@@ -194,8 +194,11 @@ test('a tightened config file is not widened by our write', () => {
   /* ⚠️ 0640, NOT 0600, and the difference is whether this test can fail. The
      real file sits at 600 — which is also what a default write lands at under a
      umask of 077, so on such a machine the assertion passed with the mode
-     preservation deleted. 0640 is a mode no umask produces from 0666, so only
-     preservation can produce it. */
+     preservation deleted.
+     ⚠️ 0640 is not unreachable in principle (0666 & ~0026 is 0640); it is
+     unreachable from any umask anybody runs. The earlier version of this
+     comment claimed the absolute, which is the kind of overstatement this
+     codebase treats as a defect in its own right. */
   const d = folder();
   write({ projects: {} }, 0o640);
   fs.chmodSync(CONFIG, 0o640);

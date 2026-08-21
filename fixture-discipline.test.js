@@ -587,14 +587,25 @@ test('every suite that creates an agent sandboxes CLAUDE CODE’s config too', (
      this rule is about, and two suites already sandbox the directory alongside
      the file. A suite that set only the directory would have passed this rule
      while writing into the real config. */
-  const SETS_THE_FILE = /AGENT_WORKFORCE_CLAUDE_CONFIG(?!_)/;
+  /* ⚠️ AN ASSIGNMENT, not a mention, and the difference is which way the rule
+     fails. `MAKES_AN_AGENT` matching a comment is safe: it adds a file to the
+     list that then has to satisfy the second pattern. `SETS_THE_FILE` matching
+     a comment is the opposite — a suite that merely NAMES the variable in a
+     docblock, or leaves it in a commented-out line, is passed while it writes
+     into the operator's real config. The one trade the docblock above argues
+     for is the one that was already safe. */
+  const SETS_THE_FILE = /AGENT_WORKFORCE_CLAUDE_CONFIG(?!_)\s*\]?\s*=[^=]/;
   /* ⚠️ AND IT GETS ITS OWN CONTROL, because it is the pattern that decides
      pass/fail and the named control below covers only the OTHER one. Widen this
      to drop the `(?!_)` and `missing` is empty forever with nothing noticing —
      a rule made unfalsifiable by the tidy-up its own comment invites. */
-  assert.equal(SETS_THE_FILE.test('AGENT_WORKFORCE_CLAUDE_CONFIG'), true,
-    'the rule stopped recognising the variable it is about');
-  assert.equal(SETS_THE_FILE.test('AGENT_WORKFORCE_CLAUDE_CONFIG_DIR'), false,
+  assert.equal(SETS_THE_FILE.test("process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(S, 'c.json');"), true,
+    'the rule stopped recognising the assignment it is about');
+  assert.equal(SETS_THE_FILE.test('// AGENT_WORKFORCE_CLAUDE_CONFIG is the fourth root'), false,
+    'a comment naming the variable now satisfies the rule, which is the direction that fails open');
+  assert.equal(SETS_THE_FILE.test('if (process.env.AGENT_WORKFORCE_CLAUDE_CONFIG === x)'), false,
+    'a comparison satisfies the rule');
+  assert.equal(SETS_THE_FILE.test("process.env.AGENT_WORKFORCE_CLAUDE_CONFIG_DIR = d;"), false,
     'the rule is satisfied by the directory variable again, which sandboxes a different thing');
 
   /* ⚠️ TWO WAYS TO MAKE AN AGENT, and the second one has no `createAgent(` in
