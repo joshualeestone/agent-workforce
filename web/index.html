@@ -1331,9 +1331,12 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    was about. */
 .delivery:empty { display: none; }
 
-.dmbusy-room { margin: 10px 0 0; }
-.dmbusy-room .dmbusy { margin: 6px 0 0; }
-.dmbusy-room .dmbusy:first-child { margin-top: 0; }
+/* ⚠️ THE GAP LIVED ON THE PER-AGENT WRAPPER, which the grouped line removed —
+   so the dots rendered hard against the first name ("•••Angel"). The container
+   carries the same flex treatment `.dmbusy` has, which is where the spacing
+   came from in the first place. */
+.dmbusy-room { display: flex; align-items: center; gap: 8px;
+               font-size: .875rem; color: var(--k-ink-2); margin: 10px 0 0; }
 .dmoff { margin-top: 12px; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2);
   border-left: 3px solid var(--k-rule); padding-left: 12px; }
 /* ⚠️ The question box is NOT red. It is a thing to answer, not a thing that has
