@@ -122,7 +122,7 @@ const MARKERS = [
  * `kosmos reply` would put the reply on the agent's page instead — a person
  * reading the thread they asked in would see silence, which is the exact
  * failure this whole branch exists to end. A third surface needs a third
- * command; filed as kosmos#178 rather than papered over with an instruction
+ * command; filed as kosmos#186 rather than papered over with an instruction
  * that sends the answer somewhere else.
  */
 const OPERATOR_DIRECT = '[message from your operator \u00b7 to answer, run: kosmos reply]';
@@ -727,7 +727,7 @@ function sendPost({ fromPane, project, projectName, text, operator }, roster, me
      * the turn, or fail the turn that answers without sending). Those live in
      * the harness, not in Kosmos. What this removes is the RECALL — that a
      * command exists, its name, and which string of the two below is its
-     * argument. See kosmos#177 for the rung above.
+     * argument. See kosmos#185 for the rung above.
      *
      * 📌 THE NAME AND THE ID BOTH APPEAR, AND THAT IS THE POINT. The rule above
      * stands (the id must not ride the sentence an agent reads) and the command

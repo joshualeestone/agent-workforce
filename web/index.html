@@ -6280,7 +6280,7 @@ function convoRow(r, agentName) {
     /* ⚠️ `to` IS NULL WHEN THE AGENT ANSWERED THE PERSON, and this arm used to
        read "leo · to null" in that case. Not reachable today (the only writer of
        an agent-authored row is /api/reply, which files under chat.DIRECT, and
-       this view reads project threads) — but kosmos#178 is exactly the change
+       this view reads project threads) — but kosmos#186 is exactly the change
        that makes it reachable, so it is a trap primed for whoever takes it
        rather than a live defect. Fixed while it is cheap. */
     who = r.from + (r.to ? ' · to ' + r.to : ' · to you');

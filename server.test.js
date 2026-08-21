@@ -5403,7 +5403,7 @@ test('the post route resolves the project, derives the member list, and fans out
     assert.match(addressed, /project Route room ·/,
       'the addressed envelope names the project by its slug, which the agent cannot match');
     /* ⚠️ NARROWED, DELIBERATELY, when the answering command joined the envelope
-       (kosmos#177). This used to be `doesNotMatch(/routeroom/)` — slug absent
+       (kosmos#185). This used to be `doesNotMatch(/routeroom/)` — slug absent
        anywhere — which was a STRING standing in for the meaning. The meaning is
        that the slug must not be the project's IDENTITY in what the agent reads:
        Josh's agent failed because it had a slug and nothing to match it against.
@@ -5490,7 +5490,7 @@ test('the room routes: the operator flag is minted only here, and the thread fil
     assert.doesNotMatch(opEnv.replace(/ · to answer, run: kosmos post opsroom/g, ''), /opsroom/,
       'the slug reached the sentence an agent reads');
     assert.match(opEnv, /· to answer, run: kosmos post opsroom\]/,
-      'an operator arrival must say how to answer it, which is the whole of kosmos#177');
+      'an operator arrival must say how to answer it, which is the whole of kosmos#185');
 
     // The THREAD, filtered by project alone: a foreign project's post and
     // a room valve row seeded straight into the record.
