@@ -11341,10 +11341,17 @@ function pjSilentSince(m, allRows, idx) {
    stored: the sentence appears on the first paint after two minutes and
    DISAPPEARS on the next paint once the agent speaks. A stored verdict would
    keep telling somebody nobody answered five minutes after somebody did.
-   ⚠️ Two minutes because under it, silence is the normal shape of a working
-   room -- an agent that is reading takes longer than that. Below the threshold
-   the sentence would fire on every healthy post, which is the CLI overclaim
-   again with the sign flipped. */
+   ⚠️ TWO MINUTES IS A FLOOR AND ONLY A FLOOR, and an earlier version of this
+   comment argued against its own number: it said a reading agent "takes longer
+   than that", which is a reason the sentence WILL fire on healthy rooms, not a
+   reason it will not. Nothing here establishes that two minutes of quiet is
+   abnormal, and nothing could without watching real rooms.
+   🔑 What the number is chosen for is the other direction: below it, silence is
+   the ordinary shape of a working room and the sentence would fire on every
+   post, which is the CLI overclaim with the sign flipped. Above it, the
+   sentence is sometimes early — a cost paid in a sentence that can be wrong
+   rather than in one that is always noise, and one that DISAPPEARS on the next
+   paint the moment the agent speaks. */
 const PJ_SILENCE_AFTER_MS = 2 * 60 * 1000;
 function pjOldEnoughToJudge(at) {
   const when = Date.parse(at);

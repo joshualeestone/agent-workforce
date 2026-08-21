@@ -40,7 +40,14 @@ function pageScope() {
   assert.ok(src, 'the page has no script block');
   /* ⚠️ THE STUB RECORDS `innerHTML`, because that is the only way to see what
      `paintRoom` produced. A stub that swallows writes lets the whole wiring hop
-     go untested — and that hop is the one that makes the feature visible. */
+     go untested — and that hop is the one that makes the feature visible.
+     ⚠️ WHAT IT CANNOT REPRESENT, said so the next author does not read a green
+     paintRoom test as covering more than it does: an UNSET property. `get`
+     returns a truthy proxy for any unknown key, so the page's repaint-suppression
+     checks (`if (el.__lastLive === html) return`, `box.__lastRoom`, and their
+     neighbours) never match and always fall through to the write. In a browser
+     those branches skip. Every test here passes THROUGH that machinery without
+     exercising it, so a regression in the caching path is invisible from here. */
   const written = {};
   const el = (id) => new Proxy(function () {}, {
     get: (t, k) => (k === 'textContent' || k === 'value' ? ''
