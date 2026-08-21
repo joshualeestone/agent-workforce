@@ -173,8 +173,46 @@ function tmuxSaidNoServer(got) {
  * the same question drifting apart is this codebase's worst habit and these two
  * have already drifted once.
  */
+/**
+ * WHICH tmux. Kosmos ships one, and until this existed the board did not use it.
+ *
+ * 🛑 THE DEFECT THIS CLOSES, reproduced on demand before it was written: the
+ * board called `tmux` by BARE NAME, so it resolved through whatever PATH the
+ * process happened to inherit. Same machine, same agents, one variable changed:
+ *
+ *     PATH with tmux       OK 14 agents
+ *     PATH without tmux    THREW we could not see what is running on this computer
+ *
+ * ⚠️ `install/kosmos` compensates — it exports the bundled tmux onto PATH at the
+ * top of the file — so a board started by the CLI was always correct. That is
+ * exactly what made this invisible: EVERY clean-machine test starts the board
+ * from a terminal that has just run the installer, which is the one launch
+ * context guaranteed to be right. A test whose setup unconditionally supplies
+ * the thing under test cannot fail on its absence.
+ *
+ * 🔑 So the engine decides for itself rather than trusting its launcher. Same
+ * shape as `clipath.js`: probe layouts most-specific-first, and fall back to a
+ * bare name rather than invent a path we did not verify.
+ *
+ * ⚠️ AND THE OVERRIDE IS THE ONE THAT ALREADY EXISTS. `AGENT_WORKFORCE_TMUX_BIN`
+ * steered creation and `engine/chat.js` and did NOTHING for the board — measured
+ * — so an operator who had correctly diagnosed this had no lever at all.
+ */
+function tmuxBin(probeRoot) {
+  if (process.env.AGENT_WORKFORCE_TMUX_BIN) return process.env.AGENT_WORKFORCE_TMUX_BIN;
+  // Installed layout: this file is $KOSMOS_HOME/app/engine, the bundle is
+  // $KOSMOS_HOME/tmux. The conjunction is the guard — a source checkout's
+  // parent would have to hold BOTH for this to false-positive.
+  const home = probeRoot || path.resolve(__dirname, '..', '..');
+  const bundled = path.join(home, 'tmux', 'bin', 'tmux');
+  try {
+    if (fs.existsSync(path.join(home, 'app', 'server.js')) && fs.existsSync(bundled)) return bundled;
+  } catch { /* fall through to the bare name */ }
+  return 'tmux';
+}
+
 function tmuxPanes() {
-  const got = shDetail('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
+  const got = shDetail(tmuxBin(), ['list-panes', '-a', '-F', PANE_FORMAT]);
   if (got.ran && got.status === 0) return got.out;
   // ⚠️ An empty STRING, not null. `readPanes('')` is zero panes and zero
   // rejects, which is the honest reading of "tmux answered, and there are no
@@ -912,7 +950,10 @@ function setPaneCapture(fn) { paneCapture = typeof fn === 'function' ? fn : null
 
 function capturePane(target, lines = 40) {
   if (paneCapture) return paneCapture(target, lines);
-  return sh('tmux', ['capture-pane', '-p', '-t', target, '-S', `-${lines}`]);
+  // ⚠️ THE SAME RESOLVER as the pane read. Fixing one call site and leaving the
+  // other is how this comes back: a board that can list panes and cannot read
+  // one is a stranger failure than a board that can do neither.
+  return sh(tmuxBin(), ['capture-pane', '-p', '-t', target, '-S', `-${lines}`]);
 }
 
 /**
@@ -1918,6 +1959,10 @@ function countAgents(agents, unreadableLines) {
 module.exports = {
   countAgents, snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs,
   rank, paneOrder, modelDisplayName, readIdentity, transcriptFor,
+  // ⚠️ EXPORTED so `engine/chat.js` uses this one rather than keeping a second
+  // copy. Its own version's comment justified a bare fallback BY this module's
+  // bare call — one weakness citing another as precedent.
+  tmuxBin,
   isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,
   setPaneSource, setPaneCapture, tmuxSaidNoServer, shDetail,
   PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS,

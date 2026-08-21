@@ -157,15 +157,19 @@ function resetForTests() {
 }
 
 /**
- * ⚠️ Bare `tmux`, resolved on PATH, because that is what the running product
- * already depends on: `engine/status.js` reads every pane on the board with a
- * bare `tmux`, so a machine where this module could not find tmux is a machine
- * with no board at all. The env override exists for the same reason connect's
- * does — a sandboxed run must be able to point somewhere harmless.
+ * ⚠️ ONE RESOLVER, AND IT LIVES IN `status.js`. This module used to keep its own
+ * copy, and its comment justified a bare-`tmux` fallback like this: "that is
+ * what the running product already depends on: engine/status.js reads every
+ * pane with a bare tmux, so a machine where this module could not find tmux is
+ * a machine with no board at all."
+ *
+ * 🔑 THAT REASONING WAS TRUE AND IT WAS ONE WEAKNESS CITING ANOTHER AS
+ * PRECEDENT. status.js no longer resolves on PATH — it finds the tmux Kosmos
+ * ships — so the premise is gone, and a second copy here would now disagree
+ * with the board about which tmux the agents are in. Two binaries reading
+ * different sockets is the failure the CLI's own PATH comment warns about.
  */
-function tmuxBin() {
-  return process.env.AGENT_WORKFORCE_TMUX_BIN || 'tmux';
-}
+const { tmuxBin } = require('./status');
 
 /**
  * One tmux call. Returns the `{ran, status, out, err}` shape `status.shDetail`

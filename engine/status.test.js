@@ -104,6 +104,7 @@ const {
   setPaneSource,
   setPaneCapture,
   snapshot,
+  tmuxBin,
   PANE_FORMAT,
   PANE_COLUMNS,
   STATE,
@@ -1906,4 +1907,93 @@ test('a measured agent whose model size we do not know says so, and carries the 
   });
   assert.ok(known.percent !== null, 'the control produced no percentage either');
   assert.equal(known.noCeiling, undefined);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Which tmux the board uses (#174)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('the board finds the tmux Kosmos ships, whatever PATH it was launched with', () => {
+  /**
+   * 🛑 THE DEFECT, REPRODUCED BEFORE IT WAS FIXED. The board called `tmux` by
+   * bare name, so it resolved through whatever PATH the process inherited. Same
+   * machine, same agents, one variable changed:
+   *
+   *     PATH with tmux       OK 14 agents
+   *     PATH without tmux    THREW we could not see what is running on this computer
+   *
+   * ⚠️ `install/kosmos` exports the bundled tmux onto PATH at the top of the
+   * file, so a board started by the CLI was always right — and that is exactly
+   * why nothing caught it. EVERY clean-machine test starts the board from a
+   * terminal that has just run the installer, which is the one launch context
+   * guaranteed to be correct. A setup that unconditionally supplies the thing
+   * under test cannot fail on its absence.
+   */
+  const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-home-'));
+  fs.mkdirSync(nodePath.join(root, 'app'), { recursive: true });
+  fs.mkdirSync(nodePath.join(root, 'tmux', 'bin'), { recursive: true });
+  fs.writeFileSync(nodePath.join(root, 'app', 'server.js'), '', 'utf8');
+  fs.writeFileSync(nodePath.join(root, 'tmux', 'bin', 'tmux'), '', 'utf8');
+  try {
+    assert.equal(tmuxBin(root), nodePath.join(root, 'tmux', 'bin', 'tmux'),
+      'an installed layout still resolves tmux on PATH');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a layout we cannot prove falls back to the bare name rather than an invented path', () => {
+  /**
+   * ⚠️ THE CONJUNCTION IS THE GUARD, copied from `clipath.js`: a source
+   * checkout's PARENT would have to hold BOTH `app/server.js` and
+   * `tmux/bin/tmux` to false-positive. Half a layout is not a layout, and
+   * pointing the board at a path we did not verify is worse than PATH.
+   */
+  const half = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-half-'));
+  fs.mkdirSync(nodePath.join(half, 'tmux', 'bin'), { recursive: true });
+  fs.writeFileSync(nodePath.join(half, 'tmux', 'bin', 'tmux'), '', 'utf8');
+  try {
+    assert.equal(tmuxBin(half), 'tmux', 'half an install was treated as an install');
+  } finally { fs.rmSync(half, { recursive: true, force: true }); }
+
+  const empty = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-none-'));
+  try {
+    assert.equal(tmuxBin(empty), 'tmux');
+  } finally { fs.rmSync(empty, { recursive: true, force: true }); }
+});
+
+test('the operator override wins, and it is the one that already existed', () => {
+  /**
+   * 🛑 `AGENT_WORKFORCE_TMUX_BIN` steered creation and `engine/chat.js` and did
+   * NOTHING for the board — measured. So somebody who had correctly diagnosed a
+   * wrong tmux had no lever at all: not a setting, not an env var, only the
+   * PATH of whatever launched the board, which nothing reports.
+   */
+  const prev = process.env.AGENT_WORKFORCE_TMUX_BIN;
+  process.env.AGENT_WORKFORCE_TMUX_BIN = '/somewhere/of/their/own/tmux';
+  try {
+    assert.equal(tmuxBin(), '/somewhere/of/their/own/tmux');
+    // ⚠️ AND IT BEATS A REAL INSTALLED LAYOUT, or it is not an override.
+    const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-both-'));
+    fs.mkdirSync(nodePath.join(root, 'app'), { recursive: true });
+    fs.mkdirSync(nodePath.join(root, 'tmux', 'bin'), { recursive: true });
+    fs.writeFileSync(nodePath.join(root, 'app', 'server.js'), '', 'utf8');
+    fs.writeFileSync(nodePath.join(root, 'tmux', 'bin', 'tmux'), '', 'utf8');
+    try { assert.equal(tmuxBin(root), '/somewhere/of/their/own/tmux'); }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    if (prev === undefined) delete process.env.AGENT_WORKFORCE_TMUX_BIN;
+    else process.env.AGENT_WORKFORCE_TMUX_BIN = prev;
+  }
+});
+
+test('chat.js and the board resolve tmux through the SAME function', () => {
+  /**
+   * ⚠️ Two copies would let the board and the typing path disagree about which
+   * tmux the agents are in — two binaries on different sockets, which is the
+   * failure the CLI's own PATH comment warns about. `chat.js` kept its own
+   * until now, and its comment justified a bare fallback BY this module's bare
+   * call: one weakness citing another as precedent.
+   */
+  const src = fs.readFileSync(nodePath.join(__dirname, 'chat.js'), 'utf8');
+  assert.match(src, /require\('\.\/status'\)/, 'chat.js no longer imports the resolver');
+  assert.doesNotMatch(src, /function tmuxBin\(/, 'chat.js grew its own copy again');
 });
