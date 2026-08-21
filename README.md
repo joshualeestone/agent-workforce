@@ -287,7 +287,8 @@ undone if the startup job could not be installed. (Not the same as the agent
 failing later: Kosmos can only say the job was accepted, so an agent whose job
 installs and then dies keeps its line.) If the write does not take, nothing breaks:
 the agent starts and asks you once, which is what happened before this existed.
-A folder you have already answered **no** for stays answered no.
+If Claude Code had already recorded that folder, whatever it recorded is put
+back when the line is undone, rather than simply removed.
 
 Removing an agent does **not** take that line back out, and that is deliberate
 rather than an oversight. At that moment nothing can tell an entry this app

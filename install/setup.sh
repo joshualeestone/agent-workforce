@@ -933,7 +933,22 @@ uninstall() {
   # ⚠️ THE PARENTHETICAL IS LOAD-BEARING, per the precedent above: a key name
   # shouted at somebody who has just removed the only thing that could explain
   # it is not a disclosure. Name it, translate it, say the undo.
-  if [ -f "$HOME/.claude.json" ] && grep -q 'hasTrustDialogAccepted' "$HOME/.claude.json" 2>/dev/null; then
+  # 🛑 THE GATE HAS TO SUPPORT THE SENTENCE, AND THE FIRST ONE DID NOT. It was
+  # `grep -q 'hasTrustDialogAccepted'`, which matches on essentially ANY Claude
+  # Code config: measured on this machine, 22 entries and NONE of them lack the
+  # key. So it fired for people Kosmos had never written a byte for, and told
+  # them their agents' folders were recorded as trusted.
+  #
+  # ⚠️ TWO NARROWINGS, both cheap, and the "nothing here can parse JSON" excuse
+  # reached neither of them. First, the value: only a `true` is a trust mark at
+  # all (19 of the 22 here are `false`, which is Claude Code's default rather
+  # than an answer). Second, `_agents_stopped`: the paragraph above deliberately
+  # says nothing about agents on a machine that had none, and this block was
+  # contradicting it three lines later — and its own sentence "those folders are
+  # still on your machine" is only true because THAT paragraph left them there.
+  if [ "$_agents_stopped" = "yes" ] \
+     && [ -f "$HOME/.claude.json" ] \
+     && grep -q '"hasTrustDialogAccepted": true' "$HOME/.claude.json" 2>/dev/null; then
     printf '  Trust marks were left in place: your agents'\'' folders are recorded as\n'
     printf '  trusted in ~/.claude.json (Claude Code will not ask before working in\n'
     printf '  them). Those folders are still on your machine, so the marks still\n'
