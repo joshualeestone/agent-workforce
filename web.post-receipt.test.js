@@ -229,7 +229,12 @@ test('a valve notice is not an agent answering', () => {
    * ⚠️ It carries no `from`, but a version of this that trusted the row shape
    * rather than the kind would count it. The valve is the product speaking.
    */
-  const r = room([{ kind: 'valve', from: 'rick', at: ago(4), because: 'held' }]);
+  /* ⚠️ NO `from`, because the /room route drops it: valve rows are built as
+     `{ kind, project, because, at }`. An earlier fixture carried `from: 'rick'`
+     while the comment above it said "It carries no `from`" — the fixture and
+     its own docblock disagreeing, and the arm it exercised unreachable in
+     production because `if (r.from)` already skips a real valve row. */
+  const r = room([{ kind: 'valve', at: ago(4), because: 'held' }]);
   assert.deepEqual(api.pjSilentSince(r.post, r.rows, 0).sort(), ['bob', 'johnson', 'rick']);
 });
 
@@ -484,4 +489,18 @@ test('paintRoom leaves a fresh post alone, so the gate is applied on the way to 
 
   assert.match(html, /Placed with Johnson, Rick and Bob\./, 'nothing rendered at all');
   assert.doesNotMatch(html, /Nothing back/, 'a post seconds old was already reported as unanswered');
+});
+
+test('a valve row carrying a name would still not count as an answer', () => {
+  /**
+   * ⚠️ THE FIXTURE ABOVE IS THE ONE THE ROUTE EMITS, and it never reaches the
+   * `kind === 'valve'` check because `if (r.from)` skips it first. This one is
+   * the hypothetical: a valve row that somehow carried a name. The guard is
+   * kept because the valve is the PRODUCT speaking, and a check that depends on
+   * a field being absent is a check that a route change can silently remove.
+   */
+  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED };
+  const rows = [post, { kind: 'valve', from: 'rick', at: ago(4), because: 'held' }];
+  assert.deepEqual(api.pjSilentSince(post, rows, 0).sort(), ['bob', 'johnson', 'rick'],
+    'the product speaking was counted as an agent answering');
 });

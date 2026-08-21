@@ -11307,9 +11307,17 @@ function pjJoinOr(list) {
  * ⚠️ COMPUTED FROM THE WHOLE ROOM, never the filtered rows. A person typing in
  * the search box must not change what a receipt claims.
  *
- * ⚠️ AND FROM POSITION, not from timestamps. Two messages can land in the same
- * millisecond, and a clock that steps backwards would otherwise turn an answer
- * into a silence.
+ * ⚠️ AND FROM POSITION, WHICH BUYS LESS THAN AN EARLIER VERSION OF THIS
+ * COMMENT CLAIMED. It said a clock that steps backwards could not turn an
+ * answer into a silence. It can: the /room route sorts rows by `at` before the
+ * page ever sees them, so array position IS timestamp order, and a reply
+ * written with a backwards clock sorts above the post it answers.
+ *
+ * What position DOES buy is the same-millisecond case — `localeCompare` returns
+ * 0 and the sort is stable, so two rows written in the same instant keep their
+ * log order. That is the half that holds, and it is the half worth having: a
+ * person and an agent posting at once is ordinary, and a clock stepping
+ * backwards is not.
  */
 function pjSilentSince(m, allRows, idx) {
   const placed = Object.entries(m.outcomes || {})
