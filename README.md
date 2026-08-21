@@ -283,7 +283,9 @@ second earlier, Kosmos answers that question for it, by adding
 `hasTrustDialogAccepted` for that one exact path to `~/.claude.json`. It is
 another program's file, so the write is deliberately narrow: only folders this
 app created, never one you chose yourself, never a global setting, and it is
-undone if the agent fails to start. If the write does not take, nothing breaks:
+undone if the startup job could not be installed. (Not the same as the agent
+failing later: Kosmos can only say the job was accepted, so an agent whose job
+installs and then dies keeps its line.) If the write does not take, nothing breaks:
 the agent starts and asks you once, which is what happened before this existed.
 A folder you have already answered **no** for stays answered no.
 

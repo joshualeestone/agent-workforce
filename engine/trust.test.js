@@ -481,3 +481,37 @@ test('a file planted at the path the module is ABOUT to write is refused, not wr
   assert.equal(fs.existsSync(elsewhere), false, 'the config was written through the planted link');
   assert.equal(read().projects[d], undefined, 'a refused write still changed the config');
 });
+
+test('the undo leaves a trust value that changed under it', () => {
+  /**
+   * 🛑 THE CALLER'S GATE IS A CLAIM ABOUT A MOMENT THAT HAS PASSED. Creation
+   * decides to undo because it wrote the key seconds earlier — but between that
+   * write and the job failing to start, a live Claude Code session can write
+   * its own value for the same path, including the `false` this module argues
+   * elsewhere is AN ANSWER, NOT AN ABSENCE.
+   *
+   * Deleting that would be the undo destroying somebody's decision, on the one
+   * path whose whole job is putting things back. So the undo checks what it is
+   * about to remove rather than trusting the reason it was called.
+   */
+  const d = folder();
+  write({ projects: {} });
+  const t = trustFolder(d);
+  assert.deepEqual(t, { ok: true, already: false, key: d });
+
+  // Somebody else answers, in the window.
+  const data = read();
+  data.projects[d][KEY] = false;
+  fs.writeFileSync(CONFIG, JSON.stringify(data, null, 2) + '\n', 'utf8');
+
+  assert.deepEqual(forgetFolder(t.key), { ok: true, already: true });
+  assert.equal(read().projects[d][KEY], false, 'the undo deleted an answer it did not write');
+});
+
+test('the undo still removes the key when it is untouched, so the check above is not a blanket refusal', () => {
+  const d = folder();
+  write({ projects: {} });
+  const t = trustFolder(d);
+  assert.deepEqual(forgetFolder(t.key), { ok: true, already: false });
+  assert.equal(d in read().projects, false);
+});

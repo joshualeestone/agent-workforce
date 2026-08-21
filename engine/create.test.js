@@ -1860,6 +1860,29 @@ test('an agent that will not start takes its trust entry back off the machine wi
   assert.deepEqual(Object.keys(after.projects), [],
     'a trust entry survived a rollback, for a folder that no longer exists');
   assert.equal(after.theme, 'dark', 'the undo took more than it wrote');
+  assert.ok(!r.steps.some((s) => s.label === 'took back the folder trust'),
+    'the undo refused, so the "taken it back off your computer" sentence is not true');
+  create.setRunner(null);
+
+  /* 🛑 ASSERT PRESENCE BEFORE ABSENCE. Everything above is an empty
+     `projects`, which is also what a creation that NEVER WROTE THE KEY leaves —
+     a broken `weMadeTheFolder`, a `trustFolder` refusal on this fixture, or the
+     whole feature deleted. The test could not tell "the undo worked" from
+     "there was nothing to undo".
+     So the same fixture is run again with a start that SUCCEEDS: if the key
+     does not appear there, the emptiness above proved nothing. */
+  create.setRunner(() => ({ ok: true }));
+  /* ⚠️ AND dry-run again: `setRunner(null)` above RE-ARMS it, so without this
+     the control creation reports CREATED and writes nothing — the control
+     would then fail for a reason that has nothing to do with what it checks.
+     The suite told me this by throwing on a folder that was never made. */
+  create.setDryRun(false);
+  writeCfg({ theme: 'dark', projects: {} });
+  const ok = create.createAgent({ ...BINS, name: 'trustfix-rollback-control', role: 'pm' });
+  assert.equal(ok.outcome, create.OUTCOME.CREATED, ok.because);
+  const controlPath = fs.realpathSync(nodePath.join(SANDBOX, 'workers', 'trustfix-rollback-control'));
+  assert.equal(readCfg().projects[controlPath].hasTrustDialogAccepted, true,
+    'CONTROL: this fixture never produces a trust entry at all, so the rollback assertion above is vacuous');
   create.setRunner(null);
 });
 

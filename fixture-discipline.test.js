@@ -588,12 +588,20 @@ test('every suite that creates an agent sandboxes CLAUDE CODE’s config too', (
      the file. A suite that set only the directory would have passed this rule
      while writing into the real config. */
   const SETS_THE_FILE = /AGENT_WORKFORCE_CLAUDE_CONFIG(?!_)/;
+  /* ⚠️ AND IT GETS ITS OWN CONTROL, because it is the pattern that decides
+     pass/fail and the named control below covers only the OTHER one. Widen this
+     to drop the `(?!_)` and `missing` is empty forever with nothing noticing —
+     a rule made unfalsifiable by the tidy-up its own comment invites. */
+  assert.equal(SETS_THE_FILE.test('AGENT_WORKFORCE_CLAUDE_CONFIG'), true,
+    'the rule stopped recognising the variable it is about');
+  assert.equal(SETS_THE_FILE.test('AGENT_WORKFORCE_CLAUDE_CONFIG_DIR'), false,
+    'the rule is satisfied by the directory variable again, which sandboxes a different thing');
 
   /* ⚠️ TWO WAYS TO MAKE AN AGENT, and the second one has no `createAgent(` in
      it: `POST /api/agents`. A rule keyed on the function name alone lets an
      HTTP-driven suite through, and `server.test.js` hides that today by
      containing both. */
-  const MAKES_AN_AGENT = /\bcreateAgent\(|['"`]\/api\/agents['"`]|createAgent'/;
+  const MAKES_AN_AGENT = /\bcreateAgent\(|['"`]\/api\/agents['"`]/;
 
   const creators = [];
   const missing = [];
