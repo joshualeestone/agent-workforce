@@ -6718,6 +6718,13 @@ async function paintTalk(sessionName, agentName) {
        four that name the agent) precisely because it does not depend on the
        answer -- but "there is a box that keeps things" does. */
     document.getElementById('d-persist').hidden = true;
+    /* ⚠️ AND THE REPLY-LOCATION LINE, WHICH IS THE SAME CONTRADICTION AGAIN,
+       reintroduced two elements above the comment that records fixing it. "Dan
+       will see this in their own window" is a promise about an agent, printed
+       under a sentence saying we cannot resolve that agent at all. Written
+       before the fetch for the reason above; HIDDEN here for the reason the
+       persistence line is. */
+    document.getElementById('d-reply-where').hidden = true;
     document.getElementById('d-say').disabled = true;
     document.getElementById('d-send').disabled = true;
     /* The section itself, never the composer this arm just closed: the
@@ -6910,6 +6917,10 @@ async function paintTalk(sessionName, agentName) {
      talk-9-unfilable shows it happening. The thread arm already splits on this
      fact; the promise splits with it. */
   document.getElementById('d-persist').hidden = body.historyUnfilable === true;
+  /* ⚠️ AND THE SAME RESET FOR THE REPLY-LOCATION LINE, for the reason above:
+     the 404 arm hides it, the element is reused, and without this a borrowed
+     name once opened would silence the line for every agent after it. */
+  document.getElementById('d-reply-where').hidden = false;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
    * above a closed box promises a route that is shut, which is the same lie as
@@ -7109,10 +7120,28 @@ async function paintTalk(sessionName, agentName) {
     off.textContent = 'We could not check whether ' + name + ' is running. '
       + 'You can still send this, and we will tell you if it did not land.';
     off.hidden = false;
+    /* ⚠️ UNSURE KEEPS THE LINE. This arm says we could not CHECK, and then says
+       "you can still send this" — so the composer is live and where an answer
+       would come back is exactly what a person needs. The off arm above is
+       different in kind: there the window itself is the thing we cannot reach. */
   } else {
     off.textContent = '';
     off.hidden = true;
   }
+  /* 🛑 ONE PLACE DECIDES WHETHER THE REPLY-LOCATION LINE SHOWS, and it is here
+     rather than in each arm. Hiding it in a branch without a matching un-hide
+     is how a line disappears for the REST OF THE SESSION: the element is reused
+     across agents, so a refusal on one leaves it hidden on the next, and
+     "absent" is indistinguishable from "we decided not to say it".
+     ⚠️ THE CONDITION IS `presence === 'off'` because every reason that arm
+     prints is about the WINDOW — "its window is scrolled back", "there is no
+     Claude running in its window", "we cannot reach its window" — and this line
+     says the answer arrives in that window. The screen would otherwise state
+     the window is unreachable and that the reply comes back through it, at the
+     same time.
+     ⚠️ An earlier version also hid it inside that arm, which was two
+     derivations of one decision — the habit this file pays for most. */
+  document.getElementById('d-reply-where').hidden = body.presence === 'off';
   /**
    * ⚠️ THE BOX STAYS TYPEABLE WHILE A SEND IS IN FLIGHT, and only the button
    * goes dead — the room's split, for the room's reason: a flight can honestly

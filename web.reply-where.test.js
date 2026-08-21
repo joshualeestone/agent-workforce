@@ -42,6 +42,13 @@ test('it names the agent, says where the answer goes, and does not promise a fix
 
   assert.match(src, /name \+/, 'the line does not name the agent, so it reads as a general notice');
   assert.match(src, /their own window/, 'the line no longer says where the reply is');
+  /* 🛑 THE NEGATIVE, which nothing pinned. MEASURED: replacing the copy with
+     "Replies come back HERE, for now" — the exact inversion this change exists
+     to prevent — passed every other assertion in this file. Both
+     /their own window/ and /for now/ survive it. The sentence's whole job is
+     the word "rather", and nothing was watching it. */
+  assert.match(src, /rather\s*'?\s*\+?\s*'?than here/,
+    'the line no longer says the reply does NOT come back here, which is its only job');
   assert.match(src, /for now/,
     'the "for now" is gone: without it the sentence reads as a design decision rather than a known limit');
   assert.doesNotMatch(src, /soon|shortly|will be able|coming/,
@@ -58,8 +65,15 @@ test('the element sits above the persistence note, not below it', () => {
   const persist = PAGE.indexOf('id="d-persist"');
   const composer = PAGE.indexOf('id="d-send"');
   assert.notEqual(reply, -1);
-  assert.ok(composer < reply, 'the line sits above the composer, where nobody has formed an expectation yet');
-  assert.ok(reply < persist, 'the line was moved to the foot, which is where notes go to be unread');
+  /* ⚠️ MEASURED AND THE COMMENT WAS WRONG ABOUT ITS OWN PLACEMENT. DOM order is
+     composer → send-result alert → this line → the restart note. It is BELOW
+     the composer, second to last. The claim that it "sits by the composer,
+     above the foot" was not true of where it landed.
+     🔑 What it IS adjacent to is the send button and the result of sending,
+     which is where a person looks after pressing it — so the position is
+     defensible and the sentence describing it was not. Pinning what is true. */
+  assert.ok(composer < reply, 'the line moved above the composer; the comment describes it as following the send controls');
+  assert.ok(reply < persist, 'the line was moved below the restart note, which is where notes go to be unread');
 });
 
 test('the box still says the two things it said before', () => {
@@ -70,7 +84,18 @@ test('the box still says the two things it said before', () => {
    * something MISSING, so nothing should have been removed.
    */
   assert.match(PAGE, /Just between you and ' \+ name \+ '\. Nothing here belongs to a project\./);
-  assert.match(PAGE, /id="d-persist"/);
+  /* 🛑 THE SENTENCE, NOT THE ELEMENT. This read /id="d-persist"/, which is the
+     markup's id attribute — MEASURED: deleting the whole
+     `d-persist.textContent = 'This stays here after a restart. '…` assignment
+     left an empty <p> and passed. A control that an empty element satisfies is
+     not a control on the words.
+     ⚠️ And it must be pinned at the ASSIGNMENT, because the phrase occurs twice
+     in the file and the second is inside a comment about it, which survives the
+     deletion on its own. */
+  const persistAt = PAGE.indexOf("document.getElementById('d-persist').textContent");
+  assert.notEqual(persistAt, -1, 'the persistence sentence is no longer written anywhere');
+  assert.match(PAGE.slice(persistAt, persistAt + 200), /stays here after a restart/,
+    'the persistence sentence was removed or changed');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
