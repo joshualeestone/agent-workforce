@@ -3088,8 +3088,21 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     assert.match(off, /acard off/, 'stopped lost its off treatment');
     assert.match(off, /pres off/, 'a stopped agent shows a live presence dot');
     assert.match(api.card(leo), /pres on/, 'a working agent lost its presence dot');
-    assert.match(api.card({ ...rook, task: null }), /Waiting out a usage limit/,
+    /* ⚠️ THE CARD SAYS WHAT WAS SEEN NOW (kosmos#199). `rate_limited` is set in
+       one place, from a regex over the last 25 lines of a pane, at
+       `CONFIDENCE.SCRAPED` — whose own definition says it "may be UI chrome".
+       "Waiting out a usage limit" asserted a fact about the person's account
+       from a word on a screen. Both arms asserted, because the confident one is
+       unreachable from today's engine and would otherwise be untested. */
+    assert.match(api.card({ ...rook, task: null, stateConfidence: 'scraped' }),
+      /Its screen mentions a usage limit/,
       'the paused card lost its reason line');
+    assert.doesNotMatch(api.card({ ...rook, task: null, stateConfidence: 'scraped' }),
+      /Waiting out a usage limit/,
+      'the board still asserts a throttle it only read off a screen');
+    assert.match(api.card({ ...rook, task: null, stateConfidence: 'structured' }),
+      /Waiting out a usage limit/,
+      'a state read from a file written for the purpose should be said plainly');
     assert.match(api.card({ ...rook, task: 'Drafting' }), /Drafting/,
       'a paused agent with a real task shows the canned line instead');
 
