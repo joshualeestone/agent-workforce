@@ -3097,14 +3097,40 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     assert.match(api.card({ ...rook, task: null, stateConfidence: 'scraped' }),
       /Its screen mentions a usage limit/,
       'the paused card lost its reason line');
+    /* 🛑 AND IT OUTRANKS A PANE TITLE. `a.task` is `#{pane_title}`, frozen by
+       Claude Code at the session's first message, and it used to win — so an
+       agent that had run long enough to have a title showed a summary of
+       "hello" instead of the fact that it cannot work. Worst on the oldest
+       agents, which are the likeliest to be blocked. */
+    assert.match(api.card({ ...rook, task: 'Hello', stateConfidence: 'scraped' }),
+      /Its screen mentions a usage limit/,
+      'a frozen first-message title is outranking the reason the agent is stopped');
+    assert.doesNotMatch(api.card({ ...rook, task: 'Hello', stateConfidence: 'scraped' }),
+      /Hello/, 'the stale title is still on the card beside the blocking reason');
     assert.doesNotMatch(api.card({ ...rook, task: null, stateConfidence: 'scraped' }),
       /Waiting out a usage limit/,
       'the board still asserts a throttle it only read off a screen');
     assert.match(api.card({ ...rook, task: null, stateConfidence: 'structured' }),
       /Waiting out a usage limit/,
       'a state read from a file written for the purpose should be said plainly');
-    assert.match(api.card({ ...rook, task: 'Drafting' }), /Drafting/,
-      'a paused agent with a real task shows the canned line instead');
+    /**
+     * 🛑 THIS ASSERTED THE OPPOSITE UNTIL 2026-08-21, AND ITS PREMISE WAS THE
+     * PART THAT WAS WRONG. It read "a paused agent with a REAL TASK shows the
+     * canned line instead" — the worry being that a canned sentence would
+     * displace genuine work in progress.
+     *
+     * `task` is never genuine work in progress. It is `#{pane_title}`, which
+     * Claude Code writes once from a summary of the session's FIRST message and
+     * never refreshes (#209). So the thing being protected was a fossil, and
+     * what it was displacing was the fact that the agent cannot work at all.
+     *
+     * ⚠️ The old behaviour also failed worst on the oldest agents — the ones
+     * likeliest to have hit a limit and certain to have a title — so it read as
+     * working on a fresh agent and silently stopped as an agent aged.
+     */
+    assert.match(api.card({ ...rook, task: 'Drafting', stateConfidence: 'scraped' }),
+      /Its screen mentions a usage limit/,
+      'a frozen pane title is outranking the reason a blocked agent cannot work');
 
     // Grid/list parity on the shared facts, including the stale badge.
     const staleLeo = { ...leo, instructions: { state: 'stale' } };
