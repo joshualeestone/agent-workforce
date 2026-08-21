@@ -1696,7 +1696,22 @@ function appendLocked(projectId, agent, entry, bornAt) {
          produced today (the digit), which is exactly when to move a guarantee
          back inside the thing that promises it. */
       wire: (entry && typeof entry.wire === 'string' && cleanMessage(entry.wire)) || null,
-      delivery: {
+      /**
+       * 🛑 A ROW WITH A SENDER HAS NO DELIVERY, and the default here was
+       * claiming one. `state` falls back to COULD_NOT — which is right for the
+       * person's messages, where the fallback means "we have no evidence it
+       * arrived" — and an agent's reply is written straight into this record.
+       * There is no crossing to fail, so COULD_NOT is a claim about a mechanism
+       * that never ran.
+       *
+       * ⚠️ IT WAS NOT VISIBLE ON THE SCREEN, which is why this is worth
+       * spelling out: `dmRow` skips the verdict for these rows, so the box
+       * looked correct. The CONVERSATION view does not — it reads
+       * `m.delivery.state` straight out, and would have printed "Not sent."
+       * under a reply that arrived. Found by running an append and reading the
+       * record back, not by looking at the page.
+       */
+      delivery: (entry && typeof entry.from === 'string' && entry.from.trim()) ? null : {
         state: (entry && entry.delivery && entry.delivery.state) || DELIVERY.COULD_NOT,
         because: (entry && entry.delivery && entry.delivery.because) || null,
         /**
