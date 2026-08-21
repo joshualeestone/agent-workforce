@@ -218,7 +218,16 @@ function rowShaped(m) {
   // string, and a post must not pass by accident of that.
   if (m.kind === 'post') {
     return str(m.id) && str(m.from) && str(m.project)
-      && Array.isArray(m.to) && m.to.length > 0 && m.to.every(str)
+      /* 🛑 AN EMPTY `to` IS LEGAL AND USED TO BE DROPPED HERE. A sole member's
+         post has no recipients (the person is never typed into, they read the
+         room from this record) — so the row was written, the verdict said
+         `placed`, and this reader silently discarded it on the way back out.
+         The write succeeding and the read dropping it is the worst of the three
+         layers of #172: nothing anywhere reports a failure and the room is
+         empty. What this rule is FOR is keeping a string `to` from passing by
+         accident of the kinds above, and `Array.isArray` is the half that does
+         that; the length never carried any of it. */
+      && Array.isArray(m.to) && m.to.every(str)
       && typeof m.text === 'string'
       && Boolean(m.outcomes) && typeof m.outcomes === 'object' && !Array.isArray(m.outcomes);
   }
