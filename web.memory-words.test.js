@@ -213,7 +213,7 @@ const memoryBox = (function () {
   /* `memWhy` joined the list when memUnknown started composing the engine's own
      `because` (Josh, 2026-08-21). Listed rather than stubbed, for the reason
      the comment above gives. */
-  const deps = ['esc', 'memWhy', 'memUnknown', 'pctOf', 'memBand', 'memoryBox'];
+  const deps = ['esc', 'memWhy', 'memUnknown', 'assumedCeilingNote', 'pctOf', 'memBand', 'memoryBox'];
   // eslint-disable-next-line no-new-func
   return new Function(
     'const NEARLY_FULL = 80, WARM = 60;\n' + deps.map(sliceFn).join('\n') + '; return memoryBox;',
@@ -398,4 +398,44 @@ test('the unknown box says WHY, in the engine’s own words', () => {
     because: 'usage data was empty' });
   assert.doesNotMatch(empty.note, /not the same as it being empty/,
     'the screen argues with itself: "Usage data was empty. That is not the same as it being empty."');
+});
+
+test('a percentage measured against a guess says so, and one measured against a watched limit does not', () => {
+  /**
+   * 🛑 THE THIRD TIME IN ONE DAY THE ENGINE WROTE AN HONEST QUALIFIER AND THE
+   * SCREEN DROPPED IT — after the memory cause (0.2.19) and the usage-limit
+   * claim (0.2.20) — and the one that hid best, because it sits on the HAPPY
+   * PATH. The other two surfaced as an unhelpful sentence; this one surfaced as
+   * a confident number.
+   *
+   * `limitFor` marks `assumed: true` for every model nobody has watched hit its
+   * ceiling — Opus 5, Sonnet 5, Fable 5, all assumed at 1M — and the engine sets
+   * `ceilingAssumed` and writes the wording. `grep assumed web/index.html` found
+   * one unrelated comment. The rule the assumption ships under says an assumed
+   * denominator is fine "as long as nobody is told it was measured", and nobody
+   * was being told either way.
+   */
+  const box = (ctx) => memoryBox({ name: 'Ava', context: ctx });
+
+  const guessed = box({ tokens: 100000, percent: 10, ceiling: 1000000,
+    ceilingAssumed: true, because: 'measured, against a limit we have assumed rather than watched' });
+  assert.match(guessed, /measured, against a limit we have assumed rather than watched/,
+    'a percentage is being shown against a guessed denominator with nothing saying so');
+
+  /* 📌 SILENT WHEN THE CEILING WAS WATCHED. A disclaimer on every healthy card
+     is how disclaimers stop being read, and this one has news only sometimes. */
+  const watched = box({ tokens: 100000, percent: 10, ceiling: 1000000,
+    ceilingAssumed: false, because: 'measured, against a limit we have watched it hit' });
+  assert.doesNotMatch(watched, /assumed rather than watched/,
+    'a watched limit is being disclaimed as though it were a guess');
+  assert.doesNotMatch(watched, /This reading is/,
+    'the note fires on a reading that has nothing to qualify');
+
+  /* And it holds on the nearly-full arm too, which is a different sentence and
+     the one a person is most likely to act on. */
+  const full = box({ tokens: 900000, percent: 90, ceiling: 1000000,
+    ceilingAssumed: true, because: 'measured, against a limit we have assumed rather than watched' });
+  assert.match(full, /Memory nearly full/);
+  assert.match(full, /assumed rather than watched/,
+    'the arm a person acts on is the one that dropped the qualifier');
 });

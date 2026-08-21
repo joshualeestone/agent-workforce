@@ -1113,12 +1113,42 @@ const CONTEXT_LIMITS = {
 const ASSUMED_LIMIT = 1000000;
 const ASSUMED_LIMIT_MODELS = /^claude-(opus|sonnet|fable)-/;
 
+/**
+ * 🛑 HAIKU IS NOT 1M, AND SWEEPING IT INTO THE RULE ABOVE WOULD HAVE BEEN THE
+ * DANGEROUS KIND OF WRONG.
+ *
+ * Josh, 2026-08-21: two of his eight agents read "Unknown" after the memory fix
+ * landed, and they were the only two Haiku agents on the board. `limitFor`
+ * returns null for `claude-haiku-4-5-20251001` — not in `CONTEXT_LIMITS`, its
+ * undated form is not either, and the regex above omits haiku — so `noCeiling`
+ * is set, `percent` stays null, and the badge falls back to Unknown. Their
+ * memory was being read the whole time; only the denominator was missing.
+ *
+ * ⚠️ THE COMMENT ON THE RULE ABOVE ARGUES FROM OBSERVATION — "every
+ * current-generation model observed here is consistent with 1M and none
+ * contradicts it" — and nobody has observed a Haiku agent's ceiling. Being
+ * current-generation makes Haiku eligible for that reasoning, not covered by
+ * its evidence. Adding it there would have given every Haiku agent a
+ * five-times-too-large denominator: one at 80% would draw at 16%, and a person
+ * would not know it was nearly full. A vague "Unknown" is a bad reading; a
+ * confident 16% for 80% is a wrong one, and this file's whole posture is that
+ * the second is worse.
+ *
+ * 📌 So it gets its own assumed figure, carried as an assumption exactly as the
+ * others are, and the UI marks it. Replace this with a measurement the day one
+ * exists — `CONTEXT_LIMITS` is where an observed ceiling belongs.
+ */
+const HAIKU_ASSUMED_LIMIT = 200000;
+const HAIKU_MODELS = /^claude-haiku-/;
+
 function limitFor(model) {
   if (!model) return null;
   if (CONTEXT_LIMITS[model]) return { limit: CONTEXT_LIMITS[model], assumed: false };
   const undated = model.replace(/-\d{8}$/, '');
   if (CONTEXT_LIMITS[undated]) return { limit: CONTEXT_LIMITS[undated], assumed: false };
   if (ASSUMED_LIMIT_MODELS.test(model)) return { limit: ASSUMED_LIMIT, assumed: true };
+  // Its own figure, for the reason above: the 1M assumption is not Haiku's.
+  if (HAIKU_MODELS.test(model)) return { limit: HAIKU_ASSUMED_LIMIT, assumed: true };
   return null;
 }
 
