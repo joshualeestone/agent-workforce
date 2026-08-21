@@ -4327,6 +4327,25 @@ function memBand(pct) {
    assertion about one cannot be satisfied by the other — the same property the
    ring's docblock relies on. */
 function memUnknown(ctx) {
+  /* 🛑 A THIRD CASE, AND IT WAS SHIPPING A FALSE SENTENCE ON THE SURFACE THIS
+     CHANGE REWRITES. When a reading is taken but the model's limit is unknown,
+     the engine returns tokens with a null percent — so every surface here said
+     "memory could not be read" about a reading it had successfully taken, while
+     the engine's own `because` on the next line said "measured, but we do not
+     know how much this model can hold".
+     ⚠️ It is not exotic: `readModel` reads the last 64KB and `readContext` the
+     last 256KB, so a transcript whose recent tail carries no model name gives
+     no model, no ceiling, and this branch.
+     ⚠️ Deferring it to the unknown-model cards was the wrong call once the
+     wording was being rewritten anyway: the deferral left the one sentence this
+     change exists to remove, on the one screen it was rewriting. */
+  if (ctx && ctx.tokens != null) {
+    return { notYet: false,
+             word: 'No limit known',
+             aria: 'Memory was read; this model’s size is not known here.',
+             lead: 'memory was read, but we do not know what this model can hold.',
+             note: 'The reading is real. Turning it into a percentage needs the model’s size, which we do not have.' };
+  }
   const notYet = !!(ctx && ctx.notYet);
   return notYet
     /* ⚠️ `lead` IS SPOKEN AFTER A POSSESSIVE — the Memory box composes

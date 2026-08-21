@@ -228,3 +228,35 @@ test('every field belongs to its own branch, so the two cannot be swapped', () =
     assert.notEqual(yet[k], unk[k], `${k} is the same in both branches, so it says nothing`);
   }
 });
+
+test('an agent whose memory we READ is never told we could not read it', () => {
+  /**
+   * 🛑 A FALSE SENTENCE ON THE SURFACE THIS CHANGE REWRITES. When the engine
+   * takes a reading but does not know the model's limit, it returns tokens with
+   * a null percent — and every surface said "memory could not be read" about a
+   * reading it had successfully taken. The engine's own `because` said the
+   * truth on the next line: "measured, but we do not know how much X can hold".
+   *
+   * ⚠️ Reachable without an exotic model: the model name is read from the last
+   * 64KB of a transcript and the usage from the last 256KB, so a busy agent
+   * whose recent tail happens to carry no model name lands here.
+   */
+  const measured = memUnknown({ tokens: 42000, percent: null, notYet: false });
+  assert.doesNotMatch(measured.lead, /could not be read/, 'we told them we failed at a reading we took');
+  assert.doesNotMatch(measured.aria, /could not be read/);
+  assert.match(measured.lead, /was read/);
+  assert.equal(measured.notYet, false);
+
+  // ⚠️ AND IT IS ITS OWN CASE, not a relabelling of one of the other two.
+  const unk = memUnknown({ tokens: null, percent: null, notYet: false });
+  const yet = memUnknown({ tokens: null, percent: null, notYet: true });
+  for (const k of ['word', 'aria', 'lead', 'note']) {
+    assert.notEqual(measured[k], unk[k], `${k} is the same as the admission`);
+    assert.notEqual(measured[k], yet[k], `${k} is the same as the not-yet branch`);
+  }
+
+  // ⚠️ THE CONTROL: tokens absent must still reach the other two branches, or
+  // this new arm has swallowed them.
+  assert.equal(unk.word, 'Unknown');
+  assert.equal(yet.word, 'Not yet read');
+});
