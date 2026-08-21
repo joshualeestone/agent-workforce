@@ -60,7 +60,7 @@ of wording before; the new pair shares "not", "read" and "yet", so it is pinned.
 
 ## Evidence
 
-- `yarn test`: **1024 pass, 0 fail** (65 → 71 in `status.test.js`, plus six new
+- `yarn test`: **1019 pass, 0 fail** (65 → 71 in `status.test.js`, plus six new
   in `web.memory-words.test.js`).
 - **Five deliberate breaks on `status.js`**, each reverted after the named test
   was watched to fail: re-collapsing `if (!text)`, calling every missing
