@@ -120,10 +120,19 @@ function room(after) {
      post, and the first version of this fixture invented `null` — which made
      the operator test unable to fail, because a null name matches no agent
      whatever the code does. */
-  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'hello' };
+  const post = { kind: 'post', id: 'm-op', operator: true, from: 'you', to: Object.keys(ALL_PLACED),
+    at: ago(5), outcomes: ALL_PLACED, text: 'hello' };
   return { rows: [post, ...after], post };
 }
-const said = (who) => ({ from: who, at: ago(4), text: 'here' });
+/* ⚠️ THE SHAPE THE /room ROUTE EMITS, field for field: it builds every post row
+   as { kind, id, from, to, operator, text, at, outcomes }. The earlier fixture
+   was { from, at, text } — three of eight — and that omission is what made the
+   safer allow-list (`kind === 'post'`) impossible to adopt: tightening the code
+   failed every test, so the loose code was the only code the fixtures allowed.
+   A fixture free to invent a shape does not only miss defects; it can pin the
+   defect in place. */
+const said = (who) => ({ kind: 'post', id: 'm-' + who, from: who, to: ['you'],
+  operator: false, at: ago(4), text: 'here', outcomes: {} });
 
 /* ⚠️ SESSION NAMES, which is what the page passes now. It used to map them to
    display names first — and display names are not unique, so two agents both
@@ -197,7 +206,7 @@ test('anything an agent says afterwards counts, and it does not have to be a rep
 });
 
 test('the person talking to themselves is not an agent answering', () => {
-  const r = room([{ operator: true, from: 'you', at: ago(4), text: 'anyone?' }]);
+  const r = room([{ kind: 'post', operator: true, from: 'you', at: ago(4), text: 'anyone?' }]);
   assert.deepEqual(api.pjSilentSince(r.post, r.rows, 0).sort(), ['bob', 'johnson', 'rick']);
 });
 
@@ -217,7 +226,7 @@ test('an agent actually named "you" is not mistaken for the person', () => {
   const outcomes = { you: 'placed', rick: 'placed' };
   const p = { agents: [member('you', 'You'), member('rick', 'Rick')] };
   const post = { operator: true, from: 'you', at: ago(5), outcomes };
-  const rows = [post, { operator: true, from: 'you', at: ago(4), text: 'anyone?' }];
+  const rows = [post, { kind: 'post', operator: true, from: 'you', at: ago(4), text: 'anyone?' }];
 
   assert.deepEqual(api.pjSilentSince(post, rows, 0).sort(), ['rick', 'you'],
     'the person’s own post was read as the agent called "you" answering');
@@ -292,12 +301,12 @@ test('the silence map is built from the whole room, and only under the person’
    * rendering the screen — delete `pjOldEnoughToJudge` from the condition and
    * every test stayed green while the sentence fired on a post one second old.
    */
-  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED };
-  const fresh = { operator: true, from: 'you', at: ago(0), outcomes: ALL_PLACED };
-  const agentPost = { from: 'rick', at: ago(5), outcomes: { johnson: 'placed' } };
+  const post = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED };
+  const fresh = { kind: 'post', operator: true, from: 'you', at: ago(0), outcomes: ALL_PLACED };
+  const agentPost = { kind: 'post', from: 'rick', at: ago(5), outcomes: { johnson: 'placed' } };
   const rows = [post, fresh, agentPost];
 
-  const map = api.pjSilences(rows);
+  const map = api.pjSilences(rows, P);
 
   /* ⚠️ Rick is NOT in this list, and that is the fixture doing two jobs: his
      post comes after the person's, so he has spoken. An agent's message counts
@@ -315,13 +324,13 @@ test('the map is keyed on the row, so a filtered view reads the same verdicts', 
    * a working exchange into "nothing back from Rick".
    */
   const r = room([said('rick'), said('bob'), said('johnson')]);
-  const map = api.pjSilences(r.rows);
+  const map = api.pjSilences(r.rows, P);
   assert.deepEqual(map.get(r.post), [], 'everyone spoke and somebody was still called silent');
 
   // THE CONTROL: the same function over only the surviving rows really does
   // answer differently, so passing the whole room is what has to be right.
   const filtered = [r.post];
-  assert.deepEqual(api.pjSilences(filtered).get(r.post).sort(), ['bob', 'johnson', 'rick']);
+  assert.deepEqual(api.pjSilences(filtered, P).get(r.post).sort(), ['bob', 'johnson', 'rick']);
 });
 
 test('paintRoom indexes the silence against allRows and not against the filtered rows', () => {
@@ -334,7 +343,7 @@ test('paintRoom indexes the silence against allRows and not against the filtered
   const at = PAGE.indexOf('function paintRoom(');
   assert.notEqual(at, -1);
   const body = PAGE.slice(at, at + 2000);
-  assert.match(body, /pjSilences\(allRows\)/, 'the silence is no longer computed from the whole room');
+  assert.match(body, /pjSilences\(allRows, p\)/, 'the silence is no longer computed from the whole room');
   assert.doesNotMatch(body, /pjSilences\(shown/, 'the silence is computed from the filtered rows');
 });
 
@@ -352,7 +361,7 @@ test('the sentence actually reaches the rendered row', () => {
    */
   const render = renderer();
 
-  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'anyone there?' };
+  const post = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'anyone there?' };
 
   const withSilence = render(post, P, ['rick', 'bob']);
   assert.match(withSilence, /Placed with Johnson, Rick and Bob\./);
@@ -379,7 +388,7 @@ test('an agent’s own post renders no silence sentence, whatever it is handed',
    * underneath a message RICK sent.
    */
   const render = renderer();
-  const agentPost = { from: 'rick', at: ago(5), outcomes: { johnson: 'placed', bob: 'could_not' }, text: 'on it' };
+  const agentPost = { kind: 'post', from: 'rick', at: ago(5), outcomes: { johnson: 'placed', bob: 'could_not' }, text: 'on it' };
 
   const html = render(agentPost, P, ['johnson']);
   assert.match(html, /class="delivery/, 'no receipt rendered at all, so this tests nothing');
@@ -389,7 +398,7 @@ test('an agent’s own post renders no silence sentence, whatever it is handed',
 
   // ⚠️ THE CONTROL: the same outcomes on the PERSON's post do get the sentence,
   // so the assertion above is about who sent it and not about the shape.
-  const ownPost = { operator: true, from: 'you', at: ago(5), outcomes: { johnson: 'placed', bob: 'could_not' }, text: 'anyone?' };
+  const ownPost = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: { johnson: 'placed', bob: 'could_not' }, text: 'anyone?' };
   assert.match(render(ownPost, P, ['johnson']), /Nothing back from Johnson\./,
     'the person’s own post lost the sentence too, so the gate is not about the sender');
 });
@@ -464,7 +473,7 @@ test('paintRoom actually puts the sentence on the screen', () => {
   const scope = pageScope();
   scope.setProject({ id: 'proj-1', name: 'Test project', agents: P.agents });
 
-  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'anyone there?' };
+  const post = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'anyone there?' };
   scope.paintRoom({ ok: true, rows: [post, said('rick')] });
   const html = scope.written['pj-room'];
 
@@ -483,7 +492,7 @@ test('paintRoom leaves a fresh post alone, so the gate is applied on the way to 
   const scope = pageScope();
   scope.setProject({ id: 'proj-1', name: 'Test project', agents: P.agents });
 
-  const fresh = { operator: true, from: 'you', at: ago(0), outcomes: ALL_PLACED, text: 'just now' };
+  const fresh = { kind: 'post', operator: true, from: 'you', at: ago(0), outcomes: ALL_PLACED, text: 'just now' };
   scope.paintRoom({ ok: true, rows: [fresh] });
   const html = scope.written['pj-room'];
 
@@ -499,8 +508,46 @@ test('a valve row carrying a name would still not count as an answer', () => {
    * kept because the valve is the PRODUCT speaking, and a check that depends on
    * a field being absent is a check that a route change can silently remove.
    */
-  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED };
+  const post = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED };
   const rows = [post, { kind: 'valve', from: 'rick', at: ago(4), because: 'held' }];
   assert.deepEqual(api.pjSilentSince(post, rows, 0).sort(), ['bob', 'johnson', 'rick'],
     'the product speaking was counted as an agent answering');
+});
+
+test('a one-agent room never says nobody came back, because the app forbids the answer', () => {
+  /**
+   * 🛑 THE FEATURE INVERTED. `sendPost` builds an agent's recipients as
+   * `members.filter(m => m !== from)`, so in a one-agent project that list is
+   * empty and the post is REFUSED: "nobody else is on that project yet, so
+   * there is no room to post to". The agent's own instruction block tells it to
+   * run `kosmos post`; it does; it is turned away.
+   *
+   * The old receipt said only "Placed with Rick", which claimed nothing. The
+   * new sentence would assert a silence the product manufactures and name the
+   * agent as its cause, permanently, on a working agent — which is exactly the
+   * failure this feature exists to remove, pointed the other way.
+   */
+  const solo = { agents: [member('rick', 'Rick')] };
+  const post = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: { rick: 'placed' } };
+  assert.equal(api.pjSilences([post], solo).size, 0,
+    'a sole agent was reported silent for a message it is not allowed to answer');
+
+  // ⚠️ THE CONTROL: two members and the same room does produce a verdict, so
+  // the carve-out is the case the engine refuses and not a blanket off-switch.
+  const pair = { agents: [member('rick', 'Rick'), member('bob', 'Bob')] };
+  const post2 = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: { rick: 'placed', bob: 'placed' } };
+  assert.deepEqual(api.pjSilences([post2], pair).get(post2).sort(), ['bob', 'rick']);
+});
+
+test('a row kind the route has not grown yet is not counted as an agent speaking', () => {
+  /**
+   * ⚠️ AN ALLOW-LIST, NOT A DENY-LIST. The scan used to skip valve rows and
+   * operator rows and count everything else, so any kind the /room route grows
+   * later — an agent-to-agent message, a refusal notice — would count as an
+   * answer and silently delete the sentence. Only a `post` is speech.
+   */
+  const post = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED };
+  const rows = [post, { kind: 'notice', from: 'rick', at: ago(4), text: 'something new' }];
+  assert.deepEqual(api.pjSilentSince(post, rows, 0).sort(), ['bob', 'johnson', 'rick'],
+    'a row kind that is not a post was counted as Rick answering');
 });

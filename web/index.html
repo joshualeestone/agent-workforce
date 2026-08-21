@@ -11327,7 +11327,11 @@ function pjSilentSince(m, allRows, idx) {
   const spoke = new Set();
   for (let i = idx + 1; i < allRows.length; i++) {
     const r = allRows[i];
-    if (!r || r.operator === true || r.kind === 'valve') continue;
+    /* ⚠️ AN ALLOW-LIST, NOT A DENY-LIST. This read `!== 'valve' && !operator`,
+       which counts as speech any row kind the /room route grows later — an
+       a2a message, a refusal notice — and silently deletes the sentence. Only
+       a `post` from an agent is an agent speaking. */
+    if (!r || r.kind !== 'post' || r.operator === true) continue;
     if (r.from) spoke.add(r.from);
   }
   return placed.filter((who) => !spoke.has(who));
@@ -11414,8 +11418,26 @@ function pjReceiptSentence(outcomes, p, silent) {
  * from Johnson" underneath something RICK said — a receipt about somebody
  * else's message, which is not what a receipt is.
  */
-function pjSilences(allRows) {
+function pjSilences(allRows, p) {
   const out = new Map();
+
+  /* 🛑 A SOLE MEMBER CANNOT ANSWER, AND SAYING THEY DID NOT IS BLAMING THEM FOR
+     A RULE WE ENFORCE. `sendPost` builds an agent's recipients as
+     `members.filter(m => m !== from)`, so in a one-agent project that list is
+     empty and the post is REFUSED: "nobody else is on that project yet, so
+     there is no room to post to". The agent's own instructions tell it to run
+     `kosmos post`, it does, it is turned away, and the room would say "Nothing
+     back from Rick." forever.
+     🔑 That is this feature inverted. The old receipt said only "Placed with
+     Rick", which claimed nothing; the new sentence would assert a silence the
+     app manufactures and name the agent as its cause.
+     ⚠️ THE SUPPRESSION IS THE NARROW FIX, NOT THE RIGHT ONE. The right one is
+     for an agent to be able to answer in a room the person is sitting in; that
+     is an engine change with its own blast radius, and it is filed rather than
+     smuggled in here. Two or more members and every agent can post, so the
+     carve-out is exactly the case the engine refuses. */
+  if ((p && p.agents ? p.agents.length : 0) < 2) return out;
+
   (allRows || []).forEach((m, i) => {
     if (m && m.operator === true && m.outcomes && pjOldEnoughToJudge(m.at)) {
       out.set(m, pjSilentSince(m, allRows, i));
@@ -11517,7 +11539,7 @@ function paintRoom(body) {
   const allRows = body.rows || [];
   const shown = pjRoomFilterRows(allRows, p, PJ_ROOM_QUERY);
   const filtering = PJ_ROOM_QUERY.trim() !== '';
-  const silences = pjSilences(allRows);
+  const silences = pjSilences(allRows, p);
   const rows = shown.map((m) => pjRoomRow(m, p, silences.get(m))).join('');
   /* An unreadable record is SAID, ahead of whatever could be read --
      no-state-as-silence, the same rule as every list on this app. */
