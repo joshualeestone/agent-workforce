@@ -179,10 +179,20 @@ test('the reply-location line is gone, and gone rather than reworded', () => {
    * longer needs one, and the element is kept only so nothing else that touches
    * it throws.
    */
-  assert.doesNotMatch(PAGE, /Replies come back there rather/,
+  /* ⚠️ COMMENTS STRIPPED FIRST, and the first version of this failed on the
+     RECORD OF THE REMOVAL — the comments explaining why the sentence went do
+     quote it, which is exactly what they are for. A check a correct
+     implementation cannot satisfy is not a check, and this is the third time
+     today that shape has appeared. Both comment forms, because this file
+     carries HTML and JS ones. */
+  const code = PAGE.replace(/<!--[\s\S]*?-->/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
+  assert.doesNotMatch(code, /Replies come back there rather/,
     'the box still tells the person the reply is somewhere else');
-  assert.doesNotMatch(PAGE, /will see this in their own window. Replies/,
+  assert.doesNotMatch(code, /will see this in their own window/,
     'a reworded version of the same apology came back');
+  /* ⚠️ AND THE STRIPPER NEEDS ITS OWN CONTROL, or a regex that ate the file
+     would make every absence above vacuous. */
+  assert.ok(code.includes("getElementById('d-reply-where')"), 'the comment stripper removed code');
 
   const at = PAGE.indexOf("document.getElementById('d-reply-where').hidden = true;");
   assert.notEqual(at, -1, 'the element is no longer hidden, so an empty line may take space');
