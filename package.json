@@ -11,6 +11,7 @@
     "lint-fix": "echo 'no linter configured'",
     "build": "echo 'no build step for the app: it runs from source. Release bundles: tools/build-*-bundle.sh'",
     "test:shell": "sh -n install/setup.sh && bash -n install/kosmos && bash -n tools/build-tmux-bundle.sh && bash -n tools/build-kosmos-bundle.sh && bash -n tools/build-tmux-from-source.sh && bash -n tools/lib/floor-gate.sh && bash -n tools/test-install.sh && bash tools/check-floor-consistency.sh && bash tools/test-permission-acceptance.sh",
-    "test:install": "bash tools/test-install.sh"
+    "test:install": "bash tools/test-install.sh",
+    "test:render": "node tools/measure-memory-badge.js"
   }
 }

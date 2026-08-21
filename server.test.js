@@ -3013,8 +3013,20 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     // separate assertion about the BADGE could pass with the badge deleted.
     // The two strings are now deliberately disjoint, so an assertion has to
     // name the one it means.
-    assert.match(api.card(spoofed), /Memory could not be read/,
+    // ⚠️ AND NOW ON THE SHAPE OF THE LABEL RATHER THAN ONE SENTENCE OF IT. There
+    // are two honest unknown labels since the engine learned to tell "nothing
+    // has been recorded yet" from "we could not read it", and this fixture is
+    // the FIRST kind — an agent with no registry entry at all. Pinning the
+    // could-not sentence made this control fail on a correct render and, worse,
+    // would have passed only for whichever half of the split the fixture
+    // happened to land in. What "degraded to the unknown ring" means is that
+    // the ring carries an unknown label and no percentage survived, so that is
+    // what is asserted.
+    const spoiled = api.card(spoofed);
+    assert.match(spoiled, /aria-label="[^"]*(Memory could not be read|Nothing has been recorded)/,
       'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
+    assert.doesNotMatch(spoiled, /class="membadge">/,
+      'CONTROL: a percentage badge survived the coercion');
 
     // ⚠️ ANCHORED ON THE ELEMENT, NOT THE WORDS. The line above matches the
     // ring's `aria-label="… Memory unknown: we could not read how full it is."`
