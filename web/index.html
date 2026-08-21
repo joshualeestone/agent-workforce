@@ -12500,79 +12500,46 @@ async function pjAnswerFrom(sessionName, displayName) {
   // capitalised-names change made everywhere else. The card carries both;
   // falling back to the machine name only when no display name arrived.
   const spoken = displayName || sessionName;
-  // If our read was retired by a newer caller (the 5-second poll can start
-  // between the await and the branch below), ask once more so the
-  // PJ_READ_FAILED we branch on belongs to a read at least as fresh as this
-  // click. If the retry retires too, the flag and PROJECTS are still a
-  // consistent pair from the last completed read -- the sentence picked
-  // matches the list shown, it is just a moment older (round 21).
-  if (!(await loadProjects())) await loadProjects();
-  showTab('projects');
-  // ⚠️ "We could not look" is NOT "it is on none". loadProjects leaves
-  // PROJECTS untouched on failure, so filtering it after a failed read would
-  // say "not on a project yet, add it to one" -- a definite instruction built
-  // on a read that did not happen, directly under a list saying we cannot see
-  // the projects at all. The two sentences cannot both be on screen.
-  if (PJ_READ_FAILED) {
-    PJ_CURRENT = null;
-    pjView('list');
-    document.getElementById('pj-list-msg').textContent =
-      'We could not check which projects ' + spoken + ' is on just now, so we cannot '
-      + 'open its conversation from here. This is not saying it has none.';
-    return;
-  }
-  const on = PROJECTS.filter((p) => (p.agents || []).some((m) => m.sessionName === sessionName));
-  if (!on.length) {
-    PJ_CURRENT = null;
-    pjView('list');
-    // Named, and told what would fix it. "Nothing happened" is what a silent
-    // return looks like from the outside.
-    document.getElementById('pj-list-msg').textContent =
-      spoken + ' is not on a project yet, so there is no conversation to open here. '
-      + 'Add it to a project and you can answer it.';
-    return;
-  }
-  openProject(on[0].id);
-  if (PJ_CURRENT !== on[0].id) return;   // openProject bailed and said why
-  // ⚠️ Same two lines the picker's change handler runs, for the same
-  // reason (round 32): the standing verdict describes the conversation
-  // being LEFT, and without this the single-project case kept re-rendering
-  // "Placed into Casey's session" under a picker now showing Mara (the
-  // multi-project arm below happened to overwrite it, so the common case
-  // was the uncovered one).
-  PJ_SENT_LINE = null;
-  document.getElementById('pj-thread-msg').textContent = '';
-  PJ_WHO = sessionName;
-  await loadThread();
-  /* ⚠️ Focus MOVES to the question (round 30, measured): the card that
-     carried the button is torn down on the tab switch, so activation left
-     document.activeElement on <body> -- a keyboard or screen-reader user
-     landed nowhere and had to re-traverse the page to reach the question
-     they clicked for. Guarded on the question actually having painted, so
-     the no-question arm does not focus a hidden element; the pre is
-     already tabindex=0 with role=region and a name, so landing there
-     announces whose question it is. */
-  /* Guarded on the TEXT BOX, not the wrapper (round 35): the
-     asking-but-no-question arm shows the wrapper while hiding the box,
-     and .focus() on a hidden element is a no-op -- the stranded-keyboard
-     state again, one arm over from where round 30 closed it. In that arm
-     the deliberate landing is the message box, same as paintThread's own
-     rescue. */
-  const qt = document.getElementById('pj-question-text');
-  const qw = document.getElementById('pj-question');
-  if (qt && qt.hidden === false && qw && !qw.hidden) qt.focus();
-  else document.getElementById('pj-say').focus();
-  if (on.length > 1) {
-    // ⚠️ Said, because we chose. Opening one of three projects silently is a
-    // decision the person did not make and cannot see. Registered as the
-    // poll's note (round 29) so it is cleared by the same pairing that
-    // clears every other transient sentence, instead of sitting under
-    // later unrelated activity on an aria-live region forever.
-    const chose = pjNameOf(on[0], sessionName) + ' is on ' + on.length + ' projects. This one is '
-      + on[0].name + '.';
-    document.getElementById('pj-thread-msg').textContent = chose;
-    pjAnnounce(chose);
-    PJ_THREAD_NOTE = chose;
+  /**
+   * 🛑 THE AGENT'S OWN PAGE, NOT A PROJECT ROOM, and this function used to do
+   * the opposite. It was written when the room was the ONLY place a blocking
+   * question could be seen and answered, so "take me to where I can answer
+   * this" meant "open a project". #119 put the question and the answer
+   * controls on the agent's own panel and NOBODY RE-POINTED THIS.
+   *
+   * Josh, 2026-08-21, testing 0.2.9: *"when I click on the Needs You and click
+   * the answer from the agent screen on the agent, it jumps me straight back
+   * to a project that he is not in or assigned to. It's like it's not taking
+   * me to the View Agent page."*
+   *
+   * 🔑 Nothing about the old body looked stale. Every ending in it was correct
+   * FOR THE DESTINATION IT WAS WRITTEN AGAINST, including two careful refusals
+   * for "we could not check the projects" and "it is on none". The staleness
+   * was in the POINTER, and a pointer is what nobody re-reads while adding the
+   * screen it should point at.
+   *
+   * ⚠️ AND BOTH OF THOSE REFUSALS ARE GONE ON PURPOSE rather than by
+   * oversight. Neither is a reason to withhold the agent's own page: an agent
+   * on no project still has a question, and a projects read that failed says
+   * nothing about whether we can show its screen. Withholding on either would
+   * be the stranded state this whole path exists to make impossible.
+   */
+  openDetail(sessionName);
+  /**
+   * ⚠️ `openDetail` RETURNS SILENTLY when the name is not on the board it
+   * reads (`LAST.find` then a bare return), which from the outside is a click
+   * that did nothing. That is the one ending this function has always refused
+   * to have. The board is the same list the card was drawn from, so a miss
+   * here means the agent left between the paint and the click.
+   */
+  if (!CURRENT || CURRENT.sessionName !== sessionName) {
+    showTab('agents');
+    const msg = document.getElementById('summary');
+    if (msg) {
+      msg.textContent = 'We could not open ' + spoken + '. It was on the board a moment ago and is not now, '
+        + 'so it may have stopped or been removed.';
+      msg.hidden = false;
+    }
   }
 }
 
