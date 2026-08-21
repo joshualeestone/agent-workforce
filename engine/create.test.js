@@ -2048,6 +2048,25 @@ test('an undo that could not run is recorded, because the sentence says it did',
 });
 
 test('a successful undo adds no step, so the failure step means something', () => {
+  /**
+   * ⚠️ THE VERSION BEFORE THIS PASSED WITH THE WHOLE TRUST FEATURE DELETED. Its
+   * two assertions were "projects is empty" and "no failure step" — and a
+   * creation that never wrote the key produces both. Its own guard message,
+   * "the undo did not run, so this proves nothing", named a check that could
+   * not tell "the undo removed the entry" from "there was never an entry".
+   *
+   * ⚠️ So it proves PRESENCE first, with a succeeding creation on the same
+   * fixture, exactly as its sibling above does.
+   */
+  create.setRunner(() => ({ ok: true }));
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+  const ok = create.createAgent({ ...BINS, name: 'trustfix-undo-ok-control', role: 'pm' });
+  assert.equal(ok.outcome, create.OUTCOME.CREATED, ok.because);
+  const controlPath = fs.realpathSync(nodePath.join(SANDBOX, 'workers', 'trustfix-undo-ok-control'));
+  assert.equal(readCfg().projects[controlPath].hasTrustDialogAccepted, true,
+    'CONTROL: this fixture never produces a trust entry, so the emptiness below proves nothing');
+
   create.setRunner((file, args) => {
     if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
     return { ok: true };
@@ -2057,8 +2076,9 @@ test('a successful undo adds no step, so the failure step means something', () =
 
   const r = create.createAgent({ ...BINS, name: 'trustfix-undo-ok', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.PARTIAL);
-  assert.deepEqual(Object.keys(readCfg().projects), [], 'the undo did not run, so this proves nothing');
+  assert.deepEqual(Object.keys(readCfg().projects), [], 'the undo did not run');
   assert.ok(!r.steps.some((s) => s.label === 'took back the folder trust'),
     'a successful undo reported itself as a failure');
   create.setRunner(null);
 });
+
