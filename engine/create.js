@@ -1159,7 +1159,11 @@ function createAgent(opts) {
       // testing, and the test asserting its ABSENCE could not fail because
       // nothing ever pushed it.
       let undone = false;
-      try { undone = require('./trust').forgetFolder(trusted.key).ok === true; }
+      // ⚠️ WITH WHAT THE WRITE DISPLACED, so the undo RESTORES rather than
+      // deletes. "Delete the key afterwards" is only a restore when the key was
+      // absent before, and it usually was not: nineteen of twenty-two entries
+      // on this machine hold `false`.
+      try { undone = require('./trust').forgetFolder(trusted.key, trusted.displaced, trusted.madeEntry).ok === true; }
       catch { undone = false; }
       if (!undone) steps.push({ label: 'took back the folder trust', ok: false });
     }

@@ -41,7 +41,7 @@ test('a folder we made is trusted, under the key Claude Code will look for', () 
   write({ projects: {} });
   const d = folder();
   const r = trustFolder(d);
-  assert.deepEqual(r, { ok: true, already: false, key: d });
+  assert.deepEqual(r, { ok: true, already: false, key: d, displaced: undefined, madeEntry: true });
   assert.equal(read().projects[d][KEY], true);
 });
 
@@ -305,7 +305,8 @@ test('a recorded false is overwritten, because it is a default and not a refusal
   write({ projects: { [d]: { [KEY]: false, allowedTools: ['Bash(ls:*)'], lastSessionId: 'abc' } } });
 
   const r = trustFolder(d);
-  assert.deepEqual(r, { ok: true, already: false, key: d }, 'a default was treated as a refusal');
+  assert.deepEqual(r, { ok: true, already: false, key: d, displaced: false, madeEntry: false },
+    'a default was treated as a refusal, or the displaced value was not carried out');
   const e = read().projects[d];
   assert.equal(e[KEY], true);
   assert.deepEqual(e.allowedTools, ['Bash(ls:*)'], 'their other settings went with it');
@@ -324,10 +325,11 @@ test('taking a trust entry back leaves everything else exactly as it was', () =>
   const other = folder();
   write({ theme: 'dark', projects: { [other]: { [KEY]: true, allowedTools: ['Bash(ls:*)'] } } });
 
-  assert.deepEqual(trustFolder(d), { ok: true, already: false, key: d });
+  const t0 = trustFolder(d);
+  assert.deepEqual(t0, { ok: true, already: false, key: d, displaced: undefined, madeEntry: true });
   assert.equal(read().projects[d][KEY], true);
 
-  assert.deepEqual(forgetFolder(d), { ok: true, already: false });
+  assert.deepEqual(forgetFolder(t0.key, t0.displaced, t0.madeEntry), { ok: true, already: false });
   const after = read();
   assert.equal(after.projects[d], undefined, 'the entry we wrote is still there after a rollback');
   assert.equal(after.projects[other][KEY], true, 'somebody else’s entry went with it');
@@ -435,10 +437,11 @@ test('a trust key merged into somebody’s existing entry is taken back WITHOUT 
   write({ projects: { [d]: { allowedTools: ['Bash(ls:*)'], mcpServers: { linear: {} }, history: [1, 2] } } });
 
   const t = trustFolder(d);
-  assert.deepEqual(t, { ok: true, already: false, key: d }, 'the fixture did not reach the merge, so this tests nothing');
+  assert.deepEqual(t, { ok: true, already: false, key: d, displaced: undefined, madeEntry: false },
+    'the fixture did not reach the merge, so this tests nothing');
   assert.equal(read().projects[d][KEY], true);
 
-  assert.equal(forgetFolder(t.key).ok, true);
+  assert.equal(forgetFolder(t.key, t.displaced, t.madeEntry).ok, true);
   const e = read().projects[d];
   assert.ok(e, 'the whole entry was deleted, taking settings we never wrote');
   assert.deepEqual(e.allowedTools, ['Bash(ls:*)']);
@@ -451,7 +454,7 @@ test('an entry we created outright is removed outright, leaving no empty shell',
   const d = folder();
   write({ projects: {} });
   const t = trustFolder(d);
-  assert.equal(forgetFolder(t.key).ok, true);
+  assert.equal(forgetFolder(t.key, t.displaced, t.madeEntry).ok, true);
   assert.equal(d in read().projects, false, 'an empty entry was left behind for a folder that is gone');
 });
 
@@ -511,14 +514,14 @@ test('the undo leaves a trust value that changed under it', () => {
   const d = folder();
   write({ projects: {} });
   const t = trustFolder(d);
-  assert.deepEqual(t, { ok: true, already: false, key: d });
+  assert.deepEqual(t, { ok: true, already: false, key: d, displaced: undefined, madeEntry: true });
 
   // Somebody else answers, in the window.
   const data = read();
   data.projects[d][KEY] = false;
   fs.writeFileSync(CONFIG, JSON.stringify(data, null, 2) + '\n', 'utf8');
 
-  assert.deepEqual(forgetFolder(t.key), { ok: true, already: true });
+  assert.deepEqual(forgetFolder(t.key, t.displaced, t.madeEntry), { ok: true, already: true });
   assert.equal(read().projects[d][KEY], false, 'the undo deleted an answer it did not write');
 });
 
@@ -526,6 +529,44 @@ test('the undo still removes the key when it is untouched, so the check above is
   const d = folder();
   write({ projects: {} });
   const t = trustFolder(d);
-  assert.deepEqual(forgetFolder(t.key), { ok: true, already: false });
+  assert.deepEqual(forgetFolder(t.key, t.displaced, t.madeEntry), { ok: true, already: false });
   assert.equal(d in read().projects, false);
+});
+
+test('the undo puts a displaced FALSE back, rather than leaving the key absent', () => {
+  /**
+   * 🛑 THE POPULATION THIS FEATURE CREATES IS THE POPULATION THAT BREAKS IT.
+   * Nineteen of twenty-two entries on this machine hold `false`, and fifteen of
+   * fifteen worker folders do. "Delete the key on the way back" is a restore
+   * only when the key was ABSENT before — everywhere else it leaves a state
+   * that never existed, and the undo's own docblock claims it "restores the
+   * exact state from before `trustFolder` ran, in both cases".
+   *
+   * ⚠️ AND THE WORSE HALF: an entry holding ONLY `{hasTrustDialogAccepted:
+   * false}` is empty once the key is deleted, so the empty-entry sweep removed
+   * an entry we had not created. That is the one thing the undo exists not to
+   * do, done by the code written to avoid it.
+   */
+  const d = folder();
+  write({ projects: { [d]: { [KEY]: false, allowedTools: ['Bash(ls:*)'] } } });
+
+  const t = trustFolder(d);
+  assert.deepEqual(t, { ok: true, already: false, key: d, displaced: false, madeEntry: false });
+  assert.equal(read().projects[d][KEY], true);
+
+  assert.equal(forgetFolder(t.key, t.displaced, t.madeEntry).ok, true);
+  const e = read().projects[d];
+  assert.ok(e, 'the entry was deleted, and we never created it');
+  assert.equal(e[KEY], false, 'the displaced value was not put back');
+  assert.deepEqual(e.allowedTools, ['Bash(ls:*)']);
+});
+
+test('an entry that held ONLY a false is not swept away by the undo', () => {
+  const d = folder();
+  write({ projects: { [d]: { [KEY]: false } } });
+  const t = trustFolder(d);
+  assert.equal(forgetFolder(t.key, t.displaced, t.madeEntry).ok, true);
+  const e = read().projects[d];
+  assert.ok(e, 'an entry we did not create was deleted because it looked empty');
+  assert.equal(e[KEY], false);
 });

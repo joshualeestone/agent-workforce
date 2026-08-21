@@ -157,6 +157,15 @@ function trustFolder(dir) {
   // one reading as a failure.
   if (existing && existing[KEY] === true) return { ok: true, already: true, key };
 
+  // ⚠️ WHAT WE ARE ABOUT TO DISPLACE, carried out so the undo can put it back.
+  // "Delete the key afterwards" is only a restore when the key was ABSENT
+  // before — and it almost never is: 19 of the 22 entries on this machine, and
+  // fifteen of fifteen worker folders, hold `false`. Deleting it there leaves a
+  // state that was never true, and where the entry held nothing else it deletes
+  // an entry we did not create, which is the one thing the undo exists not to do.
+  const displaced = existing && (KEY in existing) ? existing[KEY] : undefined;
+  const madeEntry = existing === undefined;
+
   // 🛑 A RECORDED `false` IS NOT A REFUSAL, AND AN EARLIER VERSION OF THIS FILE
   // REFUSED ON ONE BECAUSE I ASSUMED IT WAS. The premise was that Claude Code
   // writes `false` when somebody chooses "No, exit". Measured rather than
@@ -233,7 +242,7 @@ function trustFolder(dir) {
     return { ok: false, because: 'we could not write to their config file' };
   }
 
-  return { ok: true, already: false, key };
+  return { ok: true, already: false, key, displaced, madeEntry };
 }
 
 /**
@@ -274,7 +283,7 @@ function trustFolder(dir) {
  *
  * Same shape, same refusals, same fail-soft contract as `trustFolder`.
  */
-function forgetFolder(dir) {
+function forgetFolder(dir, displaced, madeEntry) {
   const target = CONFIG();
   if (!dir || !path.isAbsolute(dir)) return { ok: false, because: 'that is not an absolute folder path' };
 
@@ -323,9 +332,17 @@ function forgetFolder(dir) {
   // Deleting that would be the undo destroying a decision, on the one path
   // whose whole job is putting things back.
   if (entry[KEY] !== true) return { ok: true, already: true };
-  delete entry[KEY];
-  // Only now, and only if there is nothing of theirs left in it.
-  if (Object.keys(entry).length === 0) delete data.projects[key];
+
+  // ⚠️ PUT BACK WHAT WAS THERE, which is not always "nothing". `displaced` is
+  // the value the key held before we wrote, or `undefined` if it had none.
+  if (displaced === undefined) delete entry[KEY];
+  else entry[KEY] = displaced;
+
+  // ⚠️ AND THE ENTRY GOES ONLY IF WE MADE IT. An entry that is empty afterwards
+  // is not proof we created it: an entry holding only `{hasTrustDialogAccepted:
+  // false}` is empty once the key is removed, and deleting it would be the undo
+  // destroying a record it found. The caller knows which it was.
+  if (madeEntry === true && Object.keys(entry).length === 0) delete data.projects[key];
 
   const tmp = tempPath(target);
   try {
