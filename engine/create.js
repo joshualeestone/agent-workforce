@@ -1113,8 +1113,16 @@ function createAgent(opts) {
    * ⚠️ And it is skipped entirely under DRY_RUN, which is the whole point of a
    * dry run: nothing outside Kosmos is touched.
    */
+  // ⚠️ THE RESULT IS KEPT, and the first version discarded it. `trustFolder`
+  // returns a reason for each of its refusals, and throwing that away made a
+  // refusal indistinguishable from a success from anywhere on the machine — but
+  // more than that, it is what the rollback below needs: an entry we wrote for
+  // a folder we are about to delete has to come back out, or the sentence
+  // "we have taken it back off your computer" is false in exactly the case
+  // that produces it.
+  let trusted = null;
   if (!DRY_RUN && weMadeTheFolder) {
-    try { require('./trust').trustFolder(workerDir(name)); }
+    try { trusted = require('./trust').trustFolder(workerDir(name)); }
     catch { /* another tool's file; an agent that asks once is not a failed creation */ }
   }
 
@@ -1124,6 +1132,18 @@ function createAgent(opts) {
   });
 
   if (!started) {
+    // ⚠️ AND THE TRUST ENTRY GOES WITH IT — only when we CREATED it (`already`
+    // false), never when it was somebody's own decision that happened to be
+    // there already. `rollBack` puts the machine back; this is the one thing
+    // it puts back that is not ours.
+    if (trusted && trusted.ok === true && trusted.already === false) {
+      try { require('./trust').forgetFolder(fs.realpathSync(workerDir(name))); }
+      catch {
+        // The folder may already be gone. Fall back to the unresolved path,
+        // which equals the resolved one on every machine measured.
+        try { require('./trust').forgetFolder(workerDir(name)); } catch { /* best effort */ }
+      }
+    }
     // ⚠️ INCLUDING THE JOB, and including UNLOADING it. It was left installed
     // here, so an agent reported as "not running yet" would have started at the
     // person's next login anyway -- the one outcome nobody would predict from
