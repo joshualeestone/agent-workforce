@@ -11449,6 +11449,17 @@ function pjRoomRow(m, p, silent) {
      agent's post whenever any recipient did NOT simply receive it --
      partial delivery in the room must never look like the full room heard. */
   const showReceipt = isOp || states.some((v) => v !== 'placed');
+  /* ⚠️ THE PILL READS DELIVERY, AND THE SENTENCE INSIDE IT NOW READS MORE THAN
+     DELIVERY. A post placed with everyone where nobody has come back draws a
+     green `placed` pill around the words "Nothing back from any of them" — the
+     fastest-read channel on the row disagreeing with the slowest, on a feature
+     whose entire point is telling a working room from a broken one at a glance.
+     ⚠️ It is left as it is on purpose. `placed` is TRUE: the message was
+     delivered, and that is what the pill has always meant. Recolouring it on
+     silence would make the pill mean two different things depending on how old
+     the post is, and would put a failure colour on a delivery that worked. The
+     mismatch is real and it belongs to the pill's vocabulary, which is a design
+     question, not a bug to patch here. */
   const cls = states.length && states.every((v) => v === 'placed') ? 'placed'
     : (states.some((v) => v === 'could_not') ? 'failed' : 'unsure');
   const receipt = showReceipt && states.length

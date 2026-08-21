@@ -53,8 +53,8 @@ a receipt claims, and two messages can land in the same millisecond.
 
 ## Evidence
 
-- `yarn test`: **1031 pass, 0 fail**.
-- 24 tests in `web.post-receipt.test.js`, which **executes** the functions
+- `yarn test`: **1034 pass, 0 fail**.
+- 27 tests in `web.post-receipt.test.js`, which **executes** the functions
   rather than grepping the page for their output.
 - The filtered-vs-whole-room test carries its own control: the same call against
   a filtered list really does answer differently, so the call site is what has
@@ -92,6 +92,31 @@ by brace-matching is why the renderer had no test: it reaches nine helpers and
 two module-level values, and each one discovered by a `ReferenceError` was
 another guess about the page. The whole script is now evaluated with a DOM stub,
 which cannot drift because there is no dependency list to keep in step.
+
+## What the second blind pass found
+
+**Two blockers, both in coverage of the same hop, one round after I thought I
+had closed it.**
+
+1. **Nothing drove `paintRoom`.** Every test called `pjRoomRow` directly with a
+   silence list, so rewriting the one call site to `pjRoomRow(m, p)` deleted the
+   feature from the product with the suite green. The structural check only
+   looked for `pjSilences(allRows)`, which that rewrite leaves untouched. The
+   test now drives `paintRoom` and reads what it wrote, through a DOM stub that
+   records `innerHTML` instead of swallowing it.
+2. **The agent's-post test certified nothing.** Its fixture was all-`placed`, so
+   `showReceipt` suppressed the whole receipt before any silence code ran and
+   the assertion was satisfied by delivery-pill logic. With the shape the
+   `/room` route really emits for a partly unreachable room, the old code drew
+   *"Placed with Johnson. Bob could not be reached. Nothing back from Johnson."*
+   under a message **Rick** sent. The renderer now enforces that rule itself
+   rather than resting on one condition in another function.
+
+Also fixed: a comment claiming immunity to a backwards clock that the route's own
+sort removes; a valve fixture carrying a field its producer drops, contradicting
+its own docblock; and two states named rather than patched (the `unconfirmed`
+gap, and the green delivery pill that can now wrap "Nothing back from any of
+them").
 
 ## Deliberately not here
 
