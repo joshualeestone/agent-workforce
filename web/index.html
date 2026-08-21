@@ -217,39 +217,15 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .checked b { display: block; font-size: .75rem; letter-spacing: 0;
              text-transform: none; color: var(--k-ink); font-weight: 600; }
 .checked.stale b { text-decoration: underline wavy; }
-.build { max-width: 1320px; margin: 0 auto var(--space-7);   /* the -4px top was tuned for its old spot under the New agent row; at the foot it just pulls against #removed-wrap */
-          font: var(--text-caption) var(--font-ui); color: var(--label-3);
-          /* The version, its state and its control are ONE line and read left
-             to right: what you are running, whether it is current, what to do
-             about it. Wrapping is allowed because the middle part is a whole
-             sentence on a narrow window. */
-          display: flex; align-items: center; gap: .75em; flex-wrap: wrap;
-          /* 🔑 PINNED (Josh, 2026-08-21): "lock the version and the Check Now
-             to the bottom of the page". Sticky rather than fixed, so it still
-             occupies its place in the flow and cannot overlap the last row of
-             content the way a fixed bar does at the end of a long board.
-             ⚠️ IT NEEDS ITS OWN BACKGROUND. Sticky elements paint over what
-             scrolls beneath them, and a transparent one lets cards slide
-             through the version number. */
-          position: sticky; bottom: 0; z-index: 3;
-          background: var(--k-bg, var(--bg, #faf9f7));
-          padding: 8px 0; }
-  .build b { font-weight: 600; color: var(--label-2); letter-spacing: .04em; }
-  /* ⚠️ #upd-line IS A <b> FOR THE LIVE REGION, NOT FOR EMPHASIS, so it opts out
-     of the .build b treatment above: that rule dresses "BETA", and a status
-     sentence in letter-spaced caps reads as a second heading. */
-  .build #upd-line { font-weight: 400; color: var(--label-3); letter-spacing: 0; }
-  .build #upd-line:empty { display: none; }
-  /* 🛑 SIZED TO THE LINE IT SITS ON. .btn-quiet is a 17px control with .9em
-     padding, built for dialogs; dropped into a caption-sized footer unchanged
-     it stood taller than everything around it and read as the loudest thing on
-     the page, which is the opposite of what a footer control should be. */
-  /* ⚠️ THE BORDER IS THE CONTROL'S ONLY EDGE, so it is held to the 3:1
-     non-text minimum with room to spare. Measured at --label-4 it came out at
-     3.01, which passes and is not a margin: any theme nudge, any rounding, and
-     the only thing saying "this is a button" stops meeting AA. */
-  .build .btn-quiet { font-size: inherit; padding: .35em 1em; border-radius: 8px;
-                      border-color: var(--label-3); color: var(--label-1, var(--label-2)); }
+/* The version and its control live in Settings > Updates now (Josh, 2026-08-21).
+   `.build` as a page footer is gone; what is left is the quiet treatment for the
+   status line inside that row. */
+.upd-line { display: block; margin-top: 4px; font-weight: 400; color: var(--label-3); }
+/* ⚠️ The label is two words and the row's right-hand slot is narrow, so it wrapped
+   to "Check for / Update" — a two-line button beside a one-line row. Measured
+   after: one line at the settings width. */
+#upd-btn { white-space: nowrap; }
+.upd-line:empty { display: none; }
   .summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
 
   /* ---- the connection notice ---------------------------------------------
@@ -4096,12 +4072,25 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            spending" while doing no such thing. Fleet-stop is its own
            chunk. -->
       <h3 class="dlab">Updates</h3>
-      <!-- The checking CONTROL moved to the version line at the foot of the
-           page; see the note there. What is left here is the setting, which is
-           what this section is for. -->
+      <!-- 🔑 BACK HERE, AND ONLY HERE (Josh, 2026-08-21): *"lets kill the beta,
+           version, up to date, check for an update except for the settings page
+           so it's not cluttered up everywhere else"*.
+           📌 THE HISTORY, because this has moved twice and the next person
+           deserves both reasons. It lived here, he went looking for it beside
+           the version he was running and could not find it, so 0.2.16 moved the
+           whole line to a pinned page footer (Mona Lisa: move it, never
+           duplicate it). Living with it, he found a control on every screen was
+           clutter — which is a judgement only reachable after seeing it, not
+           before. The first move fixed "nobody can find it"; this one fixes
+           "it is everywhere". Neither reading was wrong when it was made.
+           ⚠️ STILL ONE CONTROL. Same ids, same painter, same derivation; what
+           changed is where it sits. Two of these would have to agree about
+           state and one of them would eventually be wrong. -->
       <div class="setrow" id="upd-row">
-        <div><b>Kosmos runs in the background</b>
-          <p class="dhint" style="margin:2px 0 0;">Closing this window does not stop your agents. The version you are running, and a button to check for a new one, are at the foot of this page.</p></div>
+        <div><b id="build"></b>
+          <p class="dhint" style="margin:2px 0 0;">Kosmos runs in the background. Closing this window does not stop your agents.</p>
+          <b id="upd-line" role="status" class="upd-line"></b></div>
+        <button class="btn-quiet" type="button" id="upd-btn" hidden>Check for Update</button>
       </div>
       <div class="setrow off" style="margin-top:12px;">
         <div><b>Tell me when there is a new version</b>
@@ -4244,21 +4233,6 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
      protect exactly that adjacency, and the move stepped through it.
      Kept OUTSIDE `#removed-wrap` for the reason that note gives: the wrap hides
      itself entirely when nothing is removed. -->
-<div class="build">
-  <!-- 🔑 THE VERSION LINE IS THE UPDATE AFFORDANCE (Mona Lisa's ruling, Josh's
-       instinct, 2026-08-21). The control existed in Settings under "Updates"
-       and did everything asked of it; Josh went looking for it here, next to
-       what he was running, and did not find it. A control nobody can find is
-       the same as no control.
-       ⚠️ MOVED, NEVER DUPLICATED. Two controls doing one thing would have to
-       agree about state, and one of them would eventually be wrong.
-       ⚠️ AND THE BUTTON IS A SIBLING OF #build, NOT INSIDE IT. That span's
-       innerHTML is rewritten on every five-second poll, which would destroy
-       this button (and any focus resting on it) twice a minute. -->
-  <span id="build"></span>
-  <b id="upd-line" role="status"></b>
-  <button class="btn-quiet" type="button" id="upd-btn" hidden>Check for Update</button>
-</div>
 
 <script>
 'use strict';
@@ -5820,15 +5794,8 @@ function showTab(tab) {
     const sum = document.getElementById('summary');
     sum.hidden = !agents || sum.textContent === '';
   }
-  /* 🔑 NO LONGER TAB-GATED. This line used to be board chrome and hid with the
-     board, which was right when it was only a version stamp under the agents.
-     Josh asked for it and its Check for Update control pinned to the bottom of
-     the PAGE (2026-08-21), so it is app chrome now — and the gate had become
-     visibly wrong rather than merely stale: the control is a SIBLING of this
-     span, so hiding only the span left a bare "Check for Update" button
-     floating in the footer of every project room with nothing to say what it
-     was about. */
-  document.getElementById('build').hidden = false;
+  /* The version moved into Settings (Josh, 2026-08-21), so there is no
+     board-chrome version line left to show or hide here. */
   // (boardbar was set above, before the visibility computation that reads
   // it; the view toggle is board chrome and travels with the board.)
   // ⚠️ Hidden with the rest of the board, and NOT unhidden here — whether it
