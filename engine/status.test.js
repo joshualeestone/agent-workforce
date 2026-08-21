@@ -1907,3 +1907,62 @@ test('a measured agent whose model size we do not know says so, and carries the 
   assert.ok(known.percent !== null, 'the control produced no percentage either');
   assert.equal(known.noCeiling, undefined);
 });
+
+test('an agent with no registry entry is read from the folder it was launched in', () => {
+  /**
+   * 🛑 THE REGISTRY THIS FILE READS IS NOT WRITTEN BY CLAUDE CODE OR BY KOSMOS.
+   * On the machine where all of this was built it is written by
+   * `~/.claude/scripts/lib/session-recovery.sh`, local fleet tooling; nothing in
+   * this repo creates it. So on a clean install the folder does not exist and
+   * EVERY agent reads "memory could not be read", permanently.
+   *
+   * Josh, 2026-08-21, on a fresh mini:
+   *   ls: /Users/cabal/.claude/agent-registry/: No such file or directory
+   *
+   * ⚠️ EVERY EXISTING TEST HERE SEEDS THE REGISTRY, which is why a product-wide
+   * gap survived all of them: the fixture supplied the very file the product
+   * was wrong to depend on. This one deliberately seeds NO registry entry.
+   */
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const name = 'foldersonly';
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
+  fs.mkdirSync(dir, { recursive: true });
+
+  // Claude Code flattens the launch directory: every character that is not a
+  // letter or a digit becomes a dash. Measured against a real transcript tree.
+  const flat = dir.replace(/[^A-Za-z0-9]/g, '-');
+  const projects = nodePath.join(root, 'projects', flat);
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-folders.jsonl'),
+    JSON.stringify({ type: 'summary', sessionId: 'sess-folders' }) + '\n'
+    + JSON.stringify({ cwd: dir, message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } } }) + '\n',
+    'utf8');
+
+  setPaneSource(() => `${name}\t0.0\t2.1.227\t0\t${name}\t✳ Claude Code`);
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === name);
+    assert.ok(card, 'the fixture did not produce a card at all');
+    assert.ok(card.context.percent !== null,
+      'an agent with no registry entry still has an unknowable memory ring, which is every agent on a clean install');
+    assert.equal(card.model, 'claude-opus-5');
+
+    /**
+     * 🛑 THE CONTROL, AND IT IS THE WHOLE POINT OF THE DESIGN. The folder is a
+     * GUESS — two paths can flatten to one directory — so the transcript is
+     * opened and its own `cwd` checked against the folder we meant. Point it
+     * somewhere else and the reading must go back to nothing rather than
+     * reporting confident numbers about another conversation.
+     */
+    fs.writeFileSync(nodePath.join(projects, 'sess-folders.jsonl'),
+      JSON.stringify({ type: 'summary', sessionId: 'sess-folders' }) + '\n'
+      + JSON.stringify({ cwd: '/somewhere/else', message: { model: 'claude-opus-5', usage: { input_tokens: 42000 } } }) + '\n',
+      'utf8');
+    const wrong = snapshot().agents.find((a) => a.sessionName === name);
+    assert.equal(wrong.context.percent, null,
+      'a transcript belonging to another directory was used, which is the one outcome worse than no reading');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
