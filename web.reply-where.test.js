@@ -183,3 +183,37 @@ test('the element sits under the thread and above the composer', () => {
   assert.ok(thread > 0 && busy > thread, 'the line is not under the conversation');
   assert.ok(busy < send, 'the line is below the composer, where it is not next to what it describes');
 });
+
+test('the line is hidden in the two states where it would be false', () => {
+  /**
+   * 🛑 THE TWO BLOCKERS THIS PINS, both found by a blind pass and neither
+   * caught by anything here before:
+   *
+   *   a name the box cannot resolve — the panel says "we cannot show a
+   *   conversation for this name" while this line said "<name> will see this
+   *   in their own window", eight pixels apart
+   *
+   *   presence 'off' — every reason that arm prints is about the WINDOW ("its
+   *   window is scrolled back", "we cannot reach its window") and this line
+   *   says the answer arrives in that window
+   *
+   * ⚠️ AND A HIDE NEEDS AN UN-HIDE. The element is reused across agents, so a
+   * branch that hides without a matching reset silences the line for the rest
+   * of the session — and absent is indistinguishable from "we decided not to
+   * say it".
+   *
+   * ⚠️ THIS IS A SOURCE ASSERTION AND CANNOT SEE A RENDER, said plainly: it
+   * pins that the decision exists and what it keys on. Whether the element is
+   * actually invisible in those states is a browser question, and the check in
+   * docs/browser-checks/ is where that belongs.
+   */
+  assert.match(PAGE, /d-reply-where'\)\.hidden = body\.presence === 'off'/,
+    'nothing decides whether the line shows, or it no longer keys on the unreachable window');
+  assert.match(PAGE, /d-reply-where'\)\.hidden = false/,
+    'the hide has no matching reset, so one unresolvable name silences the line for every agent after it');
+
+  const refusal = PAGE.indexOf("document.getElementById('d-persist').hidden = true;");
+  assert.notEqual(refusal, -1, 'the refusal arm no longer hides the persistence line, so this is aimed at nothing');
+  assert.match(PAGE.slice(refusal, refusal + 700), /d-reply-where'\)\.hidden = true/,
+    'the refusal arm hides the persistence promise and leaves this one standing, which is the defect the comment beside it records fixing');
+});
