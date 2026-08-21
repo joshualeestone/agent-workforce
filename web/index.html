@@ -11343,7 +11343,9 @@ function pjOldEnoughToJudge(at) {
 /** The receipt, in the operator's words, one clause per real state. */
 function pjReceiptSentence(outcomes, p, silent) {
   const groups = { placed: [], unconfirmed: [], could_not: [] };
+  const placedWho = [];
   for (const [who, state] of Object.entries(outcomes || {})) {
+    if (state === 'placed') placedWho.push(who);
     /* An UNKNOWN state lands in the not-confirmed clause: "could not be
        reached" is a definite failure claim that licenses a free re-send,
        which an unknown state does not -- and the pill's weight already
@@ -11360,17 +11362,58 @@ function pjReceiptSentence(outcomes, p, silent) {
   /* ⚠️ ORDERED BY THE LIST ALREADY ON SCREEN, so the two sentences can be
      matched by eye without re-reading the first one. */
   if (silent && silent.length && groups.placed.length) {
-    const names = groups.placed.filter((n) => silent.includes(n));
+    /* ⚠️ MATCHED ON SESSION NAMES, NOT ON WHAT IS DISPLAYED. Display names are
+       not unique — creation collides only on the slug, so two agents can both
+       show "Rick" — and matching in display-name space merged them: one
+       answers, one does not, both match, and the person is told nobody
+       answered about a room where somebody did. The caller passes the session
+       names and the mapping to words happens here, once. */
+    const names = placedWho.filter((who) => silent.includes(who)).map((who) => pjNameOf(p, who));
     if (names.length) {
       /* ⚠️ "ANY OF THEM" WHEN IT IS ALL OF THEM, deliberately. Repeating the
          whole list reads as a DIFFERENT set of people; "any of them" points at
-         the list already in front of the person. */
-      bits.push(names.length === groups.placed.length && names.length > 1
+         the list already in front of the person.
+         ⚠️ AND "THEM" IS EVERYONE THE RECEIPT JUST NAMED, not everyone it was
+         placed with. Comparing against the placed group alone produced
+         "Placed with A and B. C could not be reached. Nothing back from any of
+         them." — sweeping in the agent the sentence before had just said never
+         received it. */
+      const everyoneNamed = groups.placed.length + groups.unconfirmed.length + groups.could_not.length;
+      bits.push(names.length === everyoneNamed && names.length > 1
         ? 'Nothing back from any of them.'
         : 'Nothing back from ' + pjJoinOr(names) + '.');
     }
   }
   return bits.join(' ');
+}
+
+/**
+ * Who is silent under each post in a room, as a Map keyed by the row.
+ *
+ * ⚠️ IT IS A FUNCTION SO THAT THE TWO-MINUTE GATE IS TESTABLE. Inline in
+ * `paintRoom` it was reachable only by rendering the whole screen, so deleting
+ * `pjOldEnoughToJudge` from the condition left every test green while the
+ * sentence fired on a post one second old — the "render condition, not a timer"
+ * rule certified by nothing at the point it is applied.
+ *
+ * ⚠️ INDEXED AGAINST THE WHOLE ROOM, never the filtered rows. A person typing
+ * in the search box must not be able to change what a receipt claims: filtering
+ * out an agent's reply would otherwise turn a working exchange into "nothing
+ * back from Rick".
+ *
+ * ⚠️ AND ONLY UNDER THE PERSON'S OWN POSTS. An agent's post carries outcomes
+ * too, so without `m.operator === true` the room told the person "nothing back
+ * from Johnson" underneath something RICK said — a receipt about somebody
+ * else's message, which is not what a receipt is.
+ */
+function pjSilences(allRows) {
+  const out = new Map();
+  (allRows || []).forEach((m, i) => {
+    if (m && m.operator === true && m.outcomes && pjOldEnoughToJudge(m.at)) {
+      out.set(m, pjSilentSince(m, allRows, i));
+    }
+  });
+  return out;
 }
 
 function pjRoomRow(m, p, silent) {
@@ -11449,16 +11492,7 @@ function paintRoom(body) {
   const allRows = body.rows || [];
   const shown = pjRoomFilterRows(allRows, p, PJ_ROOM_QUERY);
   const filtering = PJ_ROOM_QUERY.trim() !== '';
-  /* ⚠️ INDEXED AGAINST `allRows`, NOT `shown`. The silence verdict is about the
-     room, and a person typing in the search box must not be able to change what
-     a receipt claims — filtering out an agent's reply would otherwise turn a
-     working exchange into "nothing back from Rick". */
-  const silences = new Map();
-  allRows.forEach((m, i) => {
-    if (m && m.outcomes && pjOldEnoughToJudge(m.at)) {
-      silences.set(m, pjSilentSince(m, allRows, i).map((who) => pjNameOf(p, who)));
-    }
-  });
+  const silences = pjSilences(allRows);
   const rows = shown.map((m) => pjRoomRow(m, p, silences.get(m))).join('');
   /* An unreadable record is SAID, ahead of whatever could be read --
      no-state-as-silence, the same rule as every list on this app. */

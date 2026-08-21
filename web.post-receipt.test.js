@@ -22,26 +22,60 @@ const nodePath = require('node:path');
 
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 
-function slice(name) {
-  const at = PAGE.indexOf(`function ${name}(`);
-  assert.notEqual(at, -1, `${name} is not in the page at all`);
-  let depth = 0;
-  let i = PAGE.indexOf('{', at);
-  for (; i < PAGE.length; i++) {
-    if (PAGE[i] === '{') depth++;
-    else if (PAGE[i] === '}') { depth--; if (depth === 0) break; }
-  }
-  return PAGE.slice(at, i + 1);
+/**
+ * The page's own script, evaluated whole, with a DOM stub.
+ *
+ * 🛑 THIS FILE USED TO SLICE INDIVIDUAL FUNCTIONS OUT BY BRACE-MATCHING, and
+ * that is why the renderer had no test: `pjRoomRow` reaches nine helpers and
+ * two module-level values, and each one discovered by a ReferenceError was
+ * another guess about what the page contains. A harness that is hard to point
+ * at the real thing gets pointed at a fragment instead — and the fragment
+ * passed while the hop that makes the feature visible was never executed.
+ *
+ * ⚠️ Evaluating the whole script is also the only version that CANNOT drift:
+ * there is no list of dependencies to keep in step with the page.
+ */
+function pageScope() {
+  const src = PAGE.match(/<script>([\s\S]*)<\/script>/);
+  assert.ok(src, 'the page has no script block');
+  const el = () => new Proxy(function () {}, {
+    get: (t, k) => (k === 'textContent' || k === 'innerHTML' || k === 'value' ? '' : el()),
+    set: () => true,
+    apply: () => el(),
+  });
+  const document = {
+    getElementById: () => el(), querySelector: () => el(), querySelectorAll: () => [],
+    addEventListener: () => {}, createElement: () => el(),
+    documentElement: el(), body: el(), readyState: 'complete',
+  };
+  const window = {
+    addEventListener: () => {}, matchMedia: () => ({ matches: false, addEventListener: () => {} }),
+    location: { hash: '', pathname: '/' },
+    localStorage: { getItem: () => null, setItem: () => {} },
+  };
+  // eslint-disable-next-line no-new-func
+  return new Function(
+    'document', 'window', 'navigator', 'fetch', 'setInterval', 'setTimeout',
+    'clearInterval', 'EventSource', 'location', 'localStorage',
+    src[1] + `
+    return { pjJoinNames, pjJoinOr, pjNameOf, pjSilentSince, pjSilences,
+             pjReceiptSentence, pjOldEnoughToJudge, pjRoomRow, PJ_SILENCE_AFTER_MS };`,
+  )(document, window, {}, () => new Promise(() => {}), () => 0, () => 0, () => {},
+    function EventSource() {}, window.location, window.localStorage);
 }
 
-const NAMES = ['pjJoinNames', 'pjJoinOr', 'pjNameOf', 'pjSilentSince', 'pjReceiptSentence', 'pjOldEnoughToJudge'];
-const PJ_SILENCE_AFTER_MS = 2 * 60 * 1000;
-// eslint-disable-next-line no-new-func
-const api = new Function(
-  `const PJ_SILENCE_AFTER_MS = ${PJ_SILENCE_AFTER_MS};`
-  + NAMES.map(slice).join('\n')
-  + `; return { ${NAMES.join(', ')} };`,
-)();
+const api = pageScope();
+const renderer = () => api.pjRoomRow;
+
+test('the threshold this file tests is the one the page ships', () => {
+  /**
+   * ⚠️ Read, then asserted, so a change to the page is a FAILURE here rather
+   * than a silently different pass. Two minutes is the number the design
+   * settled on: under it, silence is the normal shape of a working room.
+   */
+  assert.equal(api.PJ_SILENCE_AFTER_MS, 2 * 60 * 1000,
+    'the page changed the silence threshold; the tests below describe two minutes');
+});
 
 /**
  * A project's member list, in the shape `engine/projects.js` really emits.
@@ -84,8 +118,10 @@ function room(after) {
 }
 const said = (who) => ({ from: who, at: ago(4), text: 'here' });
 
-const sentence = (silentSessionNames) =>
-  api.pjReceiptSentence(ALL_PLACED, P, (silentSessionNames || []).map((w) => api.pjNameOf(P, w)));
+/* ⚠️ SESSION NAMES, which is what the page passes now. It used to map them to
+   display names first — and display names are not unique, so two agents both
+   showing "Rick" merged into one match. */
+const sentence = (silentSessionNames) => api.pjReceiptSentence(ALL_PLACED, P, silentSessionNames || []);
 
 test('nobody has answered: the receipt says so instead of only saying it was placed', () => {
   assert.equal(sentence(['johnson', 'rick', 'bob']),
@@ -121,7 +157,7 @@ test('"any of them" is only for ALL of them, and never for a single recipient', 
    * back from any of them" about one person is a sentence nobody would write.
    */
   const one = { rick: 'placed' };
-  const s = api.pjReceiptSentence(one, P, ['Rick']);
+  const s = api.pjReceiptSentence(one, P, ['rick']);
   assert.equal(s, 'Placed with Rick. Nothing back from Rick.');
 });
 
@@ -133,7 +169,7 @@ test('an agent we could not reach is not also reported as silent', () => {
    * was ignored.
    */
   const mixed = { johnson: 'placed', rick: 'could_not', bob: 'unconfirmed' };
-  const s = api.pjReceiptSentence(mixed, P, ['Johnson', 'Rick', 'Bob']);
+  const s = api.pjReceiptSentence(mixed, P, ['johnson', 'rick', 'bob']);
   assert.match(s, /Nothing back from Johnson\./);
   assert.doesNotMatch(s, /Nothing back from[^.]*Rick/);
   assert.doesNotMatch(s, /Nothing back from[^.]*Bob/);
@@ -237,6 +273,45 @@ test('the verdict is computed against the whole room, never a filtered view', ()
     'the control: against a filtered list the answer really is different, so paintRoom must pass the whole room');
 });
 
+test('the silence map is built from the whole room, and only under the person’s posts', () => {
+  /**
+   * 🛑 THE HOP THAT USED TO BE UNTESTABLE. This lived inline in `paintRoom`,
+   * so the two-minute gate at the point it is APPLIED was reachable only by
+   * rendering the screen — delete `pjOldEnoughToJudge` from the condition and
+   * every test stayed green while the sentence fired on a post one second old.
+   */
+  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED };
+  const fresh = { operator: true, from: 'you', at: ago(0), outcomes: ALL_PLACED };
+  const agentPost = { from: 'rick', at: ago(5), outcomes: { johnson: 'placed' } };
+  const rows = [post, fresh, agentPost];
+
+  const map = api.pjSilences(rows);
+
+  /* ⚠️ Rick is NOT in this list, and that is the fixture doing two jobs: his
+     post comes after the person's, so he has spoken. An agent's message counts
+     as an answer even though it gets no verdict of its own. */
+  assert.deepEqual(map.get(post).sort(), ['bob', 'johnson'], 'an old post got no verdict');
+  assert.equal(map.has(fresh), false, 'a post seconds old was judged; the two-minute gate is not applied here');
+  assert.equal(map.has(agentPost), false,
+    'an agent’s own post got a silence verdict, so the room says "nothing back from Johnson" under something RICK said');
+});
+
+test('the map is keyed on the row, so a filtered view reads the same verdicts', () => {
+  /**
+   * ⚠️ The verdict is about the ROOM. Typing in the search box must not change
+   * what a receipt claims: filtering out an agent's reply would otherwise turn
+   * a working exchange into "nothing back from Rick".
+   */
+  const r = room([said('rick'), said('bob'), said('johnson')]);
+  const map = api.pjSilences(r.rows);
+  assert.deepEqual(map.get(r.post), [], 'everyone spoke and somebody was still called silent');
+
+  // THE CONTROL: the same function over only the surviving rows really does
+  // answer differently, so passing the whole room is what has to be right.
+  const filtered = [r.post];
+  assert.deepEqual(api.pjSilences(filtered).get(r.post).sort(), ['bob', 'johnson', 'rick']);
+});
+
 test('paintRoom indexes the silence against allRows and not against the filtered rows', () => {
   /**
    * ⚠️ AND THIS IS THE HALF THE UNIT TEST ABOVE CANNOT SEE. It proves the
@@ -247,7 +322,49 @@ test('paintRoom indexes the silence against allRows and not against the filtered
   const at = PAGE.indexOf('function paintRoom(');
   assert.notEqual(at, -1);
   const body = PAGE.slice(at, at + 2000);
-  assert.match(body, /allRows\.forEach\(\(m, i\) => \{[\s\S]*?pjSilentSince\(m, allRows, i\)/,
-    'the silence is no longer computed from the whole room');
-  assert.doesNotMatch(body, /pjSilentSince\(m, shown/, 'the silence is computed from the filtered rows');
+  assert.match(body, /pjSilences\(allRows\)/, 'the silence is no longer computed from the whole room');
+  assert.doesNotMatch(body, /pjSilences\(shown/, 'the silence is computed from the filtered rows');
+});
+
+test('the sentence actually reaches the rendered row', () => {
+  /**
+   * 🛑 NOTHING IN THIS FILE EXECUTED `pjRoomRow`, so the one hop that makes the
+   * feature VISIBLE was uncovered: change its call to
+   * `pjReceiptSentence(m.outcomes, p)` — dropping the silence argument — and
+   * every other test here still passes while the second sentence never renders.
+   * That is the "ships dead" failure this file's own header claims to prevent,
+   * and it was live in the file that claimed it.
+   *
+   * ⚠️ So the renderer is executed, with its helpers taken from the page rather
+   * than stubbed, and the assertion is on the HTML a person would receive.
+   */
+  const render = renderer();
+
+  const post = { operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'anyone there?' };
+
+  const withSilence = render(post, P, ['rick', 'bob']);
+  assert.match(withSilence, /Placed with Johnson, Rick and Bob\./);
+  assert.match(withSilence, /Nothing back from Rick or Bob\./,
+    'the row rendered without the sentence, so the receipt still cannot tell a working room from a broken one');
+
+  // ⚠️ AND THE OTHER HALF, or this passes for a renderer that always appends it.
+  const quiet = render(post, P, []);
+  assert.match(quiet, /Placed with Johnson, Rick and Bob\./);
+  assert.doesNotMatch(quiet, /Nothing back/, 'a room where everyone answered still got the sentence');
+});
+
+test('an agent’s own post renders no silence sentence, whatever it is handed', () => {
+  /**
+   * ⚠️ BELT AND BRACES ON PURPOSE. `pjSilences` never produces a verdict for an
+   * agent's post, so this is unreachable today — but the renderer takes the
+   * list as an argument, and the thing that keeps it unreachable is one
+   * condition in a different function. If that condition is ever loosened, the
+   * row a person reads is where it shows up.
+   */
+  const render = renderer();
+
+  const agentPost = { from: 'rick', at: ago(5), outcomes: { johnson: 'placed' }, text: 'on it' };
+  const html = render(agentPost, P, ['johnson']);
+  assert.doesNotMatch(html, /Nothing back from/,
+    'the room told the person nobody answered, underneath a message somebody else sent');
 });
