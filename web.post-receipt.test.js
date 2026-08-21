@@ -148,11 +148,11 @@ const sentence = (silentSessionNames) => api.pjReceiptSentence(ALL_PLACED, P, si
 
 test('nobody has answered: the receipt says so instead of only saying it was placed', () => {
   assert.equal(sentence(['johnson', 'rick', 'bob']),
-    'Placed with Johnson, Rick and Bob. Nothing back from any of them.');
+    'Nothing back from any of them.');
 });
 
 test('one silent of three is named, and the other two are not', () => {
-  assert.equal(sentence(['rick']), 'Placed with Johnson, Rick and Bob. Nothing back from Rick.');
+  assert.equal(sentence(['rick']), 'Nothing back from Rick.');
 });
 
 test('two silent are joined with OR, because it is a different list from the one above', () => {
@@ -161,17 +161,33 @@ test('two silent are joined with OR, because it is a different list from the one
    * is not — "nothing back from Rick and Bob" reads as one joint absence rather
    * than two separate ones.
    */
-  assert.equal(sentence(['rick', 'bob']), 'Placed with Johnson, Rick and Bob. Nothing back from Rick or Bob.');
+  assert.equal(sentence(['rick', 'bob']), 'Nothing back from Rick or Bob.');
 });
 
-test('everyone answering leaves the receipt exactly as it was', () => {
+test('a post that simply worked says nothing at all', () => {
   /**
-   * ⚠️ THE CASE THAT MUST NOT GROW A SENTENCE. A healthy room is the common
-   * one, and a second clause on every post would be the CLI overclaim with the
-   * sign flipped: noise that people learn to stop reading.
+   * 🔑 JOSH, 2026-08-21: *"lets kill the bubble that says 'Placed with Name,
+   * Name, and Name' when i post a message"*. Reaching everyone is the expected
+   * outcome of posting, and a sentence saying only that printed under every
+   * post is the CLI overclaim with the sign flipped: noise people learn to stop
+   * reading. The whole receipt is now empty in the healthy case.
+   *
+   * ⚠️ AND THE DELIVERY HALF MUST STILL SPEAK WHEN IT HAS NEWS, which is the
+   * assertion that keeps this from being "delete the receipt". "Placed with A
+   * and B" is what makes "C could not be reached" actionable — without it a
+   * person cannot tell whether anybody got it.
    */
-  assert.equal(sentence([]), 'Placed with Johnson, Rick and Bob.');
-  assert.equal(sentence(undefined), 'Placed with Johnson, Rick and Bob.');
+  assert.equal(sentence([]), '');
+  assert.equal(sentence(undefined), '');
+
+  const mixed = { johnson: 'placed', rick: 'placed', bob: 'could_not' };
+  assert.equal(api.pjReceiptSentence(mixed, P, []),
+    'Placed with Johnson and Rick. Bob could not be reached.',
+    'the names of who DID get it went missing from the case that needs them');
+
+  const unsure = { johnson: 'placed', rick: 'unconfirmed', bob: 'placed' };
+  assert.match(api.pjReceiptSentence(unsure, P, []), /^Placed with Johnson and Bob\./,
+    'an unconfirmed recipient should still leave the placed names on screen');
 });
 
 test('"any of them" is only for ALL of them, and never for a single recipient', () => {
@@ -181,7 +197,7 @@ test('"any of them" is only for ALL of them, and never for a single recipient', 
    */
   const one = { rick: 'placed' };
   const s = api.pjReceiptSentence(one, P, ['rick']);
-  assert.equal(s, 'Placed with Rick. Nothing back from Rick.');
+  assert.equal(s, 'Nothing back from Rick.');
 });
 
 test('an agent we could not reach is not also reported as silent', () => {
@@ -371,13 +387,20 @@ test('the sentence actually reaches the rendered row', () => {
   const post = { kind: 'post', operator: true, from: 'you', at: ago(5), outcomes: ALL_PLACED, text: 'anyone there?' };
 
   const withSilence = render(post, P, ['rick', 'bob']);
-  assert.match(withSilence, /Placed with Johnson, Rick and Bob\./);
+  /* ⚠️ PROBED ON THE SILENCE CLAUSE, not on "Placed with…": that sentence is
+     now dropped when delivery is the whole story (Josh, 2026-08-21), so using
+     it here would test the receipt's copy rather than the HOP this test exists
+     for. The mixed case below keeps the placed names covered. */
+  assert.match(withSilence, /Nothing back from Rick or Bob\./);
   assert.match(withSilence, /Nothing back from Rick or Bob\./,
     'the row rendered without the sentence, so the receipt still cannot tell a working room from a broken one');
 
   // ⚠️ AND THE OTHER HALF, or this passes for a renderer that always appends it.
   const quiet = render(post, P, []);
-  assert.match(quiet, /Placed with Johnson, Rick and Bob\./);
+  /* ⚠️ ANCHORED ON THE POST ITSELF, because the receipt is now EMPTY when
+     everything simply worked. "Placed with…" was standing in for "the renderer
+     produced something", and that control has to keep working without it. */
+  assert.match(quiet, /anyone there\?/, 'the row did not render at all, so the half below proves nothing');
   assert.doesNotMatch(quiet, /Nothing back/, 'a room where everyone answered still got the sentence');
 });
 
@@ -454,7 +477,11 @@ test('two agents showing the same display name are not merged into one verdict',
    * a WRONG claim about how many of them answered.
    */
   const twoRicks = { agents: [member('rick', 'Rick'), member('rick-2', 'Rick')] };
-  const outcomes = { rick: 'placed', 'rick-2': 'placed' };
+  /* ⚠️ A COULD_NOT THIRD MEMBER, so the "Placed with…" clause is still on
+     screen to be asserted: it is suppressed when everything simply worked. The
+     duplicate-name property being tested is unchanged. */
+  const outcomes = { rick: 'placed', 'rick-2': 'placed', bob: 'could_not' };
+  twoRicks.agents.push(member('bob', 'Bob'));
 
   const s = api.pjReceiptSentence(outcomes, twoRicks, ['rick-2']);
   assert.match(s, /Placed with Rick and Rick\./);
@@ -485,7 +512,9 @@ test('paintRoom actually puts the sentence on the screen', () => {
   const html = scope.written['pj-room'];
 
   assert.ok(html && html.length > 0, 'paintRoom wrote nothing, so this tests nothing');
-  assert.match(html, /Placed with Johnson, Rick and Bob\./, 'the base receipt did not render');
+  /* Anchored on the post's own text: the healthy receipt is empty now, so this
+     is what proves paintRoom rendered anything at all. */
+  assert.match(html, /anyone there\?/, 'paintRoom rendered no post at all');
   assert.match(html, /Nothing back from Johnson or Bob\./,
     'the sentence never reached the screen: the silence map is computed and then dropped');
   assert.doesNotMatch(html, /Nothing back from[^.]*Rick/, 'Rick answered and was still named');
@@ -503,7 +532,7 @@ test('paintRoom leaves a fresh post alone, so the gate is applied on the way to 
   scope.paintRoom({ ok: true, rows: [fresh] });
   const html = scope.written['pj-room'];
 
-  assert.match(html, /Placed with Johnson, Rick and Bob\./, 'nothing rendered at all');
+  assert.match(html, /just now/, 'nothing rendered at all');
   assert.doesNotMatch(html, /Nothing back/, 'a post seconds old was already reported as unanswered');
 });
 

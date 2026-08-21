@@ -120,14 +120,37 @@ test('it says WORKING, and never that the agent is replying to you', () => {
      the rest of this file uses; what changed is that it is now aimed at the
      function that holds the sentence and at all three that could reintroduce
      the claim. */
-  assert.match(fn('busyRow'), /is working/, 'the line no longer says what it can see');
+  /* ⚠️ RE-POINTED AGAIN when the room grew a GROUPED line (Josh, 2026-08-21):
+     the verb became a shared constant, so `busyRow`'s source no longer contains
+     the word and this went red for a refactor that changed no behaviour — the
+     second time this test has been aimed at the wrong thing in one day.
+     🔑 The constant IS the claim now, so that is what is pinned, and the
+     vocabulary rule below covers every function that could reintroduce the
+     stronger word on either surface. */
+  const decl = PAGE.match(/const WORKING_VERB = '([^']+)'/);
+  assert.ok(decl, 'the shared verb vanished; the two surfaces can drift again');
+  assert.equal(decl[1], 'working', 'the line no longer says what it can see');
   /* And the vocabulary rule holds over the source of every function that can
      put words on either surface, so a future arm cannot introduce the claim on
      a path this render does not reach. */
+  /* ⚠️ COMMENTS STRIPPED FIRST, and that is not a loophole — it is the rule
+     stated correctly. What must never say "typing" is what the page EMITS. The
+     comment above `paintRoomBusy` quotes Josh's reference ("Splinter, Mona
+     Lisa, and Angel are typing...") precisely in order to record why we do not
+     use the word, and an unstripped check called that a violation. A check that
+     cannot tell a word USED from a word DISCUSSED punishes the explanation and
+     would be silenced by deleting it, which is the opposite of what it is for. */
+  const code = (src) => String(src).replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
   for (const name of ['busyRow', 'paintBusy', 'paintRoomBusy']) {
-    assert.doesNotMatch(String(fn(name)), /typing|replying|composing|answering/i,
+    assert.doesNotMatch(code(fn(name)), /typing|replying|composing|answering/i,
       name + ' claims to know what the agent is working ON');
   }
+  /* 🔑 AND THE STRIPPER IS PROVED, or it could be silently eating everything:
+     the forbidden word in real code must still be caught. */
+  assert.match(code("const x = 'is typing'; /* typing */"), /typing/,
+    'the comment stripper ate the code as well, so this check certifies nothing');
+  assert.doesNotMatch(code('/* is typing */ const x = 1;'), /typing/,
+    'the comment stripper did not strip a comment');
 });
 
 test('only a card that positively says working produces the line', () => {
