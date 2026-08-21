@@ -4624,6 +4624,36 @@ function memWhy(ctx) {
   return why.charAt(0).toUpperCase() + why.slice(1) + '. ';
 }
 
+/**
+ * 🛑 A PERCENTAGE MEASURED AGAINST A GUESS SAYS SO NOW. This is the third time
+ * today the engine wrote an honest qualifier and the screen dropped it — after
+ * the memory cause (0.2.19) and the usage-limit claim (0.2.20) — and it is the
+ * one that hid best, because it sits on the HAPPY PATH. The other two showed up
+ * as an unhelpful sentence; this one shows up as a confident number.
+ *
+ * `limitFor` returns `assumed: true` for every model nobody has watched hit its
+ * ceiling — today Opus 5, Sonnet 5 and Fable 5, all assumed at 1M — and the
+ * engine even writes the wording ("measured, against a limit we have assumed
+ * rather than watched") and sets `ceilingAssumed`. `grep assumed web/index.html`
+ * matched one unrelated comment. The rule the assumption was allowed under is
+ * stated at ASSUMED_LIMIT: *"an assumed denominator is fine to show as long as
+ * nobody is told it was measured"*. Nobody was being told either way.
+ *
+ * ⚠️ THE ENGINE'S WORDS, WITH A SUBJECT ADDED. Its sentence was written to
+ * complete "this reading is …", so shipping it bare would read as a fragment.
+ * Adding the subject is not paraphrasing it; changing the clause would be.
+ *
+ * 📌 Silent when the ceiling was watched. "Measured against a limit we have
+ * watched it hit" is true and is not news; a disclaimer on every healthy card is
+ * how disclaimers stop being read.
+ */
+function assumedCeilingNote(ctx) {
+  if (!ctx || ctx.ceilingAssumed !== true) return '';
+  const why = typeof ctx.because === 'string' ? ctx.because.trim() : '';
+  if (!why) return '';
+  return ' This reading is ' + why + '.';
+}
+
 function pctOf(ctx) {
   return Number.isFinite(ctx.percent) ? ctx.percent : null;
 }
@@ -6381,9 +6411,10 @@ function memoryBox(a) {
     + '<span class="pct">' + pct + '%</span></div>'
     + (pct >= NEARLY_FULL
       ? '<p class="dhint" style="margin:12px 0 0;"><b>Memory nearly full.</b> ' + esc(a.name)
-        + ' will soon summarise its older context to keep working, and fine detail from earlier in the session may be compressed.</p>'
+        + ' will soon summarise its older context to keep working, and fine detail from earlier in the session may be compressed.'
+        + assumedCeilingNote(a.context) + '</p>'
       : '<p class="dhint" style="margin:12px 0 0;">Room to spare. ' + esc(a.name)
-        + ' is holding the whole session so far.</p>');
+        + ' is holding the whole session so far.' + assumedCeilingNote(a.context) + '</p>');
 }
 
 /* One conversation row (messaging screens, Mona Lisa's spec). Pure like

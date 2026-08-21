@@ -1966,3 +1966,47 @@ test('an agent with no registry entry is read from the folder it was launched in
     setPaneCapture(null);
   }
 });
+
+test('a Haiku agent gets a ceiling of its own, and it is not the 1M the others assume', () => {
+  /**
+   * 🛑 JOSH, 2026-08-21: two of eight agents read "Unknown" after the memory fix
+   * landed, and they were the only two Haiku agents on his board.
+   * `ASSUMED_LIMIT_MODELS` is `/^claude-(opus|sonnet|fable)-/` — no haiku — so
+   * `limitFor` returned null, `noCeiling` was set, and the badge fell back to
+   * Unknown while their memory was being read perfectly well.
+   *
+   * ⚠️ AND THE OBVIOUS FIX WAS THE DANGEROUS ONE. Adding haiku to that regex
+   * gives it 1M. Haiku 4.5 holds 200K (Anthropic's published figure), so an
+   * agent at 80% would have drawn at 16% and nobody would have known it was
+   * nearly full. This asserts the SIZE, not merely that a number appeared,
+   * because "a percentage renders" is exactly what a 5x-wrong denominator does.
+   */
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const name = 'haikuagent';
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const projects = nodePath.join(root, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(projects, { recursive: true });
+  // 20,000 tokens: 10% of 200K, and 2% of the 1M the other models assume.
+  fs.writeFileSync(nodePath.join(projects, 'sess-haiku.jsonl'),
+    JSON.stringify({ type: 'summary', sessionId: 'sess-haiku' }) + '\n'
+    + JSON.stringify({ cwd: dir,
+        message: { model: 'claude-haiku-4-5-20251001', usage: { input_tokens: 20000 } } }) + '\n',
+    'utf8');
+
+  setPaneSource(() => `${name}\t0.0\t2.1.227\t0\t${name}\t✳ Claude Code`);
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === name);
+    assert.ok(card, 'the fixture did not produce a card at all');
+    assert.equal(card.context.ceiling, 200000,
+      'a Haiku agent is being measured against the wrong ceiling');
+    assert.equal(card.context.percent, 10,
+      'the percentage does not match Haiku’s own limit; at 1M this would read 2');
+    assert.equal(card.context.ceilingAssumed, true,
+      'a published figure is still not a watched one, and the screen has to be able to say so');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
