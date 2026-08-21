@@ -4310,9 +4310,38 @@ const PRESSAY = {
    views cannot drift apart on what they say about the same agent. */
 function cardStOf(a) { return CARD_ST[a.state] || CARD_ST.unknown; }
 function taskLine(a) {
-  /* rate_limited MEANS waiting out a usage limit -- the pack's own line for
-     the state, said only when the state is the reason there is no task. */
-  return a.task || (a.state === 'rate_limited' ? 'Waiting out a usage limit' : 'no task showing');
+  /**
+   * 🛑 IT SAYS WHAT WAS SEEN, NOT WHAT IS TRUE OF THE ACCOUNT (kosmos#199,
+   * found by Mona Lisa). This read *"Waiting out a usage limit"*, and the
+   * comment justifying it said "rate_limited MEANS waiting out a usage limit".
+   * The state does not mean that. It is set in exactly one place:
+   *
+   *   status.js:1007  RATE_LIMIT_MARKERS.some((re) => re.test(tail))
+   *                   -> confidence: SCRAPED, because: 'its screen mentions a usage limit'
+   *
+   * A regex over the last 25 lines of a terminal. `CONFIDENCE.SCRAPED`'s own
+   * definition says it "may be UI chrome". An agent reading about rate limits,
+   * or a transcript quoting one, matches — and the board then asserts the
+   * person's account is throttled. The engine wrote the honest sentence and
+   * this line overwrote it with a stronger one.
+   *
+   * 🔑 AND IT READS `stateConfidence`, which is the general finding behind the
+   * card: `snapshot()` emits that field so a screen can decline to trust a
+   * state, status.test.js says so outright, and the page read it NOWHERE — the
+   * only field in that object it ignored, and the one saying how far to trust
+   * the rest.
+   *
+   * ⚠️ THE CONFIDENT ARM IS UNREACHABLE TODAY and is not dead code: it states
+   * the rule rather than today's single call site, so a structured source for
+   * this state (an API answer rather than a screen-scrape) strengthens the
+   * sentence by arriving, instead of needing this line found again. Both arms
+   * are tested; only one is reachable from the engine as it stands.
+   */
+  if (a.task) return a.task;
+  if (a.state !== 'rate_limited') return 'no task showing';
+  return a.stateConfidence === 'scraped'
+    ? 'Its screen mentions a usage limit'
+    : 'Waiting out a usage limit';
 }
 function modelLine(a) {
   /* Provider-first ("Claude Opus 5"), guarded so a modelName that already
