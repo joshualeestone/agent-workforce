@@ -223,7 +223,17 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
              to right: what you are running, whether it is current, what to do
              about it. Wrapping is allowed because the middle part is a whole
              sentence on a narrow window. */
-          display: flex; align-items: center; gap: .75em; flex-wrap: wrap; }
+          display: flex; align-items: center; gap: .75em; flex-wrap: wrap;
+          /* 🔑 PINNED (Josh, 2026-08-21): "lock the version and the Check Now
+             to the bottom of the page". Sticky rather than fixed, so it still
+             occupies its place in the flow and cannot overlap the last row of
+             content the way a fixed bar does at the end of a long board.
+             ⚠️ IT NEEDS ITS OWN BACKGROUND. Sticky elements paint over what
+             scrolls beneath them, and a transparent one lets cards slide
+             through the version number. */
+          position: sticky; bottom: 0; z-index: 3;
+          background: var(--k-bg, var(--bg, #faf9f7));
+          padding: 8px 0; }
   .build b { font-weight: 600; color: var(--label-2); letter-spacing: .04em; }
   /* ⚠️ #upd-line IS A <b> FOR THE LIVE REGION, NOT FOR EMPHASIS, so it opts out
      of the .build b treatment above: that rule dresses "BETA", and a status
@@ -1305,6 +1315,14 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .dmbusy { display: flex; align-items: center; gap: 8px;
           font-size: .875rem; color: var(--k-ink-2); margin: 10px 0 0; }
 .dmbusy .msg-av { width: 22px; height: 22px; font-size: .625rem; flex: 0 0 auto; }
+/* The room's stack (#176). It holds one `.dmbusy` per working member and
+   inherits every rule above, so the two surfaces cannot drift apart visually.
+   ⚠️ The FIRST line loses the top margin: `.dmbusy` carries 10px so it clears
+   the agent page's message box, and here the container already sits in the gap
+   between the thread and the composer. */
+.dmbusy-room { margin: 10px 0 0; }
+.dmbusy-room .dmbusy { margin: 6px 0 0; }
+.dmbusy-room .dmbusy:first-child { margin-top: 0; }
 .dmoff { margin-top: 12px; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2);
   border-left: 3px solid var(--k-rule); padding-left: 12px; }
 /* ⚠️ The question box is NOT red. It is a thing to answer, not a thing that has
@@ -2711,11 +2729,15 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          never. "Working" survives being wrong about the subject; "replying"
          does not. (Mona Lisa, 2026-08-21.)
          ⚠️ AND IT IS AN INSTRUMENT HERE, NOT AN AFFORDANCE, which is why the
-         under-claim matters more rather than less. On this box nothing else
-         comes back at all (#175), so a person is reading it as EVIDENCE:
-         working + an empty box is #175 happening in front of them; never
-         working means the message never landed. It separates two failures that
-         look identical, which is what Josh lacked for a day.
+         under-claim matters more rather than less.
+         ⚠️ THIS PARAGRAPH USED TO SAY "on this box nothing else comes back at
+         all (#175)", and 0.2.13 made that false without touching this file: an
+         agent can now answer here with `kosmos reply`. The reasoning it
+         supported still holds and is why the correction is a rewrite rather
+         than a deletion — working plus an empty box is now "it is composing, or
+         it will answer in its own window", and never-working still means the
+         message never landed. It separates two failures that look identical,
+         which is what Josh lacked for a day.
          ⚠️ UNKNOWN SHOWS NOTHING — not working, not idle. An agent we cannot
          read must not be rendered as either. Same rule as the stale badge and
          the memory caption. -->
@@ -3577,6 +3599,14 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            real delivery state -- a post to three that reaches two must
            never render as sent. -->
       <div class="thread" id="pj-room"></div>
+      <!-- ⚠️ THE ROOM'S HALF OF THE SAME SIGNAL (#176), mounted where the agent
+           page mounts its own: between the thread and the composer, so it sits
+           against the box you are about to type into.
+           ⚠️ A ROOM HAS MEMBERS, so this can name more than one, and it draws
+           one line per working member rather than a summary. "2 agents are
+           working" is a count; the point of this signal is WHICH one, and the
+           agent page's grammar (face, dots, name) already answers that. -->
+      <div class="dmbusy-room" id="pj-busy" hidden></div>
       <!-- ⚠️ NO `+` BUTTON AND NO "drop a file anywhere" SENTENCE, and their
            absence is the decision rather than an omission. The pack draws both
            (.attachbtn, and a composerhint whose first half promises drop-to-
@@ -4028,7 +4058,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            pass; her spec placed the line "in Settings" without naming a
            card). The version line carries her four states plus the two
            review-added arms (boot-checking; reached-but-unreadable),
-           Check now clears the Later note, and the runs-in-background
+           Check for Update clears the Later note, and the runs-in-background
            sentence sits beside the version per her spec. A Stop button is
            deliberately ABSENT: kosmos stop kills the BOARD process
            only; the agents live in tmux under launchd and keep working,
@@ -4197,7 +4227,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
        this button (and any focus resting on it) twice a minute. -->
   <span id="build"></span>
   <b id="upd-line" role="status"></b>
-  <button class="btn-quiet" type="button" id="upd-btn" hidden>Check now</button>
+  <button class="btn-quiet" type="button" id="upd-btn" hidden>Check for Update</button>
 </div>
 
 <script>
@@ -4932,10 +4962,13 @@ function renderUpdateToast(u) {
 }
 /* The update card (Settings): her four states, painted from the SAME
    status payload the toast reads, so the two surfaces can never disagree.
-   A Check now in flight owns the card; poll paints stand off until it
+   A check in flight owns the card; poll paints stand off until it
    lands (UPD_CHECKING), so the Checking sentence is never overwritten by
    a stale poll mid-ask. */
 let UPD_CHECKING = false;
+/* Has the person pressed the button in this session? Gates the resting
+   "Up to date." only; see the arm that reads it. */
+let UPD_ASKED = false;
 function paintUpdateCard(running, offer, look) {
   if (UPD_CHECKING) return;
   const line = document.getElementById('upd-line');
@@ -4955,7 +4988,7 @@ function paintUpdateCard(running, offer, look) {
     if (line.textContent !== text) line.textContent = text;
   };
   // The button gets the same guard: focus can be resting on it after a
-  // Check now, and replacing its text node is the same mutation class.
+  // a check, and replacing its text node is the same mutation class.
   const putBtn = (text) => { if (btn.textContent !== text) btn.textContent = text; };
   btn.hidden = false;
   btn.disabled = false;
@@ -4968,12 +5001,20 @@ function paintUpdateCard(running, offer, look) {
     // that has not happened (boot rendered "could not reach" for the
     // seconds before the first answer landed).
     put(v + 'Checking.');
-    putBtn('Check now');
+    putBtn('Check for Update');
     btn.dataset.act = 'check';
     btn.disabled = true;
   } else if (look && look.reached && look.readable) {
-    put(v + 'Up to date.');
-    putBtn('Check now');
+    /* 🔑 "UP TO DATE" IS THE ANSWER TO A QUESTION, and until somebody asks it
+       there is no question. Josh, 2026-08-21, on the line this replaces:
+       *"Instead of just saying 'Up to date. [Check Now]' lets say 'Beta Version
+       0.X.XX [Check for Update]'"*. So at rest the footer is the version and
+       the control; the verdict appears when it has been asked for.
+       ⚠️ THE OTHER ARMS ARE UNTOUCHED. An offer, an unreadable answer and an
+       unreachable host are all things a person needs to know WITHOUT asking,
+       and suppressing those would be hiding news rather than removing noise. */
+    put(UPD_ASKED ? 'Up to date.' : '');
+    putBtn('Check for Update');
     btn.dataset.act = 'check';
   } else if (look && look.reached && !look.readable) {
     // The captive-portal shape: the host answered, the answer was not a
@@ -4991,7 +5032,7 @@ function paintUpdateCard(running, offer, look) {
     // No look at all (a caller with no data yet): neutral, never a
     // failure that has not happened -- the same rule as the boot arm.
     put(v + 'Checking.');
-    putBtn('Check now');
+    putBtn('Check for Update');
     btn.dataset.act = 'check';
     btn.disabled = true;
   }
@@ -5008,12 +5049,13 @@ async function updCheckNowClick() {
     document.getElementById('uc-no').focus();
     return;
   }
-  /* Check now does three things, in the spec's order: clears the Later
+  /* The check does three things, in the spec's order: clears the Later
      note (the trap: Later silenced a version FOREVER, across relaunches),
      asks the host immediately (TTL bypassed server-side), updates the
      line. Clearing first means a found update is OFFERED again, toast
      included. */
   try { localStorage.removeItem('kosmos-update-later'); } catch { /* the check still runs */ }
+  UPD_ASKED = true;
   UPD_CHECKING = true;
   line.textContent = (LAST_VERSION ? 'Kosmos ' + LAST_VERSION + '. ' : 'Kosmos. ') + 'Checking.';
   btn.disabled = true;
@@ -5049,7 +5091,7 @@ async function updCheckNowClick() {
   // The Later note is gone, so a live offer returns to the toast too.
   renderUpdateToast(out.offer);
   // The keyboard's place is restored: disabling the focused button had
-  // dropped focus to <body>, and the person who pressed Check now was
+  // dropped focus to <body>, and the person who pressed the button was
   // left nowhere while the answer landed (announced by the line's
   // role="status").
   btn.focus();
@@ -6240,6 +6282,56 @@ function memoryBox(a) {
  * empty rather than guessing. Only a card that positively says `working`
  * produces the line.
  */
+/**
+ * The row itself: face, dots, sentence. ONE builder, because the room grew the
+ * same signal (#176) and a second copy of this markup is how the two surfaces
+ * start disagreeing about what "working" looks like.
+ *
+ * ⚠️ PURE, and it takes the card rather than a name: every input it needs is on
+ * the card, so neither caller can hand it a name that belongs to a different
+ * agent's avatar.
+ */
+function busyRow(fresh, name) {
+  const who = name || (fresh && fresh.name) || 'This agent';
+  const face = (fresh && fresh.hasAvatar)
+    ? '<div class="msg-av" aria-hidden="true"><img src="/api/agent/'
+      + encodeURIComponent(fresh.sessionName) + '/avatar" alt=""></div>'
+    : '<div class="msg-av" aria-hidden="true" style="background:' + discTint(who)
+      + ';color:' + discInk(who) + '">' + esc(initials(who)) + '</div>';
+  return face
+    + '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>'
+    + '<span>' + esc(who) + ' is working&hellip;</span>';
+}
+
+/**
+ * The ROOM's half (#176). Josh asked for it the moment he saw the agent page's:
+ * *"I'm not getting the status. It shows an agent is writing a message inside
+ * of projects, is that only active in the view agent dialog box right now?"*
+ *
+ * ⚠️ IT READS THE SAME CARDS THE BOARD DRAWS, never a second source. `LAST` is
+ * the poll's own agent list, so a member the board shows as working and a
+ * member this line shows as working cannot disagree.
+ *
+ * ⚠️ AND THE DEFAULT IS NOTHING, for every reason the agent page's version
+ * gives: a member we cannot read, a member that is gone, and a poll that has
+ * not landed yet all render empty. Only `working` produces a line.
+ */
+function paintRoomBusy(members) {
+  const el = document.getElementById('pj-busy');
+  if (!el) return;
+  const names = Array.isArray(members) ? members : [];
+  /* Ordered by the MEMBER list rather than by the board, so the lines do not
+     reshuffle under a person's eyes every time the poll returns a different
+     order. */
+  const working = names
+    .map((n) => (LAST || []).find((a) => a && a.sessionName === n))
+    .filter((a) => a && a.state === 'working');
+  el.hidden = !working.length;
+  el.innerHTML = working.length
+    ? working.map((a) => '<p class="dmbusy">' + busyRow(a, a.name) + '</p>').join('')
+    : '';
+}
+
 function paintBusy(fresh, name) {
   const el = document.getElementById('d-busy');
   if (!el) return;
@@ -6250,16 +6342,8 @@ function paintBusy(fresh, name) {
      initials fallback — Josh asked for the face and a second way of drawing one
      would drift from the board's. `aria-hidden` because the sentence beside it
      already names the agent, and a screen reader should not hear the name
-     twice. */
-  const who = name || (fresh && fresh.name) || 'This agent';
-  const face = (fresh && fresh.hasAvatar)
-    ? '<div class="msg-av" aria-hidden="true"><img src="/api/agent/'
-      + encodeURIComponent(fresh.sessionName) + '/avatar" alt=""></div>'
-    : '<div class="msg-av" aria-hidden="true" style="background:' + discTint(who)
-      + ';color:' + discInk(who) + '">' + esc(initials(who)) + '</div>';
-  el.innerHTML = face
-    + '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>'
-    + '<span>' + esc(who) + ' is working…</span>';
+     twice. Now shared with the room's line through `busyRow`. */
+  el.innerHTML = busyRow(fresh, name);
 }
 
 function convoRow(r, agentName) {
@@ -11256,6 +11340,9 @@ function paintOneProject() {
   // instead of once per member (the three-identical-sentences weight the
   // pack comparison surfaced). Mixed or singleton rosters keep per-member.
   const roster = p.agents || [];
+  /* #176's room half, painted from the SAME roster the members column is drawn
+     from a line below, so the two cannot disagree about who is on the project. */
+  paintRoomBusy(roster.map((a) => (a && a.sessionName) || a));
   const sharedTold = pjSharedTold(roster);
   setIfChanged(document.getElementById('pj-one-agents'), roster.length
     ? roster.map((m) => pjMember(m, !!sharedTold)).join('')

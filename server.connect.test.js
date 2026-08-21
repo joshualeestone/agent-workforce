@@ -327,7 +327,7 @@ test('start on an already-connected machine answers connected and runs nothing',
 function pageFunction(name, prelude = '') {
   const raw = fs.readFileSync(path.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  const start = script.indexOf('function ' + name);
+  const start = script.indexOf('function ' + name + '(');
   assert.ok(start > -1, name + ' vanished from the page');
   let depth = 0; let end = -1;
   for (let k = script.indexOf('{', start); k < script.length; k += 1) {

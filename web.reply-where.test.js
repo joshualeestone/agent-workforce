@@ -107,10 +107,27 @@ test('it says WORKING, and never that the agent is replying to you', () => {
    * surface where nothing comes back at all (#175), so a person reads the line
    * as evidence rather than as decoration.
    */
-  const src = fn('paintBusy');
-  assert.match(src, /is working/, 'the line no longer says what it can see');
-  assert.doesNotMatch(src, /typing|replying|composing|answering/i,
-    'the line claims to know what the agent is working ON, which the reading does not support');
+  /* ⚠️ RE-POINTED WHEN THE ROOM GREW THE SAME LINE (#176): the sentence moved
+     into `busyRow`, the shared builder, and this read `paintBusy`'s source —
+     so it went red for a refactor that changed no behaviour, and would have
+     gone GREEN for one that kept the words in paintBusy and shipped a room line
+     saying something else entirely.
+     🔑 So it reads the BUILDER, and the vocabulary rule below is checked over
+     every function that can put words on either surface — which is the property
+     the test is actually about.
+     ⚠️ Still a source read, said plainly: `fn` returns text, not a callable,
+     so this pins the words rather than the output. It is the same instrument
+     the rest of this file uses; what changed is that it is now aimed at the
+     function that holds the sentence and at all three that could reintroduce
+     the claim. */
+  assert.match(fn('busyRow'), /is working/, 'the line no longer says what it can see');
+  /* And the vocabulary rule holds over the source of every function that can
+     put words on either surface, so a future arm cannot introduce the claim on
+     a path this render does not reach. */
+  for (const name of ['busyRow', 'paintBusy', 'paintRoomBusy']) {
+    assert.doesNotMatch(String(fn(name)), /typing|replying|composing|answering/i,
+      name + ' claims to know what the agent is working ON');
+  }
 });
 
 test('only a card that positively says working produces the line', () => {
