@@ -121,6 +121,14 @@ const GROUP_BECAUSE = new Map([
    * sit after "We could not update these agents about this folder: " and
    * nowhere else. The KEYS are the engine's verbatim singulars and are
    * authored at call sites in this file, `you.js` and `workerfile.js`.
+   *
+   * ⚠️ AND "ALL NINE" IS AN INSTRUCTION, NOT A CLAIM ABOUT WHAT WAS DONE. The
+   * row below saying "we cannot tell they are THOSE agents" was carried over
+   * from the previous frame and reads as a second, different set now that the
+   * frame says THESE agents. Its singular twin is consistent ("this name ...
+   * this agent"). Flagged to the designer rather than reworded here, because
+   * the value is hers, and recorded here because an earlier version of this
+   * comment implied every row had been re-read against the new frame.
    */
   ['it has no folder of its own on this computer yet',
     'none of them has a folder of its own on this computer yet'],

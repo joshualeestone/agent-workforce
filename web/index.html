@@ -3098,7 +3098,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <div class="stale-note" id="made-bg" hidden></div>
     <div class="first-action" id="made-first" hidden></div>
     <div class="frow" style="margin-top: var(--space-7);">
-      <button class="btn" id="made-done" type="button" hidden>See it on the board</button>
+      <button class="btn" id="made-done" type="button" hidden>See it under Agents</button>
       <button class="btn" id="made-retry" type="button" hidden>Start over</button>
     </div>
   </div>
@@ -4802,7 +4802,7 @@ async function tick() {
     if (start) start.hidden = true;
     const gone = document.getElementById('d-remove-hint');
     if (gone) {
-      gone.textContent = 'This agent is no longer on the board. It may have been removed somewhere else, '
+      gone.textContent = 'This agent is no longer under Agents. It may have been removed somewhere else, '
         + 'or it may have stopped. Nothing here can change it until it is back.';
     }
     PANEL_WITHDRAWN = true;

@@ -1664,9 +1664,19 @@ test('the map is checked in BOTH directions: a new engine sentence cannot skip i
    * The map declaration is stripped for the same reason it is stripped above:
    * scanning it would hand this pin a copy of its own answer.
    */
+  /* ⚠️ COMMENTS ARE STRIPPED FIRST, and that is not tidiness. The first
+     version of this scan took a fixed 600-character window after each
+     `TOLD.COULD_NOT` and a ten-line docblock sat inside one of those windows,
+     so it ate the space before the strings and the scan found 5 of 9 in one
+     file and 6 of 9 in the other. Its CONTROL asserted `>= 3` and passed.
+     I had rewritten this scan an hour earlier to stop it being keyed on a
+     PHRASE, and keyed it on COMMENT LENGTH instead. */
+  const stripComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/^\s*\/\/.*$/gm, ' ');
   const verdictsIn = (src) => {
     const out = [];
-    for (const part of src.split('TOLD.COULD_NOT').slice(1)) {
+    for (const part of stripComments(src).split('TOLD.COULD_NOT').slice(1)) {
       for (const m of part.slice(0, 600).matchAll(/'([^'\n]{15,})'/g)) {
         if (/ /.test(m[1]) && !/\$\{/.test(m[1])) out.push(m[1]);
       }
@@ -1678,21 +1688,47 @@ test('the map is checked in BOTH directions: a new engine sentence cannot skip i
   const mapEnd = projSrc.indexOf(']);', mapStart);
   assert.ok(mapStart > -1 && mapEnd > mapStart, 'could not locate GROUP_BECAUSE; re-point this pin');
   const stripped = projSrc.slice(0, mapStart) + projSrc.slice(mapEnd);
+  const mapBody = projSrc.slice(mapStart, mapEnd);
   const youSrc = fs.readFileSync(path.join(__dirname, 'you.js'), 'utf8');
+  const wfSrc = fs.readFileSync(path.join(__dirname, 'workerfile.js'), 'utf8');
+  const seen = new Set();
   for (const [where, src] of [['projects.js', stripped], ['you.js', youSrc]]) {
     const authored = verdictsIn(src);
-    // CONTROL: the scan actually found sentences. An expression matching
-    // nothing satisfies the loop vacuously, which is the failure this whole
-    // test exists to prevent, one level down. It is the assertion that caught
-    // the suffix version dying, so it earns its place twice.
-    assert.ok(authored.length >= 3,
+    // CONTROL: the scan found sentences at all. A scan matching nothing
+    // satisfies the loop vacuously, which is the failure this test exists to
+    // prevent one level down, and it is what caught the previous version
+    // dying.
+    assert.ok(authored.length >= 1,
       'CONTROL: found ' + authored.length + ' authored verdicts in ' + where
       + '; the scan is not looking at the right text');
     for (const singular of authored) {
+      seen.add(singular);
       assert.ok(projects.groupBecause(singular),
         'a verdict authored in ' + where + ' has no plural row, so its group line loses its reason: ' + singular);
     }
   }
+  /* 🛑 THE COVERAGE CONTROL, and the reason it is exact rather than a floor.
+     A `>= 3` control passes while the scan quietly loses half the set, which is
+     exactly what happened: 5 of 9 in one file, 6 in the other, green. Every key
+     the map holds is authored SOMEWHERE in these two modules, so the union of
+     what the scan found must contain all of them. If the scan degrades again,
+     for any reason, this is what says so and names the ones it dropped. */
+  const keys = [...mapBody.matchAll(/^\s*\['([^']+)',$/gm)].map((m) => m[1]);
+  assert.ok(keys.length >= 9, 'CONTROL: parsed ' + keys.length + ' map keys; the key scan is broken too');
+  /* ⚠️ ONE NAMED EXCEPTION, AND IT CARRIES ITS OWN PROOF. `workerfile.js`
+     authors the folder verdict, and it is not scanned above because its
+     verdicts are not `TOLD.COULD_NOT` returns: it has ten `because:` literals
+     and only this one is a told-verdict, so scanning it would fail nine times
+     for the wrong reason. The forward pin knows the same thing (`authorOf`).
+     The exception is asserted rather than assumed, so it fails if that
+     sentence moves out of workerfile. */
+  const FOLDER = 'it has no folder of its own on this computer yet';
+  assert.ok(wfSrc.includes(FOLDER),
+    'the folder verdict is no longer authored in workerfile.js; re-point this exception');
+  assert.ok(projects.groupBecause(FOLDER), 'the folder verdict has no plural row');
+  const missed = keys.filter((k) => !seen.has(k) && k !== FOLDER);
+  assert.deepEqual(missed, [],
+    'the verdict scan never saw these mapped singulars, so nothing checks whether they map: ' + missed.join(' | '));
 });
 
 test('groupBecause NEVER invents: unmapped, null, and non-string yield null', () => {
