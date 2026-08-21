@@ -1822,9 +1822,35 @@ function readModel(agentName, exactSession) {
   if (!file) return { model: null, confidence: CONFIDENCE.NONE };
   const { text } = tailBytes(file, 65536);
   if (!text) return { model: null, confidence: CONFIDENCE.NONE };
-  const matches = [...text.matchAll(/"model":"([^"]+)"/g)];
+  /**
+   * 🛑 `<synthetic>` IS NOT A MODEL, AND IT IS THE LAST ONE IN THE FILE EXACTLY
+   * WHEN SOMEBODY IS LOOKING.
+   *
+   * Claude Code writes `"model":"<synthetic>"` on rows it generates itself, and
+   * taking the last match blindly rendered that straight onto the page. Josh,
+   * 2026-08-21, seconds after switching an agent from Fable to Opus: **"Right
+   * now: Claude <synthetic>"**. The restart had worked — her window said
+   * `Opus 5 · Claude Max` — and the panel reported a model that does not exist,
+   * at the one moment the person is checking whether the change took.
+   *
+   * ⚠️ MEASURED, NOT GUESSED, across the real transcript tree on this machine:
+   *   claude-opus-5   19500     claude-fable-5   18413
+   *   claude-opus-4-8   520     opus                45
+   *   <synthetic>        45     (109 across all projects)
+   * `<synthetic>` is the ONLY bracketed value that occurs. The bracket shape is
+   * the rule rather than the literal string, because a sentinel written that way
+   * is a placeholder by construction and a model id never is — but the literal
+   * is what was observed, and if a second sentinel ever appears it should be
+   * added here with its own count rather than assumed to match.
+   *
+   * 📌 SKIPS BACKWARDS RATHER THAN FILTERING FORWARDS: the most recent REAL
+   * model is what the agent is running, and synthetic rows sit on top of it.
+   */
+  const matches = [...text.matchAll(/"model":"([^"]+)"/g)]
+    .map((m) => m[1])
+    .filter((v) => !/^<.*>$/.test(v));
   if (!matches.length) return { model: null, confidence: CONFIDENCE.NONE };
-  return { model: matches[matches.length - 1][1], confidence: CONFIDENCE.STRUCTURED };
+  return { model: matches[matches.length - 1], confidence: CONFIDENCE.STRUCTURED };
 }
 
 /**

@@ -2155,3 +2155,45 @@ test('the wording Claude Code actually uses for a spent limit reads as paused, n
     setPaneCapture(null);
   }
 });
+
+test('a synthetic placeholder is not reported as the model an agent runs on', () => {
+  /**
+   * 🛑 JOSH, 2026-08-21, SECONDS AFTER SWITCHING AN AGENT FROM FABLE TO OPUS:
+   * **"Right now: Claude <synthetic>"**. The switch had worked — her window read
+   * `Opus 5 · Claude Max` — and the panel named a model that does not exist, at
+   * the one moment a person is checking whether the change took.
+   *
+   * Claude Code stamps `"model":"<synthetic>"` on rows it generates itself, and
+   * a usage-limit notice is exactly such a row. `readModel` takes the LAST match
+   * in the tail, so the placeholder won.
+   *
+   * ⚠️ THE ORDER IS THE TEST. A fixture with the placeholder anywhere but LAST
+   * would pass against the old code too, which is the whole defect.
+   */
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const name = 'synth';
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const projects = nodePath.join(root, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(nodePath.join(projects, 'sess-synth.jsonl'),
+    JSON.stringify({ cwd: dir, message: { model: 'claude-opus-5', usage: { input_tokens: 1000 } } }) + '\n'
+    // The system-generated row lands AFTER the real one, which is what made the
+    // placeholder the last match.
+    + JSON.stringify({ cwd: dir, message: { model: '<synthetic>' } }) + '\n',
+    'utf8');
+
+  setPaneSource(() => `${name}\t0.0\t2.1.239\t0\t${name}\t✳ Claude Code`);
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === name);
+    assert.ok(card, 'the fixture did not produce a card at all');
+    assert.equal(card.model, 'claude-opus-5',
+      'a placeholder Claude Code writes on its own rows is being shown as the agent’s model');
+    assert.doesNotMatch(String(card.modelName || ''), /synthetic/,
+      'the placeholder reached the name a person reads');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
