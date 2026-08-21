@@ -48,7 +48,28 @@ function extract(name) {
   const body = PAGE.slice(at, i + 1);
   assert.ok(body.length > 40 && from > at, `${name} extracted as something too small to be it`);
   // eslint-disable-next-line no-new-func
-  return new Function(`${body}; return ${name};`)();
+  /* ⚠️ DEPENDENCIES COME FROM THE PAGE, never restated here. `memUnknown` now
+     composes the engine's own `because` through `memWhy`, and a hand-written
+     stand-in would be [[a-check-containing-a-copy]]: the test would pass while
+     the shipped helper said something else. `deps` is spliced in from the same
+     file, so what runs here is what runs in the browser. */
+  const deps = (name === 'memUnknown' ? [extractSource('memWhy')] : []).join('\n');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${deps}\n${body}; return ${name};`)();
+}
+
+/* The same brace-matched slice, returned as SOURCE rather than as a callable,
+   so one page function can be spliced in as another's dependency. */
+function extractSource(name) {
+  const at = PAGE.indexOf(`function ${name}(`);
+  assert.notEqual(at, -1, `${name} is not in the page at all`);
+  let depth = 0;
+  let i = PAGE.indexOf('{', at);
+  for (; i < PAGE.length; i++) {
+    if (PAGE[i] === '{') depth += 1;
+    else if (PAGE[i] === '}') { depth -= 1; if (depth === 0) break; }
+  }
+  return PAGE.slice(at, i + 1);
 }
 
 const memUnknown = extract('memUnknown');
@@ -189,7 +210,10 @@ test('no surface still hardcodes the old word, ANYWHERE EXCEPT the one place tha
    of them would put a copy back into the test, which is the thing this test was
    rewritten to stop doing. */
 const memoryBox = (function () {
-  const deps = ['esc', 'memUnknown', 'pctOf', 'memBand', 'memoryBox'];
+  /* `memWhy` joined the list when memUnknown started composing the engine's own
+     `because` (Josh, 2026-08-21). Listed rather than stubbed, for the reason
+     the comment above gives. */
+  const deps = ['esc', 'memWhy', 'memUnknown', 'pctOf', 'memBand', 'memoryBox'];
   // eslint-disable-next-line no-new-func
   return new Function(
     'const NEARLY_FULL = 80, WARM = 60;\n' + deps.map(sliceFn).join('\n') + '; return memoryBox;',
@@ -334,4 +358,44 @@ test('a percent we could not read is not reported as a limit we do not know', ()
   // explanation is not.
   assert.equal(noLimit.word, 'Unknown');
   assert.notEqual(noLimit.lead, unreadable.lead, 'the two share an explanation as well as a word');
+});
+
+test('the unknown box says WHY, in the engine’s own words', () => {
+  /**
+   * 🔑 JOSH, 2026-08-21: every agent on his machine read "memory could not be
+   * read", and the sentence gave him nothing to do about it. The engine has
+   * returned a `because` on every one of these branches all along and this
+   * screen threw it away — while `pjMember` states the house rule outright:
+   * everywhere else in this app an unknown says why.
+   */
+  const u = memUnknown({ tokens: null, percent: null, notYet: false,
+    because: 'we cannot find a transcript for it' });
+  assert.match(u.note, /^We cannot find a transcript for it\. /,
+    'the cause the engine gave is still being discarded');
+  assert.match(u.aria, /We cannot find a transcript for it/,
+    'a screen reader is told less than the screen says');
+
+  /* ⚠️ VERBATIM apart from the first letter. Paraphrasing an engine sentence is
+     how two surfaces come to disagree, so the test pins the engine's wording
+     rather than a rewrite of it. */
+  assert.ok(u.note.startsWith('We cannot find a transcript for it. '),
+    'the engine sentence was reworded on its way to the screen');
+
+  /* 🛑 AND THE TWO BRANCHES STAY DISTINGUISHABLE WITH NO CAUSE AT ALL. Dropping
+     the old hedge outright made this note identical to the `notYet` one — two
+     different states saying one sentence, which is the defect this whole
+     function exists to prevent. Caught by the sibling test; pinned here. */
+  const bare = memUnknown({ tokens: null, percent: null, notYet: false });
+  const notYet = memUnknown({ tokens: null, percent: null, notYet: true });
+  assert.notEqual(bare.note, notYet.note,
+    'with no cause, "could not read" and "nothing recorded yet" say the same thing');
+  assert.equal(bare.aria, 'Memory could not be read.',
+    'a missing cause left a trailing space or an invented reason');
+
+  /* One of the real causes contradicts the old hedge outright, which is why the
+     cause replaces it rather than joining it. */
+  const empty = memUnknown({ tokens: null, percent: null, notYet: false,
+    because: 'usage data was empty' });
+  assert.doesNotMatch(empty.note, /not the same as it being empty/,
+    'the screen argues with itself: "Usage data was empty. That is not the same as it being empty."');
 });
