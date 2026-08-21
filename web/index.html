@@ -8373,9 +8373,20 @@ async function watchForAgent(name, result, attempt) {
       + 'appear under Agents on its own: this screen stopped waiting, it did not stop it.'
       // ⚠️ This is the screen where somebody is most likely to want an agent
       // gone, and saying "it is set to keep trying" without saying where is how
-      // a person ends up with a job they cannot find. (This used to add "because
-      // removing an agent is still a manual job" -- Remove exists now. What is
-      // still manual is DELETE, which is why the README recipe stays.)
+      // a person ends up with a job they cannot find.
+      //
+      // Remove exists. DELETE is still manual, and there is no route to it from
+      // here at all: the board is built from live panes, so an agent that never
+      // came up has no card and the Remove control lives on the card. That is
+      // why the offer below is CONDITIONAL ("if it appears under Agents") and
+      // why the other arm says we cannot clear it out yet rather than naming a
+      // recipe. The gap itself is kosmos#127.
+      //
+      // 📌 This comment used to end "which is why the README recipe stays". The
+      // recipe went in the same commit that rewrote the lines below it, so the
+      // comment explained a decision that had been reversed directly above the
+      // lines reversing it. The FACT in it was still true and only the
+      // CONCLUSION had died, which is why this keeps the fact.
       // ⚠️ The folder comes from the ANSWER, not from a path built here. This
       // page guessed `~/work/workers/<name>`, which is wrong on any machine
       // started with AGENT_WORKFORCE_WORKERS set — pointing a stuck person at a
