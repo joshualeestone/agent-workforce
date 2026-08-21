@@ -4546,9 +4546,47 @@ function memUnknown(ctx) {
         note: 'Nothing here can tell you how much room is left.' }
     : { notYet: false,
         word: 'Unknown',
-        aria: 'Memory could not be read.',
+        /**
+         * 🔑 IT SAYS WHY NOW, AND THE REASON WAS ALWAYS ON THE CARD. Josh,
+         * 2026-08-21: every agent on his machine read "memory could not be
+         * read", and the sentence gave him nothing to do about it. The engine
+         * has returned a `because` on every one of these branches all along
+         * ("we cannot find a transcript for it", "usage data was empty", …) and
+         * this screen discarded it — while `pjMember` one file over states the
+         * house rule outright: *everywhere else in this app an unknown says
+         * why*. The memory box was the exception.
+         *
+         * ⚠️ THE ENGINE'S SENTENCE SHIPS VERBATIM, first letter aside.
+         * Paraphrasing an engine sentence is how two surfaces drift, and this
+         * one is already worded for a person.
+         *
+         * 🛑 AND "THAT IS NOT THE SAME AS IT BEING EMPTY" IS GONE ON PURPOSE,
+         * not lost. It was a generic hedge standing in for a cause we were not
+         * printing, and TWO of the real causes contradict it outright: "Usage
+         * data was empty. That is not the same as it being empty." reads as the
+         * screen arguing with itself. A specific fact replaces a generic
+         * disclaimer; the `notYet` branch above already ships exactly this
+         * shorter shape for the same reason.
+         */
+        aria: ('Memory could not be read. ' + memWhy(ctx)).trim(),
         lead: 'memory could not be read.',
-        note: 'That is not the same as it being empty. Nothing here can tell you how much room is left.' };
+        /* ⚠️ THE OLD HEDGE IS THE FALLBACK, NOT DELETED, and a test caught why:
+           with no `because` at all, dropping it made this note IDENTICAL to the
+           `notYet` note above — two different states saying the same sentence,
+           which is the exact defect this whole function exists to prevent. The
+           cause replaces the hedge only when there IS a cause. */
+        note: memWhy(ctx)
+          ? memWhy(ctx) + 'Nothing here can tell you how much room is left.'
+          : 'That is not the same as it being empty. Nothing here can tell you how much room is left.' };
+}
+
+/* The engine's own sentence, capitalised and closed, or nothing at all when it
+   did not give one. Never invents a cause: a missing `because` yields an empty
+   string and the note reads exactly as it did before this existed. */
+function memWhy(ctx) {
+  const why = ctx && typeof ctx.because === 'string' ? ctx.because.trim() : '';
+  if (!why) return '';
+  return why.charAt(0).toUpperCase() + why.slice(1) + '. ';
 }
 
 function pctOf(ctx) {
