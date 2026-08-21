@@ -280,6 +280,13 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    0,1,0), which is what stops the badge dropping a line and centring itself
    when it joined the name row. */
 .dnamerow .detail-state { margin: 0; }
+/* The agent's own words, marked as a quotation rather than as our sentence: a
+   rule down the left, the terminal's own face, and no italics (this is copied
+   text, not emphasis). */
+.detail-said { margin: 6px 0 0; padding: 6px 0 6px 12px;
+               border-left: 2px solid var(--k-rule); color: var(--k-ink-2);
+               font: .8125rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+               white-space: pre-wrap; overflow-wrap: anywhere; }
 /* What the agent is doing, beside the badge rather than inside it. Reads as
    the quieter half of the pair: the badge is the state, this is the subject. */
 /* `min-width: 0` WITH the overflow pair, or it does nothing: on its own the
@@ -2645,6 +2652,12 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <div id="d-instr-stale" class="stale-note" role="status" aria-live="polite" hidden></div>
       <div class="detail-meta" id="d-meta"></div>
       <div class="detail-why" id="d-why" hidden></div>
+      <!-- 🔑 WHAT THE SCREEN SAID, not what we concluded from it (Josh,
+           2026-08-21: "is there any way we could show that her usage is full").
+           Kosmos cannot know an account is spent; it saw a sentence. So the
+           sentence is shown, which names the model and carries the vendor's own
+           remedies, and stays true if that wording changes under us. -->
+      <blockquote class="detail-said" id="d-said" hidden></blockquote>
       <!-- The relationship read from the agent's end, in the header per the
            pack: on this page it is part of who the agent is, not a section
            you act in. -->
@@ -4339,11 +4352,31 @@ function taskLine(a) {
    * sentence by arriving, instead of needing this line found again. Both arms
    * are tested; only one is reachable from the engine as it stands.
    */
+  /**
+   * 🛑 THE STATE OUTRANKS THE TITLE, AND IT DID NOT UNTIL NOW. `a.task` came
+   * first, so an agent with any pane title showed that instead of the reason it
+   * is stopped — and `a.task` is `#{pane_title}`, which Claude Code freezes at
+   * the session's FIRST message (#209). A summary of "hello" outranked "this
+   * agent cannot work".
+   *
+   * ⚠️ AND IT FAILED WORST WHERE IT MATTERED MOST. The agents with the oldest
+   * titles are the ones most likely to have hit a limit, so this read as working
+   * on a fresh agent and silently stopped working as an agent aged. Josh's Ava
+   * showed the sentence only because she was new enough to have no title yet.
+   * Found by Mona Lisa, who filed the sentence fix this afternoon and then asked
+   * the question the fix did not: what can beat it to the slot.
+   *
+   * 📌 NARROW ON PURPOSE. Only `rate_limited` jumps the queue, because only that
+   * state means the agent cannot work at all. A title is a poor status source in
+   * general (#209) and that is a bigger question than this line.
+   */
+  if (a.state === 'rate_limited') {
+    return a.stateConfidence === 'scraped'
+      ? 'Its screen mentions a usage limit'
+      : 'Waiting out a usage limit';
+  }
   if (a.task) return a.task;
-  if (a.state !== 'rate_limited') return 'no task showing';
-  return a.stateConfidence === 'scraped'
-    ? 'Its screen mentions a usage limit'
-    : 'Waiting out a usage limit';
+  return 'no task showing';
 }
 function modelLine(a) {
   /* Provider-first ("Claude Opus 5"), guarded so a modelName that already
@@ -7888,6 +7921,15 @@ function openDetail(sessionName) {
   const why = document.getElementById('d-why');
   why.textContent = String(a.because || '').trim();
   why.hidden = !why.textContent;
+  /* ⚠️ TEXT, NEVER MARKUP. This is pane content: whatever happens to be on
+     somebody's terminal, on its way to a product surface. `textContent` is the
+     escape, and the engine has already trimmed and capped it. */
+  const said = document.getElementById('d-said');
+  if (said) {
+    const line = String(a.stateEvidence || '').trim();
+    said.textContent = line;
+    said.hidden = !line;
+  }
   /* The pack's header badge and the two reading boxes, all off the same
      shared derivations the board uses (memBand/pctOf/modelLine). */
   const dpct = pctOf(a.context);

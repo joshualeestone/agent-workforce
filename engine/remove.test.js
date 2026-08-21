@@ -1633,3 +1633,71 @@ test('an agent Kosmos cannot restart is not promised that Kosmos will put it bac
   assert.match(back.because, /start it again the way you did before/,
     'it does not tell them what actually has to happen next');
 });
+
+test('restart closes the window and lets launchd bring the agent back', () => {
+  /**
+   * 🛑 KILLING THE WINDOW IS THE MECHANISM, NOT A SIDE EFFECT. `plistFor` sets
+   * `KeepAlive` true, and `agent-supervisor.sh` ADOPTS an existing session
+   * rather than replacing it. So bouncing the launchd job alone would restart
+   * the supervisor, which would find the old session, adopt it, and change
+   * nothing — a Restart button that reports success and restarts nothing.
+   *
+   * Josh needs this for two things at once: an agent running on instructions it
+   * read before he added it to a project, and an agent that has hit a model
+   * limit and needs moving to another model.
+   */
+  const name = madeAgent('restartme');
+  boardShows(name, name);
+  const calls = world();
+  try {
+    const out = remove.restart(name);
+    assert.equal(out.outcome, remove.OUTCOME.RESTARTED, out.because);
+
+    const killed = calls.find((c) => c[1][0] === 'kill-session');
+    assert.ok(killed, 'nothing closed the window, so the supervisor would adopt the old one');
+    assert.equal(killed[1][2], `=${name}`,
+      'the target is not anchored, so a longer-named stranger could be killed by prefix');
+
+    /* 📌 The nudge is asked for but is not the mechanism: KeepAlive brings it
+       back within the throttle window regardless. */
+    assert.ok(calls.some((c) => c[0] === '/bin/launchctl' && c[1][0] === 'kickstart'),
+      'launchd was not asked to start it again now');
+
+    /* ⚠️ IT MUST NOT CLAIM THE AGENT IS BACK. The new window appears when
+       launchd re-runs the supervisor, up to the throttle interval later. */
+    assert.match(out.because, /starting again/);
+    assert.doesNotMatch(out.because, /is running|has restarted|is back\b/,
+      'the verdict claims something that has not happened yet');
+  } finally {
+    remove.setRunner(null);
+    status.setPaneSource(null);
+  }
+});
+
+test('restart refuses on a window it cannot tie to the agent, and on one that is not running', () => {
+  /**
+   * 🛑 THE SAME RULE AS REMOVAL, and for the same reason: killing a window that
+   * merely borrows an agent's name is the most destructive thing this product
+   * can do to somebody else's work.
+   */
+  const name = madeAgent('restartsafe');
+  status.setPaneSource(() => fleet.line({ session: name, claim: '', title: '✳ Claude Code' }));
+  const calls = world();
+  try {
+    const out = remove.restart(name);
+    assert.equal(out.outcome, remove.OUTCOME.REFUSED, 'an untied window was restarted anyway');
+    assert.match(out.because, /cannot confirm it is this agent/);
+    assert.equal(calls.filter((c) => c[1][0] === 'kill-session').length, 0,
+      'it killed a window it had just refused to act on');
+
+    /* Nothing running at all is a refusal too, and a different sentence: there
+       is nothing to restart, and the agent starts itself. */
+    status.setPaneSource(() => '');
+    const none = remove.restart(name);
+    assert.equal(none.outcome, remove.OUTCOME.REFUSED);
+    assert.match(none.because, /not running/);
+  } finally {
+    remove.setRunner(null);
+    status.setPaneSource(null);
+  }
+});

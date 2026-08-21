@@ -51,7 +51,7 @@ const create = require('./create');
 const store = require('./store');
 const status = require('./status');
 
-const OUTCOME = { REMOVED: 'removed', RESTORED: 'restored', REFUSED: 'refused', PARTIAL: 'partial' };
+const OUTCOME = { REMOVED: 'removed', RESTORED: 'restored', RESTARTED: 'restarted', REFUSED: 'refused', PARTIAL: 'partial' };
 
 /**
  * ⚠️ TAKEN FROM THE STORE, not re-derived. `engine/store.js` already owns
@@ -1118,8 +1118,125 @@ function restoreInner(name) {
 function remove(name, opts) { return markDryRun(removeInner(name, opts)); }
 function restore(name) { return markDryRun(restoreInner(name)); }
 
+/**
+ * Start an agent's session over, so it reads its instructions again.
+ *
+ * 🔑 WHY IT LIVES IN THIS FILE. Everything a restart needs is here already and
+ * is here for reasons that were paid for: the verified session kill (a kill's
+ * own exit code is not evidence the session has gone), the `=` -anchored target
+ * that stops a prefix match reaching a longer-named stranger, `jobFor`'s
+ * ours-versus-theirs check, and `unsafeToActOn`. A restart module beside this
+ * one would be a second derivation of tmux and launchd semantics, which is the
+ * habit this codebase has paid for more than any other.
+ *
+ * 🛑 IT KILLS THE SESSION AND LETS LAUNCHD DO THE REST, and that is the whole
+ * mechanism. `plistFor` sets `KeepAlive` true with a thirty-second
+ * `ThrottleInterval`, and the supervisor ADOPTS an existing session rather than
+ * replacing it. So bouncing the launchd job alone would restart the supervisor,
+ * which would find the old session, adopt it, and change nothing — a Restart
+ * button that reports success and restarts nothing. The session has to go first.
+ *
+ * ⚠️ AND IT DOES NOT WAIT AROUND TO SAY IT WORKED. The new session appears when
+ * launchd re-runs the supervisor, up to `ThrottleInterval` later. Blocking on
+ * that would hold a request open for half a minute; claiming it had already
+ * happened would be a lie of the exact kind this file refuses. The verdict says
+ * the session was ended and that it comes back on its own, which is what is
+ * true at the moment we answer.
+ *
+ * 📌 REFUSES ON A SESSION WE CANNOT TIE TO THIS AGENT, same rule as removal. A
+ * pane merely borrowing the name is somebody else's work, and killing it would
+ * be the most destructive thing this product can do to a bystander.
+ */
+function restartInner(name) {
+  const clean = create.cleanName(name);
+  const unsafe = unsafeToActOn(clean);
+  if (unsafe) return { outcome: OUTCOME.REFUSED, because: unsafe, steps: [] };
+
+  const shown = status.readIdentity(clean).displayName || clean;
+  const job = jobFor(clean);
+  if (!job) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      steps: [],
+      because: `${shown} was not started by Kosmos, so we cannot start it again. `
+        + 'Whatever launched it is what can restart it.',
+    };
+  }
+
+  const found = sessionFor(clean);
+  if (found.kind === FOUND.NONE) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      steps: [],
+      because: `${shown} is not running, so there is nothing to restart. `
+        + 'It starts itself when this Mac is on and it is not removed.',
+    };
+  }
+  if (found.kind !== FOUND.OURS) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      steps: [],
+      because: `something is running under ${shown}'s name and we cannot confirm it is this agent, `
+        + 'so we have left it alone.',
+    };
+  }
+
+  const tmuxBinPath = process.env.AGENT_WORKFORCE_TMUX_BIN || '/opt/homebrew/bin/tmux';
+  const steps = [];
+  const step = (label, fn) => {
+    try {
+      const r = fn();
+      steps.push({ label, ok: r !== false });
+      return r !== false;
+    } catch {
+      steps.push({ label, ok: false });
+      return false;
+    }
+  };
+
+  const session = found.session;
+  const ended = step('closed its window', () => {
+    // ⚠️ `=`-anchored, and the exit code carried: tmux answers 1 for a session
+    // that is not there, which is success for our purposes.
+    const r = run(tmuxBinPath, ['kill-session', '-t', `=${session}`]);
+    if (!(r && (r.ok !== false || r.code === 1))) return false;
+    // ⚠️ LOOK AGAIN. The kill's own answer is not evidence the session has gone;
+    // this is the check that stops us reporting a restart over a live agent.
+    const still = run(tmuxBinPath, ['has-session', '-t', `=${session}`]);
+    return Boolean(still && still.ok === false && still.code === 1);
+  });
+
+  if (!ended) {
+    return {
+      outcome: OUTCOME.PARTIAL,
+      steps,
+      because: `we could not close ${shown}'s window, so it is still running the older instructions. `
+        + 'Nothing was changed.',
+    };
+  }
+
+  /* 📌 A NUDGE, NOT THE MECHANISM. `KeepAlive` brings it back within the
+     throttle window on its own; `kickstart` only asks launchd to do it now
+     rather than in up to thirty seconds. Its failure is therefore not a failed
+     restart, and is not reported as one. */
+  step('asked it to start again now', () => {
+    const r = run('/bin/launchctl', ['kickstart', `gui/${process.getuid()}/${job.label}`]);
+    return Boolean(r && r.ok !== false);
+  });
+
+  return {
+    outcome: OUTCOME.RESTARTED,
+    steps,
+    because: `${shown} is starting again. It reads its instructions when it starts, `
+      + 'so it will have the current ones. Its window comes back on its own.',
+  };
+}
+
+function restart(name) { return markDryRun(restartInner(name)); }
+
 module.exports = {
   plan,
+  restart,
   unsafeToActOn,
   isHidden,
   remove,

@@ -985,6 +985,25 @@ const RATE_LIMIT_MARKERS = [
 ];
 
 /**
+ * The first line of `text` that any of `markers` matches, or null.
+ *
+ * ⚠️ RETURNS THE LINE, NOT A BOOLEAN, so a caller can show what it saw rather
+ * than assert what it concluded. Trimmed of the tree-drawing glyphs Claude Code
+ * prefixes its own notices with, and capped: pane text is arbitrary and this is
+ * on its way to a person's screen.
+ */
+function matchedLine(text, markers) {
+  const lines = String(text == null ? '' : text).split('\n');
+  for (const raw of lines) {
+    if (!markers.some((re) => re.test(raw))) continue;
+    const line = raw.replace(/^[\s>│├└─*]+/, '').trim();
+    if (!line) continue;
+    return line.length > 240 ? line.slice(0, 240) + '…' : line;
+  }
+  return null;
+}
+
+/**
  * Classify one pane.
  *
  * Ordered most-certain first. Anything that does not match a rule falls
@@ -1031,8 +1050,31 @@ function classify(pane, paneText) {
 
   const tail = paneText.split('\n').slice(-25).join('\n');
 
-  if (RATE_LIMIT_MARKERS.some((re) => re.test(tail))) {
-    return { state: STATE.RATE_LIMITED, confidence: CONFIDENCE.SCRAPED, because: 'its screen mentions a usage limit' };
+  const limitLine = matchedLine(tail, RATE_LIMIT_MARKERS);
+  if (limitLine !== null) {
+    /**
+     * 🔑 THE LINE ITSELF RIDES ALONG, and it is the difference between a claim
+     * and evidence. Josh, 2026-08-21: *"is there any way we could show that her
+     * usage is full or something, or something that would prompt a user to know
+     * that"*. We cannot know his account is spent — all we saw is a sentence on
+     * a screen — but we can show him the sentence:
+     *
+     *   You've reached your Fable 5 limit. Run /usage-credits to continue or
+     *   switch models with /model.
+     *
+     * That names the model, carries the vendor's own two remedies, and stays
+     * true if the wording changes under us. Anything we wrote instead would be
+     * our paraphrase of somebody else's message, going stale silently.
+     *
+     * ⚠️ ONE LINE, TRIMMED AND CAPPED. This is pane text on its way to a screen:
+     * unbounded, it is a paste of somebody's terminal into a product surface.
+     */
+    return {
+      state: STATE.RATE_LIMITED,
+      confidence: CONFIDENCE.SCRAPED,
+      because: 'its screen mentions a usage limit',
+      evidence: limitLine,
+    };
   }
   if (NEEDS_YOU_MARKERS.some((re) => re.test(tail))) {
     return { state: STATE.NEEDS_YOU, confidence: CONFIDENCE.SCRAPED, because: 'it is asking you something' };
@@ -2115,6 +2157,9 @@ function snapshot() {
       task: taskLine(pane.title),
       state: status.state,
       stateConfidence: status.confidence,
+      /* The line the classifier actually matched, when it has one. Null for
+         every state that did not read a sentence off the screen. */
+      stateEvidence: status.evidence || null,
       because: status.because,
       context,
       model,
