@@ -4020,7 +4020,24 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <h3 class="dlab">Engineering mode</h3>
       <div class="setrow" id="eng-row">
         <div><b>Show the window each agent is running in</b>
-          <p class="dhint" style="margin:2px 0 0;">Off by default. Your chat shows what an agent says to you. Turn this on to watch the session underneath it.</p></div>
+          <!-- 🛑 "Your chat shows what an agent says to you" WAS HERE AND IT IS
+               FALSE OF THE DIRECT BOX. An agent cannot write into that thread
+               at all (#175), so a person read this row, believed the chat would
+               carry the answer, and waited.
+               ⚠️ IT SURVIVED BECAUSE IT IS HALF TRUE: agents really do post
+               into a project ROOM, and this screen is global — it cannot know
+               which surface you mean, so it generalised from the case that
+               works. Same shape as the day's other findings: a claim that holds
+               where it was written and is wrong one object over.
+               🔑 DROPPED RATHER THAN CORRECTED (Mona Lisa, 2026-08-21). The
+               sentence was doing a reassurance job — "you do not need this" —
+               by asserting something false, and the honest version of that
+               reassurance would have to describe the direct box's limitation
+               here, far from where it bites. The composer line already does
+               that work at the point of use, and a limitation stated far from
+               where it applies is decoration. So the row goes back to its own
+               job: what the toggle does, and why it is off. -->
+          <p class="dhint" style="margin:2px 0 0;">Off by default. It shows the raw session an agent is running in, which most people never need to see.</p></div>
         <button class="toggle" id="eng-toggle" role="switch" aria-checked="false" aria-label="Show the window each agent is running in"><i></i></button>
       </div>
       <p class="dhint" id="eng-msg" role="status" style="margin:8px 0 0;"></p>
