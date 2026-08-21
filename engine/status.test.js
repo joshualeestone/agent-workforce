@@ -1628,9 +1628,10 @@ function contextFor(name, seed, running = true) {
     session_name: name, session_id: `sess-${name}`, cwd: '/somewhere',
   }), 'utf8') });
 
-  /* ⚠️ COLUMN THREE IS THE COMMAND, and the first version of this varied the
-     TITLE instead — so both fixtures were running Claude and the not-running
-     half of every split below was never exercised. PANE_COLUMNS in order:
+  /* ⚠️ THE COMMAND STILL VARIES, but nothing in `readContext` reads it any
+     more. It is here so these fixtures cover both a live Claude pane and a
+     crashed agent's shell — and so that a future version which starts keying on
+     the command again has both cases in front of it. PANE_COLUMNS in order:
      session, pane, command, inMode, claim, title. */
   setPaneSource(() => `${name}\t0.0\t${running ? '2.1.227' : 'zsh'}\t0\t${name}\t✳ Claude Code`);
   setPaneCapture(() => 'Worked for 1m\n> \n');
@@ -1688,7 +1689,7 @@ test('a registry entry whose transcript is GONE is unknown, not "not yet"', () =
   assert.equal(ctx.notYet, false, 'a transcript that disappeared was reported as one never written');
 });
 
-test('an EMPTY transcript on a running agent is UNKNOWN, because compacting looks the same', () => {
+test('an EMPTY transcript is UNKNOWN, running or not, because compacting looks the same', () => {
   /**
    * ⚠️ THE WORSE OF THE TWO COLLAPSES. `tailBytes` returns '' for a file that
    * is there and empty, and null when the read threw; the caller tested
@@ -1713,13 +1714,15 @@ test('an EMPTY transcript on a running agent is UNKNOWN, because compacting look
   assert.equal(ctx.notYet, false, 'an agent that just compacted was told nothing had ever been recorded');
   assert.match(ctx.because, /compacts/);
 
-  // ⚠️ AND THE OTHER HALF, so the split above is a split and not a blanket
-  // refusal: with nothing running, an empty transcript really is a beginning.
+  // ⚠️ AND WITH THE PANE AT A SHELL TOO. An earlier version made this arm
+  // depend on whether the pane looked like Claude, which only moved the guess
+  // somewhere harder to see: an agent that compacted and then crashed is in the
+  // identical indistinguishable state.
   const idle = contextFor('justopened-idle', ({ transcript, write }) => {
     write();
     fs.writeFileSync(transcript, '', 'utf8');
   }, false);
-  assert.equal(idle.notYet, true, 'an empty transcript with nothing running lost its honest wording');
+  assert.equal(idle.notYet, false, 'a crashed agent that had compacted was told it had never run');
 });
 
 test('usage that is present but sums to zero is UNKNOWN, because telling those apart needs an age', () => {
@@ -1804,7 +1807,6 @@ test('a registry entry we cannot READ is not reported as an agent that never sta
   });
   assert.equal(ctx.percent, null);
   assert.equal(ctx.notYet, false, 'our unreadable file was reported as the agent never having run');
-  assert.match(ctx.because, /could not read/);
 });
 
 test('a registry entry belonging to ANOTHER agent is a refusal, not an absence', () => {
@@ -1828,12 +1830,39 @@ test('an entry with no session id in it is a look we could not finish', () => {
   assert.equal(ctx.notYet, false);
 });
 
-test('THE CONTROL: with no entry at all AND nothing running, it really is "not yet"', () => {
+test('no transcript is the admission whether the agent is up or not', () => {
   /**
-   * ⚠️ Without this, answering `notYet: false` for every empty list would pass
-   * all three tests above and silently undo the change.
+   * 🛑 THREE ATTEMPTS AT BEING CLEVERER THAN THIS WERE ALL WRONG THE SAME WAY.
+   * The causes of "no transcript" cannot be separated here: some mean the agent
+   * never started, some mean it has been running for hours under a registry key
+   * we do not look for. I tried to separate them with "is the pane running
+   * Claude" and it was wrong three ways — `node` is a real Claude install, a
+   * truncated tmux line has no command at all, and a crashed agent's pane is a
+   * shell.
+   *
+   * ⚠️ SO BOTH FIXTURES ANSWER THE SAME, and the value of this test is that it
+   * asserts the SAMENESS. A version that resolves one of them to "not yet" is
+   * the version that put "nothing has been recorded, that is normal for a new
+   * agent" on an agent at 95%.
    */
-  const ctx = contextFor('truly-absent', () => { /* nothing written anywhere */ }, false);
+  for (const running of [true, false]) {
+    const ctx = contextFor(`absent-${running}`, () => { /* nothing anywhere */ }, running);
+    assert.equal(ctx.percent, null);
+    assert.equal(ctx.notYet, false, `no transcript with running=${running} produced a claim about the agent's life`);
+  }
+});
+
+test('THE CONTROL: a transcript that IS there, fully read, with no usage rows, is "not yet"', () => {
+  /**
+   * ⚠️ WITHOUT THIS, ANSWERING `notYet: false` EVERYWHERE PASSES EVERY TEST
+   * ABOVE and silently deletes the feature. This is the branch the whole change
+   * exists for and the only one that reaches it: the file is there, we read all
+   * of it, and nothing has been recorded. That is Josh's brand-new agent.
+   */
+  const ctx = contextFor('really-new', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'summary', message: {} }) + '\n', 'utf8');
+  });
   assert.equal(ctx.percent, null);
-  assert.equal(ctx.notYet, true, 'a genuinely new agent lost its honest wording');
+  assert.equal(ctx.notYet, true, 'the one honest "not yet" case lost its wording');
 });
