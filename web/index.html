@@ -1320,6 +1320,10 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    ⚠️ The FIRST line loses the top margin: `.dmbusy` carries 10px so it clears
    the agent page's message box, and here the container already sits in the gap
    between the thread and the composer. */
+/* The member's job title: quieter than the name it sits under and quieter than
+   the state line below it, because it is the least changing of the three. */
+.pj-member-role { display: block; color: var(--label-3); opacity: .9; }
+
 .dmbusy-room { margin: 10px 0 0; }
 .dmbusy-room .dmbusy { margin: 6px 0 0; }
 .dmbusy-room .dmbusy:first-child { margin-top: 0; }
@@ -5672,7 +5676,15 @@ function showTab(tab) {
     const sum = document.getElementById('summary');
     sum.hidden = !agents || sum.textContent === '';
   }
-  document.getElementById('build').hidden = !agents;
+  /* 🔑 NO LONGER TAB-GATED. This line used to be board chrome and hid with the
+     board, which was right when it was only a version stamp under the agents.
+     Josh asked for it and its Check for Update control pinned to the bottom of
+     the PAGE (2026-08-21), so it is app chrome now — and the gate had become
+     visibly wrong rather than merely stale: the control is a SIBLING of this
+     span, so hiding only the span left a bare "Check for Update" button
+     floating in the footer of every project room with nothing to say what it
+     was about. */
+  document.getElementById('build').hidden = false;
   // (boardbar was set above, before the visibility computation that reads
   // it; the view toggle is board chrome and travels with the board.)
   // ⚠️ Hidden with the rest of the board, and NOT unhidden here — whether it
@@ -6328,7 +6340,16 @@ function paintRoomBusy(members) {
     .filter((a) => a && a.state === 'working');
   el.hidden = !working.length;
   el.innerHTML = working.length
-    ? working.map((a) => '<p class="dmbusy">' + busyRow(a, a.name) + '</p>').join('')
+    /* 🛑 A DIV, NOT A P, AND THE PARSER IS THE REASON. `busyRow` opens with
+       `<div class="msg-av">`, and a <div> inside a <p> makes the HTML parser
+       CLOSE the paragraph — so each line's avatar fell out of its own flex
+       container and rendered full size above the dots instead of beside them.
+       ⚠️ Invisible to every test in the suite: the string is right, the CSS is
+       right, and only a browser parsing it shows the break. The agent page's
+       `#d-busy` is a <p> in the markup and escapes this because innerHTML on a
+       <p> parses in that element's own context, with no open paragraph to
+       close; here the fragment is parsed inside a <div>. */
+    ? working.map((a) => '<div class="dmbusy">' + busyRow(a, a.name) + '</div>').join('')
     : '';
 }
 
@@ -10434,6 +10455,16 @@ function pjMember(m, suppressTold) {
     + face
     + '<span class="pj-member-b">'
     + '<b>' + esc(m.name) + '</b>'
+    /* 🔑 THE ROLE, UNDER THE NAME (Josh, 2026-08-21): *"put the title of the
+       person really small underneath them on the project members list inside of
+       a project so I can quickly reference and see what each agent's role is"*.
+       ⚠️ ALREADY ON THE PAYLOAD, not a new derivation: `describe` in
+       engine/projects.js sends `role`, gated on `isNamedOurs` exactly as
+       `hasAvatar` is — so a pane merely BORROWING an agent's name lends this
+       row no job title, for the same reason it lends it no photograph. Null is
+       therefore a real answer here and renders nothing rather than a blank
+       line. */
+    + (m.role ? '<small class="pj-member-role">' + esc(m.role) + '</small>' : '')
     // ⚠️ An `unknown` state carries its REASON here (historical origin: a
     // bare "Can't tell" once sat beside the now-retired told sentence and
     // read as a contradiction; the sentence is gone, the rule stands).
