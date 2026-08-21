@@ -11444,7 +11444,13 @@ function pjRoomRow(m, p, silent) {
   const cls = states.length && states.every((v) => v === 'placed') ? 'placed'
     : (states.some((v) => v === 'could_not') ? 'failed' : 'unsure');
   const receipt = showReceipt && states.length
-    ? '<span class="delivery ' + cls + '">' + esc(pjReceiptSentence(m.outcomes, p, silent)) + '</span>' : '';
+    /* ⚠️ THE SILENCE CLAUSE IS GATED HERE TOO, NOT ONLY IN `pjSilences`. An
+       agent's post carries outcomes as well, so a caller that handed this
+       function a list would draw "Nothing back from Johnson" underneath a
+       message RICK sent — a receipt about somebody else's message. That it
+       cannot happen today rests on one condition in a different function; this
+       is the row a person actually reads, so it enforces the rule itself. */
+    ? '<span class="delivery ' + cls + '">' + esc(pjReceiptSentence(m.outcomes, p, isOp ? silent : null)) + '</span>' : '';
   return '<div class="msg' + (isOp ? ' you' : '') + '">' + av
     + '<div class="msg-b"><div class="msg-h"><b>' + esc(name) + '</b>'
     + '<span class="msg-t">' + esc(pjWhen(m.at) || '') + '</span></div>'

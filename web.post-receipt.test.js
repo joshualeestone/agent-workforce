@@ -355,18 +355,31 @@ test('the sentence actually reaches the rendered row', () => {
 
 test('an agent’s own post renders no silence sentence, whatever it is handed', () => {
   /**
-   * ⚠️ BELT AND BRACES ON PURPOSE. `pjSilences` never produces a verdict for an
-   * agent's post, so this is unreachable today — but the renderer takes the
-   * list as an argument, and the thing that keeps it unreachable is one
-   * condition in a different function. If that condition is ever loosened, the
-   * row a person reads is where it shows up.
+   * 🛑 THE VERSION BEFORE THIS CERTIFIED NOTHING. Its fixture was an agent post
+   * whose outcomes were all `placed`, and `showReceipt` suppresses the entire
+   * receipt span for that — so `doesNotMatch(/Nothing back from/)` was
+   * satisfied by pre-existing delivery-pill logic, before any silence code ran.
+   *
+   * ⚠️ The shape that DOES render a receipt on an agent's post is a partly
+   * unreachable room, which is what the `/room` route emits when one recipient
+   * timed out. With that fixture and the old code, the room drew
+   * "Placed with Johnson. Bob could not be reached. Nothing back from Johnson."
+   * underneath a message RICK sent.
    */
   const render = renderer();
+  const agentPost = { from: 'rick', at: ago(5), outcomes: { johnson: 'placed', bob: 'could_not' }, text: 'on it' };
 
-  const agentPost = { from: 'rick', at: ago(5), outcomes: { johnson: 'placed' }, text: 'on it' };
   const html = render(agentPost, P, ['johnson']);
+  assert.match(html, /class="delivery/, 'no receipt rendered at all, so this tests nothing');
+  assert.match(html, /Bob could not be reached/, 'the receipt is not the one this fixture is for');
   assert.doesNotMatch(html, /Nothing back from/,
     'the room told the person nobody answered, underneath a message somebody else sent');
+
+  // ⚠️ THE CONTROL: the same outcomes on the PERSON's post do get the sentence,
+  // so the assertion above is about who sent it and not about the shape.
+  const ownPost = { operator: true, from: 'you', at: ago(5), outcomes: { johnson: 'placed', bob: 'could_not' }, text: 'anyone?' };
+  assert.match(render(ownPost, P, ['johnson']), /Nothing back from Johnson\./,
+    'the person’s own post lost the sentence too, so the gate is not about the sender');
 });
 
 test('"any of them" never sweeps in the agent we just said could not be reached', () => {
