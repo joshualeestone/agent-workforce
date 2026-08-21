@@ -155,9 +155,10 @@ const FIXTURES = [
       belowWrap: Math.round(box(dbadge).bottom - box(wrap).bottom),
       /* ⚠️ THE QUESTION THAT MATTERS is not how far it hangs below its avatar —
          it is absolutely positioned, so it always does — but whether it escapes
-         the header it lives in. `.dav-wrap` gets no equivalent of the card's
-         `:has(.membadge.unk) { margin-bottom: 26px }`, so nothing reserves the
-         space for it here. */
+         the header it lives in. `.dav-wrap` HAD no equivalent of the card's
+         `:has(.membadge.unk) { margin-bottom: 26px }` until this check found it
+         hanging 15px past the header. The rule exists now, and this assertion
+         is what keeps it: remove the rule and `belowHead` goes -11 to +15. */
       belowHead: Math.round(box(dbadge).bottom - box(document.querySelector('.dhead')).bottom),
     };
 
