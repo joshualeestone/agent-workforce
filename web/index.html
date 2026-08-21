@@ -1230,7 +1230,12 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   max-height: 15rem; overflow-y: auto; padding-right: 4px; }
 .dm { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .dm.mine { align-items: flex-end; }
-/* ⚠️ THE INCOMING BUBBLE HAS NO PRODUCER, and that is worth stating rather
+/* ⚠️ THIS BRANCH IS THE PRODUCER THE NOTE BELOW SAID DID NOT EXIST, and the note
+   is kept rather than deleted because its reasoning is what the shape of the
+   record had to change to satisfy. An agent's side IS kept now: it is a row in
+   the same thread, carrying `from`. The sentence that follows was true until
+   #175 and is not any more.
+   ⚠️ THE INCOMING BUBBLE HAD NO PRODUCER, and that is worth stating rather
    than leaving as a rule nobody can reach. The pack's dbox draws both sides of
    this conversation; the build stores only the person's side, because there is
    no record anywhere of an agent saying something to the person -- its side is
@@ -1246,12 +1251,18 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   line-height: 1.45; background: var(--k-sunk, rgba(20,22,26,.05));
   overflow-wrap: anywhere; }
 .dm.mine .dm-b { background: rgba(214,166,46,.14); }
-/* ⚠️ THEIRS IS THE DEFAULT SHAPE, not a mirror of mine: `.dm` already aligns
-   left, so this only needs the surface that distinguishes a reply from the
-   person's own words. Deliberately quieter than `.mine` — the person's rows
-   carry a delivery verdict and an agent's do not, so a louder treatment here
-   would read as the more important half. */
-.dm.theirs .dm-b { background: var(--k-surface); border: 1px solid var(--k-rule); }
+/* 🛑 THERE IS NO RULE FOR `.theirs`, AND ADDING ONE MADE IT WORSE. The first
+   version set `background: var(--k-surface); border: 1px solid var(--k-rule)`
+   — byte-identical to `.dbox`, which is the container it sits in — so the
+   agent's bubble had no bubble at all, only a hairline the same colour as the
+   panel's own edge. It was LESS visible than the default it overrode.
+   ⚠️ THIS FILE ALREADY RECORDS THAT EXACT DEFECT, four hundred lines up: three
+   controls "dissolved into their own containers with only a 0.5px border"
+   because they took the surface colour on a surface. I read the note and
+   repeated the mistake in the same file.
+   ✅ `.dm-b`'s default is `--k-sunk`, a real tint, and `.mine` overrides it
+   with the amber one. So the two sides were already distinguished and the
+   honest change was no change. */
 .dm-w { font-size: .75rem; color: var(--k-ink-2); }
 /* ⚠️ THE META LINE FOLLOWS ITS BUBBLE. `.dm.mine` is `align-items: flex-end`,
    which right-aligns the SPAN while it is narrower than the row -- and a

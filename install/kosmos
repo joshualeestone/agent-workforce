@@ -242,54 +242,6 @@ cmd_version() {
 # server's job; this command's job is to carry the words and REPORT THE
 # VERDICT, because a send that fires and assumes success silently loses
 # messages -- the transport lesson this port exists to keep.
-# Answer the person, in the box on your own page.
-#
-# 🛑 THE COMMAND THAT DID NOT EXIST. `post` reaches a room and `msg` types into
-# another agent's terminal; NEITHER reaches the person who messaged you. Until
-# this, an agent answered in its own session, which reaches nobody, and the
-# person watched an empty box (#175).
-#
-# ⚠️ NO RECIPIENT ARGUMENT, and that is the point rather than a shortcut: there
-# is exactly one person to answer, and the sender is taken from TMUX_PANE so an
-# agent can only ever write as itself.
-cmd_reply() {
-  local text body because
-  text="$*"
-  if [ -z "$text" ]; then
-    say "Usage: kosmos reply <what you want to tell them>"
-    exit 2
-  fi
-  if ! healthy; then
-    say "Kosmos is not running, so this could not be kept. Start it with: kosmos start"
-    exit 1
-  fi
-  local esc_text esc_pane
-  esc_text=$(printf '%s' "$text" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
-  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
-  body=$(curl -sS -m 15 -X POST "$URL/api/reply" \
-    -H 'content-type: application/json' \
-    --data "{\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
-    say "We could not reach Kosmos to keep that. Is it running at $URL?"
-    exit 1
-  }
-  case "$body" in
-    *'"error"'*)
-      because=$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')
-      say "Kosmos refused that: ${because:-it did not say why}."
-      exit 1 ;;
-    *'"kept":true'*)
-      # ⚠️ "It is on their screen" is what this can claim and the LIMIT of it:
-      # the reply is in the record the page reads. Whether anybody is looking is
-      # not ours to say, and a sentence implying they saw it would be the
-      # overclaim this product keeps removing.
-      say "Answered. It is on their screen now."
-      ;;
-    *)
-      because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
-      say "That was not kept: ${because:-we could not tell why}."
-      exit 1 ;;
-  esac
-}
 
 cmd_msg() {
   local to text body verdict state because
@@ -349,6 +301,61 @@ cmd_msg() {
       say "Not delivered: ${because:-we could not tell why}."
       exit 1
       ;;
+  esac
+}
+
+# ---- kosmos reply <text…> ---------------------------------------------------
+# Answer the person, in the box on your own page.
+#
+# 🛑 THE COMMAND THAT DID NOT EXIST. `post` reaches a room and `msg` types into
+# another agent's terminal; NEITHER reaches the person who messaged you. Until
+# this, an agent answered in its own session, which reaches nobody, and the
+# person watched an empty box (#175).
+#
+# ⚠️ NO RECIPIENT ARGUMENT, and that is the point rather than a shortcut: there
+# is exactly one person to answer, and the sender is taken from TMUX_PANE so an
+# agent can only ever write as itself.
+cmd_reply() {
+  local text body because
+  text="$*"
+  if [ -z "$text" ]; then
+    say "Usage: kosmos reply <what you want to tell them>"
+    exit 2
+  fi
+  if ! healthy; then
+    say "Kosmos is not running, so this could not be kept. Start it with: kosmos start"
+    exit 1
+  fi
+  local esc_text esc_pane
+  esc_text=$(printf '%s' "$text" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_pane=$(printf '%s' "${TMUX_PANE:-}" | tr '\n\t\r' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
+  body=$(curl -sS -m 15 -X POST "$URL/api/reply" \
+    -H 'content-type: application/json' \
+    --data "{\"text\":\"$esc_text\",\"from_pane\":\"$esc_pane\"}" 2>/dev/null) || {
+    say "We could not reach Kosmos to keep that. Is it running at $URL?"
+    exit 1
+  }
+  case "$body" in
+    *'"error"'*)
+      because=$(printf '%s' "$body" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')
+      say "Kosmos refused that: ${because:-it did not say why}."
+      exit 1 ;;
+    *'"kept":true'*)
+      # ⚠️ "It is on their screen" is what this can claim and the LIMIT of it:
+      # the reply is in the record the page reads. Whether anybody is looking is
+      # not ours to say, and a sentence implying they saw it would be the
+      # overclaim this product keeps removing.
+      # ⚠️ "IN THEIR CONVERSATION WITH YOU" IS WHAT THIS KNOWS. The earlier
+      # wording said "on their screen now" — and the reply is in a FILE; the
+      # page renders it only while that agent's panel is open. Whether anybody
+      # is looking is not ours to say, which the comment above already said
+      # while the sentence below asserted it anyway.
+      say "Answered. It is in their conversation with you."
+      ;;
+    *)
+      because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
+      say "That was not kept: ${because:-we could not tell why}."
+      exit 1 ;;
   esac
 }
 
@@ -438,7 +445,7 @@ case "${1:-}" in
   reply)   shift; cmd_reply "$@" ;;
   post)    shift; cmd_post "$@" ;;
   *)
-    printf '\n  kosmos start | stop | restart | status | open | version | msg | post\n\n'
+    printf '\n  kosmos start | stop | restart | status | open | version | msg | post | reply\n\n'
     printf '  The dashboard lives at %s once started.\n\n' "$URL"
     exit 2
     ;;
