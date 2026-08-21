@@ -4338,8 +4338,13 @@ function memUnknown(ctx) {
      no model, no ceiling, and this branch.
      ⚠️ Deferring it to the unknown-model cards was the wrong call once the
      wording was being rewritten anyway: the deferral left the one sentence this
-     change exists to remove, on the one screen it was rewriting. */
-  if (ctx && ctx.tokens != null) {
+     change exists to remove, on the one screen it was rewriting.
+     ⚠️ KEYED ON THE ENGINE'S OWN FLAG, not on "tokens present and no percent".
+     The first version used that shape and immediately claimed "no limit known"
+     about a card whose percent was merely UNREADABLE — a security fixture
+     feeding a garbage percent with tokens intact. Two different states, one
+     observable, which is the whole class this change is about. */
+  if (ctx && ctx.noCeiling === true) {
     return { notYet: false,
              word: 'No limit known',
              aria: 'Memory was read; this model’s size is not known here.',

@@ -253,7 +253,12 @@ test('an agent whose memory we READ is never told we could not read it', () => {
    * 64KB of a transcript and the usage from the last 256KB, so a busy agent
    * whose recent tail happens to carry no model name lands here.
    */
-  const measured = memUnknown({ tokens: 42000, percent: null, notYet: false });
+  /* ⚠️ `noCeiling`, the engine’s own flag, NOT "tokens present and no
+     percent". The first version of this arm used that shape and claimed "no
+     limit known" about a card whose percent was merely UNREADABLE — a security
+     fixture feeding a garbage percent with tokens intact. The suite caught it
+     within the hour. */
+  const measured = memUnknown({ tokens: 42000, percent: null, noCeiling: true, notYet: false });
   assert.doesNotMatch(measured.lead, /could not be read/, 'we told them we failed at a reading we took');
   assert.doesNotMatch(measured.aria, /could not be read/);
   assert.match(measured.lead, /was read/);
@@ -271,4 +276,20 @@ test('an agent whose memory we READ is never told we could not read it', () => {
   // this new arm has swallowed them.
   assert.equal(unk.word, 'Unknown');
   assert.equal(yet.word, 'Not yet read');
+});
+
+test('a percent we could not read is not reported as a limit we do not know', () => {
+  /**
+   * ⚠️ THE TWO STATES THE FLAG SEPARATES, and the reason it is a flag. A card
+   * can carry tokens with no usable percent for two different reasons: the
+   * engine measured the memory and does not know the model's size, or the
+   * percent itself was unreadable. Only the first is "no limit known".
+   *
+   * The suite found this within an hour of the arm being added, through a
+   * fixture that feeds a garbage percent with tokens intact.
+   */
+  const unreadable = memUnknown({ tokens: 1, percent: null, notYet: false });
+  assert.equal(unreadable.word, 'Unknown', 'an unreadable percent was reported as a model we do not know the size of');
+  const noLimit = memUnknown({ tokens: 1, percent: null, noCeiling: true, notYet: false });
+  assert.equal(noLimit.word, 'No limit known');
 });

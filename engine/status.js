@@ -1445,6 +1445,12 @@ function readContext(agentName, model, exactSession) {
       ceiling: null,
       ceilingSource: null,
       notYet: false,
+      // ⚠️ AN EXPLICIT FLAG, not a null the UI has to infer. The surfaces need
+      // to tell "we read it and cannot scale it" from "we could not read it",
+      // and `ceiling === null` distinguishes those only if you also know that
+      // every other shape leaves the field UNDEFINED rather than null. That is
+      // a rule nothing states and a test fixture broke within an hour.
+      noCeiling: true,
       confidence: CONFIDENCE.STRUCTURED,
       because: `measured, but we do not know how much ${model || 'this model'} can hold`,
     };
