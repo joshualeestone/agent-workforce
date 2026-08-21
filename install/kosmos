@@ -183,6 +183,15 @@ cmd_stop() {
       sleep 0.3
     done
     kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    # ⚠️ ASKED IS NOT STOPPED. This said "Stopped." unconditionally and removed
+    # the pidfile either way, so a kill that did not work made Kosmos FORGET a
+    # live process -- into exactly the state this file describes below as
+    # "something is answering that this command did not start". The pidfile is
+    # the only handle we have on it, so a failed stop KEEPS it and says so.
+    if kill -0 "$pid" 2>/dev/null; then
+      say "Could not stop it. Something is still running as $pid."
+      exit 1
+    fi
     rm -f "$PIDFILE"
     say "Stopped."
   elif healthy; then
@@ -275,7 +284,7 @@ cmd_msg() {
   # delivery, unconfirmed means the text may already be in their composer
   # (do NOT re-send), could_not names why.
   case "$body" in
-    *'"state":"placed"'*)      say "Delivered to $to." ;;
+    *'"state":"placed"'*)      say "Placed into $to's session." ;;
     *'"state":"unconfirmed"'*)
       # The server's own sentence: unconfirmed has two flavors (typed with
       # Enter unconfirmed, or a send that timed out mid-flight) and only
@@ -344,7 +353,7 @@ cmd_post() {
   # EVERY member got it; unconfirmed means the room is partly reached
   # (the outcomes live in the record for the screens to draw).
   case "$body" in
-    '{"delivery":{"state":"placed"'*)      say "Posted to $project. Everyone on it received it." ;;
+    '{"delivery":{"state":"placed"'*)      say "Posted to $project. Everyone on it has it waiting." ;;
     '{"delivery":{"state":"unconfirmed"'*)
       because=$(printf '%s' "$body" | sed -n 's/.*"because":"\([^"]*\)".*/\1/p')
       say "Posted, but not everyone is confirmed${because:+: $because}. Do not re-post; the room screen shows who got it."

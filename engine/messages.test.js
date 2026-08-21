@@ -359,6 +359,41 @@ test('owesReply counts only rows that CARRY TEXT, and never a project name', () 
   });
 });
 
+test('the colleagues block says a reply in your own session reaches nobody, and names the moment it fails', () => {
+  /**
+   * 🛑 #122/#145. The block already taught `kosmos post`. It never said that
+   * ANSWERING IN PLACE REACHES NOBODY, so an agent read a list of commands,
+   * replied the way it replies to everything, and its reply went nowhere.
+   *
+   * ⚠️ AND STATING THE RULE IS NOT ENOUGH, which is why the wording is pinned
+   * rather than just its presence. An agent broke this rule eleven minutes
+   * after explaining it to two colleagues, on a message that read like a
+   * question. A rule keyed on a CATEGORY ("a room message") cannot fire when
+   * the reader has already filed the input under a different one ("a question
+   * to answer"), so the paragraph names THE FEELING instead: "reads like an
+   * ordinary question" is available to the reader at the exact moment the rule
+   * is failing, because it is what they are experiencing.
+   */
+  /* ⚠️ `\s+` FOR EVERY SPACE, because the block is HARD-WRAPPED at source and
+     the phrases straddle line breaks. The first version of this test failed on
+     "reads like an ordinary\nquestion" -- a pin on a phrase in wrapped prose
+     breaks on rewrapping, which is a thing a copy pass does routinely and
+     which changes nothing about the meaning. Matching across whitespace pins
+     the sentence rather than the line width. */
+  const body = messages.blockBody();
+  assert.match(body, /reply you write in your own session\s+reaches nobody/i,
+    'the block never says that answering in place goes nowhere, which is the whole defect');
+  assert.match(body, /reads like an ordinary\s+question/i,
+    'the block states the rule without naming the moment it fails, and the moment is what the reader has');
+  assert.match(body, /Especially then/,
+    'the inversion is gone, so an agent thinking "this one is obviously different" is not addressed');
+
+  /* ⚠️ ANONYMOUS ON PURPOSE. An instruction block naming a specific agent ages
+     badly and invites the reader to decide they are not that agent. */
+  assert.doesNotMatch(body, /Johnson|Bob|Rick/,
+    'the block names a specific agent, which gives every other reader an escape hatch');
+});
+
 test('the colleagues block teaches the command and the colleague-vs-operator distinction, inside its own markers', () => {
   const projects = require('./projects');
   const body = messages.blockBody();
