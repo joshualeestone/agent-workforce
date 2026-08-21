@@ -15,6 +15,11 @@ const nodePath = require('node:path');
 // under it, and this module keeps its removed-list there.
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'remove-test-'));
 process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
+// ⚠️ AND THE CONFIG ROOT. `createAgent` now answers Claude Code's trust
+// question for the folder it makes, which is a write into ~/.claude.json. A
+// blind review measured the cost of leaving this out: 93 entries for temp
+// directories, in the operator's own live config, from this suite alone.
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = nodePath.join(SANDBOX, 'claude.json');
 process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'LaunchAgents');
 process.env.AGENT_WORKFORCE_DATA = nodePath.join(SANDBOX, 'support');
 process.on('exit', () => {

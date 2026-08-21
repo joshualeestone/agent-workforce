@@ -25,6 +25,11 @@ const path = require('node:path');
 const SANDBOX = fs.mkdtempSync(path.join(os.tmpdir(), 'kosmos-fixture-'));
 process.env.AGENT_WORKFORCE_DATA = path.join(SANDBOX, 'data');
 process.env.AGENT_WORKFORCE_WORKERS = path.join(SANDBOX, 'workers');
+// ⚠️ AND THE CONFIG ROOT. `createAgent` now answers Claude Code's trust
+// question for the folder it makes, which is a write into ~/.claude.json. A
+// blind review measured the cost of leaving this out: 93 entries for temp
+// directories, in the operator's own live config, from this suite alone.
+process.env.AGENT_WORKFORCE_CLAUDE_CONFIG = path.join(SANDBOX, 'claude.json');
 process.env.AGENT_WORKFORCE_LAUNCH = path.join(SANDBOX, 'launch');
 
 const test = require('node:test');
@@ -536,4 +541,55 @@ test('no test hand-types a tab-separated pane line', () => {
   }
   assert.deepEqual(offenders, [],
     'use test-support/fleet, which builds lines from PANE_COLUMNS by name');
+});
+
+// ---------------------------------------------------------------------------
+// The fourth root
+// ---------------------------------------------------------------------------
+
+test('every suite that creates an agent sandboxes CLAUDE CODE’s config too', () => {
+  /**
+   * 🛑 THIS RULE EXISTS BECAUSE THE SUITE ALREADY DID THE DAMAGE ONCE. When
+   * `createAgent` started answering Claude Code's trust question for the folder
+   * it makes, one test file was sandboxed and five were not. A blind reviewer
+   * measured the result in the operator's own live config: 93 entries keyed to
+   * temp directories under /var/folders that had not existed for hours, in a
+   * 114KB file holding their account and their MCP servers.
+   *
+   * 🔑 THE POINT IS NOT THE FIVE FILES, IT IS THE SIXTH. Adding the line to
+   * each one by hand fixes today and leaves the trap armed for whoever writes
+   * the next suite — which is exactly how three roots came to be sandboxed and
+   * a fourth not. So the rule is enforced here rather than remembered.
+   *
+   * ⚠️ It reads the files as text, and text cannot tell a call from a mention
+   * in a comment. That trade is deliberate: a comment naming `createAgent(`
+   * makes this test fail LOUDLY and somebody re-words the comment, where the
+   * clever version would let a real caller slip through a filter. This file's
+   * neighbour tried the filter and it did not work — block comments here have
+   * unmarked continuation lines.
+   */
+  const root = path.join(__dirname);
+  const files = [
+    ...fs.readdirSync(root).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, f)),
+    ...fs.readdirSync(path.join(root, 'engine')).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, 'engine', f)),
+  ];
+
+  const creators = [];
+  const missing = [];
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    if (!/\bcreateAgent\(/.test(src)) continue;
+    creators.push(path.relative(root, f));
+    if (!src.includes('AGENT_WORKFORCE_CLAUDE_CONFIG')) missing.push(path.relative(root, f));
+  }
+
+  /* ⚠️ THE POSITIVE CONTROL, and it is the half that stops this from being a
+     check that cannot fail. A rename of `createAgent`, a moved directory or a
+     bad glob would leave `creators` empty, `missing` empty, and this test
+     green while enforcing nothing at all. */
+  assert.ok(creators.length >= 4,
+    `only ${creators.length} suites look like they create agents, so this rule is aimed at nothing`);
+
+  assert.deepEqual(missing, [],
+    'these suites create agents without sandboxing ~/.claude.json, so running them writes into the operator’s real Claude config');
 });
