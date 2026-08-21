@@ -597,7 +597,7 @@ function waitingNote(state, outcome) {
  * for the one fact that separates them: whether anything of the person's text
  * could have reached the pane. None of them says the agent knows anything.
  */
-function deliver(sessionName, raw, roster) {
+function deliver(sessionName, raw, roster, envelope) {
   const at = new Date().toISOString();
   const problem = messageProblem(raw);
   if (problem) return { state: DELIVERY.COULD_NOT, because: problem, at, paneState: null, paneNote: null };
@@ -607,7 +607,25 @@ function deliver(sessionName, raw, roster) {
     return { state: DELIVERY.COULD_NOT, because: allowed.because, at, paneState: null, paneNote: null };
   }
 
+  /**
+   * ⚠️ THE ENVELOPE IS PREPENDED AFTER THE LENGTH CHECK, NEVER BEFORE IT, and
+   * that ordering is the whole reason it is a parameter rather than something
+   * the caller concatenates.
+   *
+   * `messageProblem` above measured `raw`. A caller that glued its own prefix
+   * on first would have spent the person's `MAX_TEXT` budget on Kosmos's own
+   * words: a message at exactly the limit would be refused with *"keep it to
+   * 2000 characters or fewer"* — naming a limit the text they typed does not
+   * exceed, which is unfalsifiable from where they are standing. The wire may
+   * exceed MAX_TEXT; the person's message may not.
+   *
+   * 📌 The room path reaches the same place from the other side: it validates
+   * its body against MAX_BODY and spills anything over 700 to a file, so what
+   * it concatenates is already bounded. Both are "check the part the person
+   * wrote"; only this one had no bound of its own.
+   */
   const text = cleanMessage(raw);
+  const wire = (typeof envelope === 'string' && envelope.trim()) ? envelope.trim() + ' ' + text : text;
   const target = paneTarget(allowed.card);
   // Read BEFORE the send, from the card the send was authorised against, so the
   // note describes the pane we typed into rather than whatever it became while
@@ -656,7 +674,7 @@ function deliver(sessionName, raw, roster) {
   // connect.js sends a sign-in code exactly this way for exactly this reason.
   // ⚠️ `wireText`, not `text`: a trailing `;` is tmux's command-list separator
   // and never reaches the pane unescaped. See `wireText` for what was measured.
-  const typed = tmux(['send-keys', '-t', target, '-l', '--', wireText(text)]);
+  const typed = tmux(['send-keys', '-t', target, '-l', '--', wireText(wire)]);
   if (typed.ran && typed.status !== 0) {
     // tmux ran and refused: it did not type anything. Re-sending is safe.
     return {

@@ -5400,10 +5400,21 @@ test('the post route resolves the project, derives the member list, and fans out
        the slug in the sentence is what confused the agent, and the name in the
        record would break the log, the pair counter and `kosmos post`. */
     const addressed = typed.map((a) => a[5]).find((t) => t.startsWith('[message'));
-    assert.match(addressed, /project Route room\]/,
+    assert.match(addressed, /project Route room ·/,
       'the addressed envelope names the project by its slug, which the agent cannot match');
-    assert.doesNotMatch(addressed, /routeroom/,
+    /* ⚠️ NARROWED, DELIBERATELY, when the answering command joined the envelope
+       (kosmos#177). This used to be `doesNotMatch(/routeroom/)` — slug absent
+       anywhere — which was a STRING standing in for the meaning. The meaning is
+       that the slug must not be the project's IDENTITY in what the agent reads:
+       Josh's agent failed because it had a slug and nothing to match it against.
+       `kosmos post` keys on the slug and cannot be handed the name, so the two
+       now sit adjacent, which is the only place in the app that says they are
+       one project. What is still forbidden is the slug LOOSE in the sentence,
+       and that is what this asserts. */
+    assert.doesNotMatch(addressed.replace(/ · to answer, run: kosmos post routeroom/g, ''), /routeroom/,
       'the slug reached the sentence an agent reads');
+    assert.match(addressed, /· to answer, run: kosmos post routeroom\]/,
+      'the envelope must carry the command WITH THE SLUG: the name is not a project kosmos post can resolve');
     const rec = messagesEngine.record().rows.filter((m) => m.kind === 'post');
     assert.equal(rec.length, 1);
     assert.equal(rec[0].project, 'routeroom');
@@ -5476,8 +5487,10 @@ test('the room routes: the operator flag is minted only here, and the thread fil
       'an operator arrival did not carry the operator marker');
     // The same split as the addressed case above: name in the sentence, id in
     // the record (asserted at `row.project` a few lines up).
-    assert.doesNotMatch(opEnv, /opsroom/,
+    assert.doesNotMatch(opEnv.replace(/ · to answer, run: kosmos post opsroom/g, ''), /opsroom/,
       'the slug reached the sentence an agent reads');
+    assert.match(opEnv, /· to answer, run: kosmos post opsroom\]/,
+      'an operator arrival must say how to answer it, which is the whole of kosmos#177');
 
     // The THREAD, filtered by project alone: a foreign project's post and
     // a room valve row seeded straight into the record.
@@ -8261,6 +8274,99 @@ test('the reply route refuses what it cannot attribute, and says why', async () 
     assert.equal(JSON.parse(unset.body).kept, false, 'a request with no pane at all was allowed to write');
   } finally {
     messagesEngine.setRunner(null);
+    fleet.restore();
+    void board;
+  }
+});
+
+test('a message to an agent’s own page arrives saying how to answer, and the envelope is not charged to the person', async () => {
+  /**
+   * 🛑 THE COMMAND SHIPPED AND NOTHING SAID SO AT THE MOMENT IT WAS NEEDED.
+   * Room arrivals have carried a marker since the room model landed; the
+   * person's own messages arrived as bare text. Johnson, Rick and Bob each
+   * diagnosed this independently in Josh's room on 2026-08-21, having each just
+   * failed at it — Johnson twice, the second time after writing the
+   * explanation. See `OPERATOR_DIRECT` in engine/messages.js.
+   */
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  const typed = [];
+  try {
+    /* `verifyAtSend` asks the pane again immediately before the keystroke, so a
+       runner that answers nothing refuses the send. Same canned shape the room
+       route's tests use. */
+    chatEngine.setRunner((args) => {
+      if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+      typed.push(args);
+      return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+    });
+
+    const r = await req('/api/agent/leo/thread', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'can you look at the lease?' }),
+    });
+    assert.equal(r.status, 200, r.body);
+
+    const wire = typed.map((a) => a[5]).find((t) => typeof t === 'string' && t.includes('lease')) || '';
+    assert.match(wire, /^\[message from your operator · to answer, run: kosmos reply\] can you look at the lease\?$/,
+      'the person’s message reached the pane with no way to tell where it came from or how to answer it');
+
+    /* ⚠️ THE BUBBLE KEEPS THE PERSON'S WORDS. The envelope is Kosmos speaking,
+       and a record that stored it would show the person saying it. */
+    const back = await req('/api/agent/leo/thread');
+    /* Located by CONTENT, not by index: this thread is shared with the reply
+       test above and row 0 is its row. Found on 'lease' so an enveloped record
+       is still found (and then fails the equality) rather than silently missed. */
+    const row = JSON.parse(back.body).messages.find((m) => m.text && m.text.includes('lease'));
+    assert.ok(row, 'the person’s message was not recorded at all');
+    assert.equal(row.text, 'can you look at the lease?',
+      'the envelope leaked into the record as the person’s own words');
+  } finally {
+    chatEngine.setRunner(null);
+    fleet.restore();
+    void board;
+  }
+});
+
+test('the operator envelope does not spend the person’s character budget', async () => {
+  /**
+   * 🛑 THE REGRESSION A PREPENDING CALLER WOULD HAVE SHIPPED. `messageProblem`
+   * measures what it is handed, so gluing the envelope on before the check
+   * would refuse a message at exactly MAX_TEXT with *"keep it to 2000
+   * characters or fewer"* — naming a limit the text the person typed does not
+   * exceed, which is unfalsifiable from where they are standing. That is why
+   * the envelope is a parameter of `deliver` rather than a concatenation.
+   */
+  const chatEngine = require('./engine/chat');
+  const board = fleet.install([fleet.agent('leo', { state: 'idle' })]);
+  const typed = [];
+  try {
+    /* `verifyAtSend` asks the pane again immediately before the keystroke, so a
+       runner that answers nothing refuses the send. Same canned shape the room
+       route's tests use. */
+    chatEngine.setRunner((args) => {
+      if (args[0] === 'display-message') return { ran: true, spawnFailed: false, status: 0, out: '2.1.212\t\t0\n', err: '' };
+      typed.push(args);
+      return { ran: true, spawnFailed: false, status: 0, out: '', err: '' };
+    });
+    const brim = 'x'.repeat(chatEngine.MAX_TEXT);
+
+    const r = await req('/api/agent/leo/thread', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: brim }),
+    });
+    assert.equal(r.status, 200, r.body);
+    assert.notEqual(JSON.parse(r.body).delivery.state, chatEngine.DELIVERY.COULD_NOT,
+      'a message the person is allowed to send was refused because of Kosmos’s own words: '
+      + JSON.parse(r.body).delivery.because);
+
+    const wire = typed.map((a) => a[5]).find((t) => typeof t === 'string' && t.includes(brim)) || '';
+    assert.ok(wire.length > chatEngine.MAX_TEXT,
+      'the wire should carry envelope AND the full message; the person’s half is what is capped');
+  } finally {
+    chatEngine.setRunner(null);
     fleet.restore();
     void board;
   }

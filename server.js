@@ -2175,12 +2175,19 @@ const server = http.createServer((req, res) => {
         }
         // Deliver first, then record the verdict with it — and record even a
         // failure, exactly as the project thread does.
-        const delivery = chat.deliver(name, body.text, roster);
+        const delivery = chat.deliver(name, body.text, roster, messages.OPERATOR_DIRECT);
         const kept = chat.appendMessage(chat.DIRECT, name, {
           text: chose || body.text,
           /**
-           * What was actually typed into the pane, when it is not what the
-           * bubble shows.
+           * The PERSON'S words as they reached the pane, when they are not the
+           * words the bubble shows.
+           *
+           * ⚠️ NOT "everything that was typed", which it was called until the
+           * operator envelope landed above and made that phrasing false on
+           * every row. The envelope is Kosmos's own framing, identical on all
+           * of them, and storing a constant per message would be noise; what
+           * this field reconciles is the bubble against the message. The
+           * previous drift here was the same shape and is recorded below.
            *
            * ⚠️ THROUGH `cleanMessage`, because that is what `deliver` types.
            * Storing the raw body made this field's own comment false: a text
