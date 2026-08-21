@@ -1523,7 +1523,21 @@ const server = http.createServer((req, res) => {
    * ⚠️ THE SENDER IS THE PANE, NEVER A NAME IN THE BODY, which is the same rule
    * `/api/msg` follows: a name in a request is a claim by the caller, and any
    * local process could make it. `resolveSender` ties the pane to a card on the
-   * roster, so an agent can only ever write as itself.
+   * roster, so a body naming somebody else changes nothing.
+   *
+   * 🛑 AND A PANE IS A CLAIM TOO, said plainly because an earlier version of
+   * this comment said "an agent can only ever write as itself" and that is
+   * stronger than the code. Pane ids are enumerable —
+   * `tmux list-panes -a -F '#{pane_id} #{session_name}'` — so any local process
+   * can pass a second agent's pane and have this write as that agent.
+   *
+   * ⚠️ WHAT MAKES IT WORSE HERE THAN ON `/api/msg`, which has the identical
+   * exposure: that route types into a live terminal somebody can watch, and
+   * this one PERSISTS a false attribution into the record the screen reads.
+   * The browser vector is closed by `crossSiteWrite`; the local-process one is
+   * not, and nothing on this machine separates one local program from another.
+   * Recorded rather than papered over, because a secret the CLI holds would sit
+   * in a file the same processes can read.
    *
    * ⚠️ AND THERE IS NO DELIVERY STATE HERE. The person's own sends carry one
    * because a message must cross into a terminal and may not arrive. This
