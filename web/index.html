@@ -3990,6 +3990,19 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <h3 class="dlab">Keeping agents running</h3>
       <div id="set-machine"><p class="dhint">Checking this computer…</p></div>
       <p class="dhint" id="set-machine-msg" role="status" hidden></p>
+      <!-- 🔑 MOVED OUT OF THE UPDATES BOX (Mona Lisa, 2026-08-21). When the
+           version line came back to Settings this sentence came with it, and
+           landed directly beneath `#build` — so a fact about how Kosmos RUNS
+           read as a subtitle explaining what "0.2.24" means. The two are
+           unrelated and the layout said otherwise.
+           ⚠️ MOVED RATHER THAN DROPPED: it is the only place in the app that
+           says this, and it is the reassurance somebody needs the first time
+           they close the window. This box's subject is exactly "your agents
+           keep running", which is what the sentence is about.
+           📌 A plain hint rather than a ✓ row: the rows above are CHECKED
+           machine state, and this is a statement about the product's design.
+           Drawing it with a tick would claim we had verified something. -->
+      <p class="dhint" style="margin:12px 0 0;">Kosmos runs in the background. Closing this window does not stop your agents.</p>
     </section>
 
     <section class="dbox">
@@ -4088,7 +4101,6 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            state and one of them would eventually be wrong. -->
       <div class="setrow" id="upd-row">
         <div><b id="build"></b>
-          <p class="dhint" style="margin:2px 0 0;">Kosmos runs in the background. Closing this window does not stop your agents.</p>
           <b id="upd-line" role="status" class="upd-line"></b></div>
         <button class="btn-quiet" type="button" id="upd-btn" hidden>Check for Update</button>
       </div>

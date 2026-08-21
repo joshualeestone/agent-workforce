@@ -1598,7 +1598,17 @@ function readContext(agentName, model, exactSession) {
      */
     if (notYetStarted(agentName)) {
       return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true,
-               because: 'it has not started a session yet' };
+               /* ⚠️ NOT "it has not started a session yet", which is what this said
+                  when it shipped in 0.2.23 and which Mona Lisa's jargon check
+                  caught within minutes. "Session" is agent vocabulary; this
+                  sentence is read by the person, on the Memory panel. The word
+                  arrived from the LAYER the fact was computed in, which is how
+                  most of these get in.
+                  📌 And the fact is easier to say than the mechanism: nobody
+                  needs to know a session exists to understand that nothing has
+                  happened yet. Beside `lead: 'memory has nothing recorded yet.'`
+                  the pair reads as one thought rather than two vocabularies. */
+               because: 'it has not done anything yet' };
     }
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
              because: 'we cannot find a transcript for it' };
