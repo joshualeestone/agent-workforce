@@ -1305,7 +1305,12 @@ function readThread(projectId, agent, bornAt) {
   // the one this file's whole damage taxonomy exists to remove, and every
   // OTHER damage mode was already first-class. UNPARSEABLE routes it into
   // the existing set-aside-and-start-again repair, so the file is kept.
-  if (parsed.messages.some((m) => !m || typeof m !== 'object' || typeof m.text !== 'string')) {
+  /* ⚠️ `from` IS NOT CHECKED HERE, deliberately: absent is the operator, and a
+     file written before this field existed is not damaged. What IS checked is
+     that a present one is a string, because a non-string reaches the renderer
+     and the whole point of this gate is that nothing unrenderable gets past. */
+  if (parsed.messages.some((m) => !m || typeof m !== 'object' || typeof m.text !== 'string'
+      || (m.from !== undefined && m.from !== null && typeof m.from !== 'string'))) {
     const damaged = new Error('this conversation is there but we cannot make sense of it');
     damaged.code = 'UNPARSEABLE';
     throw damaged;
@@ -1656,6 +1661,25 @@ function appendLocked(projectId, agent, entry, bornAt) {
     messages: [...existing.messages, {
       at: (entry && entry.at) || new Date().toISOString(),
       text: cleanMessage(entry && entry.text),
+      /**
+       * 🛑 WHO SPOKE, AND THE ABSENCE OF THIS FIELD IS WHY AN AGENT COULD NOT
+       * ANSWER AT ALL. Every row in a thread was the operator's by definition
+       * — the readers stamp `kind: 'operator'` on the way out — so the format
+       * had no way to represent a reply, and there was nothing for a command
+       * to write into. A person said hello, watched the answer appear in the
+       * agent's terminal, and waited (#175).
+       *
+       * ⚠️ ABSENT MEANS THE OPERATOR, and that is load-bearing rather than
+       * tidy: every thread file already on a person's disk was written without
+       * this field, and they must go on rendering exactly as they do now. A
+       * required field would have made the change a migration.
+       *
+       * ⚠️ AND IT IS THE SESSION NAME, never a display name. The log holds what
+       * the wire holds; display-name resolution happens at the surface, which
+       * is the same rule `send` follows.
+       */
+      from: (entry && typeof entry.from === 'string' && entry.from.trim())
+        ? entry.from.trim() : null,
       /**
        * ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered
        * answer sends the digit the agent's prompt is waiting for and shows the

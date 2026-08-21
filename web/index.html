@@ -1246,6 +1246,12 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   line-height: 1.45; background: var(--k-sunk, rgba(20,22,26,.05));
   overflow-wrap: anywhere; }
 .dm.mine .dm-b { background: rgba(214,166,46,.14); }
+/* ⚠️ THEIRS IS THE DEFAULT SHAPE, not a mirror of mine: `.dm` already aligns
+   left, so this only needs the surface that distinguishes a reply from the
+   person's own words. Deliberately quieter than `.mine` — the person's rows
+   carry a delivery verdict and an agent's do not, so a louder treatment here
+   would read as the more important half. */
+.dm.theirs .dm-b { background: var(--k-surface); border: 1px solid var(--k-rule); }
 .dm-w { font-size: .75rem; color: var(--k-ink-2); }
 /* ⚠️ THE META LINE FOLLOWS ITS BUBBLE. `.dm.mine` is `align-items: flex-end`,
    which right-aligns the SPAN while it is narrower than the row -- and a
@@ -6570,7 +6576,37 @@ const TALK_QUESTION = {};
  * delivery states and their sentences are decided once, or the same send would
  * be described two ways on two screens.
  */
+/**
+ * Whose words these are, in the words the person uses for that agent.
+ *
+ * ⚠️ THE RECORD HOLDS THE SESSION NAME — the log holds what the wire holds —
+ * and every surface resolves it at the edge. `name` is the display name the
+ * page already has for the agent whose box this is, so a reply from THEM reads
+ * as them; anything else is a session name we have no card for here and is
+ * shown as it is rather than guessed at.
+ */
+function dmWho(from, name) {
+  if (!CURRENT) return String(from);
+  return from === CURRENT.sessionName ? (name || CURRENT.name || String(from)) : String(from);
+}
+
 function dmRow(m, name) {
+  /**
+   * 🛑 A ROW THE AGENT WROTE, which this thread could not hold until now. Every
+   * row was the person's by definition — this function said "You" with no
+   * branch — so an agent had nowhere to put an answer and a person watched an
+   * empty box (#175).
+   *
+   * ⚠️ NO DELIVERY VERDICT ON THIS SIDE, and that is not an omission. The
+   * person's rows carry one because a message has to cross into a terminal and
+   * may not arrive. An agent's reply is written straight into the record the
+   * screen reads: the append IS the arrival, and printing "Sent" beside it
+   * would invent a mechanism that did not happen.
+   */
+  if (m && m.from) {
+    return '<div class="dm theirs"><div class="dm-b">' + esc(m.text) + '</div>'
+      + '<span class="dm-w">' + esc(dmWho(m.from, name)) + pjWhenPart(m.at) + '</span></div>';
+  }
   const v = pjVerdict(m, name);
   /* ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered answer
      sends the digit the agent's prompt is waiting for and shows the option's
