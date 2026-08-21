@@ -1283,19 +1283,57 @@ function tailBytes(file, bytes = 262144) {
   }
 }
 
+/**
+ * ⚠️ TWO DIFFERENT ANSWERS WERE SHARING ONE WORD, and the card said the one
+ * that is a CLAIM.
+ *
+ *     nothing has been recorded yet   an admission: we looked, there is
+ *                                     nothing there to look at
+ *     we could not read it            a claim: something exists and we failed
+ *
+ * A thirty-second-old agent is the first. The card said "Unknown" and the ring
+ * said "Memory could not be read", so a brand-new agent read as a fault — which
+ * is why Josh screenshotted a working agent and asked how to stop it.
+ *
+ * 🔑 Mona Lisa's rule, and the reason the split resolves the way it does:
+ * WHEN A CASE CANNOT BE ASSIGNED WITHOUT A THRESHOLD, IT GOES TO UNKNOWN.
+ * "Not yet" is a claim about where an agent is in its life; "unknown" is an
+ * admission about what we can see, and a wrong claim is worse than a vague
+ * admission. So ambiguity resolves toward the admission every time.
+ *
+ * ⚠️ AND `notYet` IS DECIDED ON WHAT THE CODE ALREADY DISTINGUISHES, never on
+ * the agent's age. Age would have been a threshold wearing a dimension's
+ * clothes: it looks principled, and the number is somebody's guess.
+ */
 function readContext(agentName, model, exactSession) {
   const file = transcriptFor(agentName, exactSession);
   if (!file) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'no transcript found' };
+    // ⚠️ TWO STATES COLLAPSED INTO ONE `null` HERE. No registry entry means
+    // Claude Code has never registered a session for this agent, so there has
+    // never been anywhere to look. An entry whose file is GONE is the other
+    // thing entirely: it was read once and is not there now, and calling that
+    // "not yet" would be false in a specific way rather than merely vague.
+    const registered = sessionIdsFor(agentName, exactSession).length > 0;
+    return registered
+      ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'its transcript is not where the registry says' }
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not started a session yet' };
   }
   const text = tailBytes(file);
-  if (!text) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'could not read the transcript' };
+  // ⚠️ `text === null` AND `text === ''` ARE NOT THE SAME ANSWER, and `if
+  // (!text)` treated them as one. tailBytes returns null when the read threw
+  // and '' when the file is there and empty — which is exactly the state a
+  // transcript is in the instant Claude Code opens it. So the newest agent on
+  // the machine was reported as one we could not read.
+  if (text === null) {
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'could not read the transcript' };
+  }
+  if (text === '') {
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'its transcript is still empty' };
   }
 
   const usages = [...text.matchAll(/"usage":\{([^}]*)\}/g)];
   if (!usages.length) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'no usage data in the transcript' };
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not used any memory yet' };
   }
 
   const num = (blob, key) => {
@@ -1308,18 +1346,29 @@ function readContext(agentName, model, exactSession) {
                  num(last, 'cache_read_input_tokens');
 
   if (!tokens) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'usage data was empty' };
+    // ⚠️ UNKNOWN, NOT "not yet", and this is the tie-breaker doing its work.
+    // A usage record that sums to zero could be a session that has genuinely
+    // done nothing, or data that is wrong. Separating those needs the agent's
+    // age, which is the threshold we refused, so it goes to the admission.
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'usage data was empty' };
   }
 
   const found = limitFor(model);
   const ceiling = found && found.limit;
 
   if (!ceiling) {
+    // ⚠️ A SEVENTH CASE, and it is neither of the two the split is about: we
+    // READ the memory and cannot express it as a percentage, because we do not
+    // know what this model holds. `notYet` is false because something was read;
+    // the card still shows the unknown badge, since pctOf is null. Whether
+    // Unknown is the right WORD for a measured-but-unscaled agent is a
+    // separate question and belongs with the unknown-model cards (#149/#150).
     return {
       tokens,
       percent: null,
       ceiling: null,
       ceilingSource: null,
+      notYet: false,
       confidence: CONFIDENCE.STRUCTURED,
       because: `measured, but we do not know how much ${model || 'this model'} can hold`,
     };
@@ -1330,6 +1379,7 @@ function readContext(agentName, model, exactSession) {
     tokens,
     percent: Math.min(100, percent),
     overCeiling: percent > 100,
+    notYet: false,
     ceiling,
     ceilingAssumed: found.assumed,
     confidence: CONFIDENCE.STRUCTURED,
@@ -1667,7 +1717,10 @@ function snapshot() {
     const { model } = tied ? readModel(pane.name, pane.session) : { model: null };
     const context = tied
       ? readContext(pane.name, model, pane.session)
-      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, because: 'we cannot tell which agent this is, so we will not read another agent\u2019s transcript for it' };
+      // ⚠️ Unknown, and not because it is ambiguous: this one is a REFUSAL. We
+      // can see there is something to read and are declining to read it, so
+      // 'not yet' would be false about us as well as about the agent.
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'we cannot tell which agent this is, so we will not read another agent\u2019s transcript for it' };
     const identity = tied
       ? readIdentity(pane.name)
       : { displayName: pane.name, role: null, derived: false };

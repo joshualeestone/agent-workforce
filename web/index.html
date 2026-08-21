@@ -4294,6 +4294,39 @@ function memBand(pct) {
    server-computed and numeric today; the day that changes, a non-number
    must degrade to the honest unknown, never reach innerHTML raw. Same
    for-the-day-upstream-changes posture as the answer button's tie gate. */
+/* ⚠️ THE ONE PLACE THE TWO UNKNOWN ANSWERS BECOME WORDS, and it is shared for
+   the same reason memBand and pctOf are: this fact has FIVE renderers — the
+   card badge, the ring's aria-label, the list row, the Memory box and the
+   detail header — and this file's own comments record them drifting apart
+   twice, each time because somebody updated the surfaces they could see.
+   A sixth surface added later gets the split for free by calling this.
+
+   🔑 The distinction, and why only one of them is safe to claim:
+     notYet   NOTHING HAS BEEN RECORDED YET. An admission, and we can see that
+              nothing has: no session registered, an empty transcript, no usage
+              rows. True of every agent for its first seconds.
+     else     WE COULD NOT READ IT. A claim that something exists and we failed.
+   Saying the claim about a thirty-second-old agent is what made a brand-new
+   agent read as a fault (#164's neighbour; Mona Lisa's ruling, 2026-08-21).
+
+   ⚠️ `word` and `aria` are kept DISJOINT AS STRINGS in both branches, so an
+   assertion about one cannot be satisfied by the other — the same property the
+   ring's docblock relies on. */
+function memUnknown(ctx) {
+  const notYet = !!(ctx && ctx.notYet);
+  return notYet
+    ? { notYet: true,
+        word: 'Not yet read',
+        aria: 'Nothing has been recorded for it so far.',
+        lead: 'has not written anything to read yet.',
+        note: 'That is normal for an agent this new. There is nothing wrong with it and nothing to do.' }
+    : { notYet: false,
+        word: 'Unknown',
+        aria: 'Memory could not be read.',
+        lead: 'memory could not be read.',
+        note: 'That is not the same as it being empty. Nothing here can tell you how much room is left.' };
+}
+
 function pctOf(ctx) {
   return Number.isFinite(ctx.percent) ? ctx.percent : null;
 }
@@ -4432,7 +4465,7 @@ function ring(a) {
   const pct = pctOf(ctx);
   if (pct === null) {
     return `<svg viewBox="0 0 72 72" role="img"
-         aria-label="${esc(a.name)}. Memory could not be read.">
+         aria-label="${esc(a.name)}. ${memUnknown(ctx).aria}">
       <circle class="gu" cx="36" cy="36" r="${R}" fill="none" stroke-width="4"/>
       ${av}
     </svg>`;
@@ -4518,7 +4551,7 @@ function card(a) {
        twice per card.
        The gap this badge closes was always the SIGHTED half. (Mona Lisa,
        2026-08-19; the pack uses this pattern 160 times on .haz/.qmark/.rest.) */
-    ? '<span class="membadge unk" aria-hidden="true">Unknown</span>'
+    ? `<span class="membadge unk" aria-hidden="true">${memUnknown(a.context).word}</span>`
     : (pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '');
   const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
@@ -4566,7 +4599,7 @@ function lrow(a) {
      draw this row at all, which is why nobody checked it: it depicts this state
      only on a card. */
   const mem = pct === null
-    ? `<span class="bar unknown"></span><span class="pct">Unknown<span class="vh"> memory</span></span>`
+    ? `<span class="bar unknown"></span><span class="pct">${memUnknown(a.context).word}<span class="vh"> memory</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
@@ -5950,9 +5983,15 @@ function memoryBox(a) {
        surfaces, one fact, and the third left on the old treatment. Not
        dishonest, since the sentence below states it in full, but not the rule
        either, and the rule exists so the three cannot drift apart. */
-    return '<div class="memrow"><span class="bar unknown"></span><span class="pct">Unknown</span></div>'
-      + '<p class="dhint" style="margin:12px 0 0;"><b>We could not read ' + esc(a.name) + '\u2019s memory.</b> '
-      + 'That is not the same as it being empty. Nothing here can tell you how much room is left.</p>';
+    /* ⚠️ AND THE SENTENCE SPLITS WITH THE WORD. "We could not read Dan's
+       memory" is a CLAIM, and on an agent that started thirty seconds ago it
+       is false — it is also the longest, most confident statement of the fact
+       on any screen, so it is the one that would do the most damage left
+       unchanged. */
+    const u = memUnknown(a.context);
+    return '<div class="memrow"><span class="bar unknown"></span><span class="pct">' + u.word + '</span></div>'
+      + '<p class="dhint" style="margin:12px 0 0;"><b>' + esc(a.name) + '\u2019s ' + u.lead + '</b> '
+      + u.note + '</p>';
   }
   const band = memBand(pct);
   return '<div class="memrow"><span class="bar"><i class="' + band + '" style="width:' + pct + '%"></i></span>'
@@ -7232,7 +7271,7 @@ function openDetail(sessionName) {
      treatment" was this branch's own note, and this was the fourth. */
   const dbadge = document.getElementById('d-membadge');
   dbadge.className = 'membadge' + (dpct === null ? ' unk' : '');
-  dbadge.textContent = dpct === null ? 'Unknown' : dpct + '%';
+  dbadge.textContent = dpct === null ? memUnknown(a.context).word : dpct + '%';
   dbadge.hidden = !(dpct === null || dpct >= NEARLY_FULL);
   document.getElementById('d-memory').innerHTML = memoryBox(a);
   const drun = document.getElementById('d-runson');
