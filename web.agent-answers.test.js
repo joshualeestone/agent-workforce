@@ -21,6 +21,7 @@ process.env.AGENT_WORKFORCE_DATA = SANDBOX;
 process.on('exit', () => { try { fs.rmSync(SANDBOX, { recursive: true, force: true }); } catch { /* best effort */ } });
 
 const chat = require('./engine/chat');
+const fleet = require('./test-support/fleet');
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 
 const readBack = (agent) => chat.readThread(chat.DIRECT, agent).messages;
@@ -125,20 +126,33 @@ test('a reply is escaped on its way to the screen', () => {
     for (; i < page.length; i++) { if (page[i] === '{') d++; else if (page[i] === '}') { d--; if (!d) break; } }
     return page.slice(at, i + 1);
   };
+  /* ⚠️ A REAL CARD, from the fixture that produces them. The first version
+     hand-wrote a two-field stand-in for one and this repo's own lint
+     caught it — the same rule that caught a hand-built project member earlier
+     today. `CURRENT` is a board card, so it is exactly the class the rule is
+     about: a stand-in is free to carry fields the producer never emits. */
+  /* Shorthand, which the lint permits and which is what a real construction
+     looks like: these are the card's own fields, not invented ones. */
+  const pick = ({ sessionName, name }) => ({ sessionName, name });
+  const board = fleet.install([fleet.agent('dana')]);
+  const card = board.agents.find((a2) => a2.name === 'dana');
+  assert.ok(card, 'the fixture produced no card, so the renderer below has no identity');
+
   // eslint-disable-next-line no-new-func
   const dmRow = new Function(
-    'let CURRENT = { sessionName: "dana", name: "Dana" };\n'
+    'let CURRENT = ' + JSON.stringify(pick(card)) + ';\n'
     + ['esc', 'pjWhen', 'pjWhenPart', 'pjSentence', 'pjVerdict', 'dmWho', 'dmRow'].map(slice).join('\n')
     + '; return dmRow;',
   )();
 
-  const html = dmRow({ from: 'dana', text: '<img src=x onerror=alert(1)>', at: new Date().toISOString() }, 'Dana');
+  const html = dmRow({ from: card.sessionName, text: '<img src=x onerror=alert(1)>', at: new Date().toISOString() }, card.name);
   assert.doesNotMatch(html, /<img/, 'an agent’s reply reaches the page unescaped');
   assert.match(html, /&lt;img/, 'the text was dropped rather than escaped');
   assert.match(html, /dm theirs/, 'the reply is rendered as the person’s own words');
   assert.doesNotMatch(html, /Sent|Placed|Could not/, 'a reply was given a delivery verdict it cannot have');
 
   // ⚠️ THE CONTROL: the person's own row still renders, and still as theirs.
-  const mine = dmRow({ text: 'hi', at: new Date().toISOString(), delivery: { state: 'placed' } }, 'Dana');
+  const mine = dmRow({ text: 'hi', at: new Date().toISOString(), delivery: { state: 'placed' } }, card.name);
   assert.match(mine, /dm mine/, 'the person’s rows stopped rendering as theirs');
+  fleet.restore();
 });
