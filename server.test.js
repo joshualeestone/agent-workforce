@@ -8378,3 +8378,64 @@ test('the operator envelope does not spend the person’s character budget', asy
     void board;
   }
 });
+
+test('a room row on an agent’s page names the project the way a person named it', async () => {
+  /**
+   * 🛑 THE SLUG IN A SENTENCE, THIRD SURFACE IN ONE DAY. Josh, 2026-08-21: a
+   * project he named "Aug 21 4:04 PM" rendered on Marilyn's page as
+   * "to everyone on AUG21404PM". The same defect made his `test project` agent
+   * insist `testproject` was not one of its projects; the agent envelope in
+   * engine/messages.js was fixed that morning and this surface was not checked.
+   *
+   * ⚠️ BOTH HALVES, because either alone lets it regress silently: the ROUTE
+   * has to send the name, and the RENDERER has to prefer it.
+   */
+  const escSrc = (() => {
+    const raw2 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+    const sc = raw2.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const at = sc.indexOf('function esc(');
+    return sc.slice(at, sc.indexOf('\n}', at) + 2);
+  })();
+  const convoRow = pageFunction('convoRow', escSrc);
+
+  const named = convoRow({ kind: 'post', from: 'heather', to: ['marilyn'], project: 'aug21404pm',
+    projectName: 'Aug 21 4:04 PM', text: 'hello', at: 'x' }, 'marilyn');
+  assert.match(named, /to everyone on Aug 21 4:04 PM/,
+    'the row showed the project’s slug in a sentence a person reads');
+  assert.doesNotMatch(named, /aug21404pm/,
+    'the slug reached the sentence beside the name');
+
+  /* 📌 THE FALLBACK IS THE ID, never a hole: a post whose project the agent has
+     since left carries no name, and an empty "to everyone on" would be worse
+     than an ugly one. */
+  const unnamed = convoRow({ kind: 'post', from: 'heather', to: ['marilyn'], project: 'oldroom',
+    projectName: null, text: 'hello', at: 'x' }, 'marilyn');
+  assert.match(unnamed, /to everyone on oldroom/,
+    'a row with no resolvable name lost the project entirely');
+
+  // ---- and the route actually sends it ------------------------------------
+  const messagesEngine = require('./engine/messages');
+  const projectsEngine = require('./engine/projects');
+  const board = fleet.install([fleet.agent('marilyn', { state: 'idle' }), fleet.agent('heather', { state: 'idle' })]);
+  try {
+    const made = projectsEngine.create({ name: 'Aug 21 4:04 PM', agents: ['marilyn', 'heather'] }, board.agents);
+    const pid = (made && (made.id || (made.project && made.project.id))) || null;
+    assert.ok(pid, 'the fixture could not make the project: ' + JSON.stringify(made));
+    assert.notEqual(pid, 'Aug 21 4:04 PM', 'the fixture needs an id that differs from the name');
+    fs.mkdirSync(nodePath.dirname(messagesEngine.LOG), { recursive: true });
+    fs.appendFileSync(messagesEngine.LOG, JSON.stringify({
+      kind: 'post', id: 'm1', project: pid, from: 'heather', to: ['marilyn'],
+      text: 'hello', at: new Date().toISOString(), outcomes: { marilyn: 'placed' },
+    }) + '\n');
+
+    const res = await req('/api/agent/marilyn/conversation');
+    assert.equal(res.status, 200, res.body);
+    const row = JSON.parse(res.body).rows.find((r) => r.kind === 'post');
+    assert.ok(row, 'the room post never reached the conversation feed');
+    assert.equal(row.project, pid, 'the row must keep the id for everything mechanical');
+    assert.equal(row.projectName, 'Aug 21 4:04 PM',
+      'the route sent no name, so the screen has only the slug to print');
+  } finally {
+    fleet.restore();
+  }
+});

@@ -6296,7 +6296,10 @@ function convoRow(r, agentName) {
     // a remark to a group must never read as a message to one. The
     // person's rows key on the flag, never on a name match.
     const isOp = r.operator === true;
-    const who = (isOp ? 'You' : r.from) + ' · to everyone on ' + r.project;
+    /* ⚠️ THE NAME, FALLING BACK TO THE ID. `r.project` is the slug and this is
+       a sentence: "to everyone on AUG21404PM" for a project called "Aug 21 4:04
+       PM" (Josh, 2026-08-21). Same rule as the agent envelope, third surface. */
+    const who = (isOp ? 'You' : r.from) + ' · to everyone on ' + (r.projectName || r.project);
     let state = '';
     if (r.state === 'unconfirmed') {
       state = '<span class="cv-state">Sent to ' + esc(agentName) + '. We could not confirm it arrived.</span>';

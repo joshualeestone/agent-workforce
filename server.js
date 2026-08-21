@@ -1695,6 +1695,10 @@ const server = http.createServer((req, res) => {
       // own "which projects is this agent on", readable from both ends.
       let mine = [];
       try { mine = projects.projectsFor(name, null) || []; } catch { mine = null; }
+      /* id -> the name a person gave it, for the room rows below. Built from
+         the SAME `mine` the project threads are read from, so the two halves of
+         this response cannot disagree about what a project is called. */
+      const PROJECT_NAMES = new Map((mine || []).map((p) => [p.id, p.name]));
       if (mine === null) {
         unreadable.push({ kind: 'unreadable', what: 'your projects', at: null });
       } else {
@@ -1745,7 +1749,16 @@ const server = http.createServer((req, res) => {
           // post, naming its project -- a remark to a group must never
           // read as a message to one. `operator` rides so the screen can
           // key the person's rows on the flag, never on a name match.
+          /* ⚠️ THE NAME RIDES BESIDE THE ID, never instead of it. The row is
+             keyed on `project` (the slug) by everything mechanical, and the
+             SENTENCE a person reads must not be. Josh, 2026-08-21: a project he
+             named "Aug 21 4:04 PM" rendered here as "to everyone on
+             AUG21404PM". Third instance of one rule today — the agent envelope
+             in engine/messages.js carries the same note and the same split.
+             📌 Null when the agent is no longer on the project (it is not in
+             `mine`), and the screen falls back to the id rather than to a hole. */
           rows.push({ kind: 'post', id: m.id, from: m.from, to: m.to, project: m.project,
+            projectName: PROJECT_NAMES.get(m.project) || null,
             operator: m.operator === true, text: m.text, at: m.at,
             state: (m.outcomes && m.outcomes[name]) || null });
         } else if (m.kind === 'valve') {
