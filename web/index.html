@@ -834,7 +834,13 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .atask { font-size: .9375rem; color: var(--k-ink-2); margin-top: 6px; }
 .acut { height: 1px; background: var(--k-rule); margin: 16px 0 14px; }
 .acard .ameta { font-weight: 600; color: var(--k-ink); font-size: .9375rem; }
-.acard .amodel { font-size: .875rem; color: var(--k-ink-2); margin-top: 1px; }
+/* Josh, 2026-08-19: "a tiny bit more. Not crazy." One pixel is not a gap, it is
+   the absence of one. Mona Lisa's spec (#184) is `--space-3`.
+   ⚠️ MEASURE THE SPACE BUDGET, NOT THE ELEMENT — her rule, and the thing to
+   check is the TALLEST card on the board rather than the one that prompted the
+   change. Measured after: tallest went 318px -> 323px at 1400 and at 700, role
+   line still 32px (two lines, not three), so nothing was pushed over. */
+.acard .amodel { font-size: .875rem; color: var(--k-ink-2); margin-top: var(--space-3); }
 .acard .note { text-align: left; margin-top: 12px; }
 /* presence is NOT status: three states, and the third does not look like off */
 .pres { position: absolute; right: 6px; bottom: 6px; width: 14px; height: 14px;
