@@ -2674,6 +2674,24 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <button class="btn" id="d-send" type="button">Send</button>
     </div>
     <p class="fmsg" id="d-say-msg" role="alert" aria-live="assertive"></p>
+    <!-- 🛑 WHERE A REPLY COMES BACK, said because it does not come back HERE.
+         An agent cannot write into this thread: the record has no field for a
+         sender, so every entry in it is the person's message to the agent
+         (#175). The box's own heading says "Just between you and <name>", which
+         describes a two-way place — so somebody says hello, sees the answer in
+         the agent's terminal and nothing here, and waits. That is exactly what
+         happened to Josh on 2026-08-21.
+         ⚠️ THIS FIXES NOTHING. It stops the screen implying a conversation the
+         product cannot hold, and it tells the person where the answer actually
+         is, which is the difference between an admission and a useful one.
+         ⚠️ IT SITS BY THE COMPOSER, NOT AT THE FOOT (Mona Lisa): by the time
+         somebody reaches the bottom of a box they have already decided what it
+         does. The restart note below has been there all along and he never
+         mentioned it.
+         ⚠️ "FOR NOW" IS THE HOUSE FORM, checked rather than invented — Settings
+         already says "One account for now. Connecting another is not built
+         yet." It says the limit is known, not that they are holding it wrong. -->
+    <p class="dhint" id="d-reply-where" style="margin:8px 0 0;"></p>
     <!-- ⚠️ THE THREAD PERSISTS, THE AGENT'S RECOLLECTION DOES NOT, and a chat
          window normally conflates the two. The pack's sentence, verbatim. -->
     <p class="dhint" id="d-persist" style="margin:12px 0 0;"></p>
@@ -6553,6 +6571,12 @@ async function paintTalk(sessionName, agentName) {
   document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
   document.getElementById('d-talk-hint').textContent =
     'Just between you and ' + name + '. Nothing here belongs to a project.';
+  /* ⚠️ WRITTEN WITH THE LABEL, not on the fetch's success path, for the reason
+     the comment below gives about the other four: whether this line names the
+     right agent does not depend on the fetch. */
+  document.getElementById('d-reply-where').textContent =
+    name + ' will see this in their own window. Replies come back there rather '
+    + 'than here, for now.';
   /* ⚠️ THE TEXT HERE, THE VISIBILITY ON THE SUCCESS PATH, and the first
      version of this fix got that backwards. Whether the line says the right
      agent's name does not depend on the fetch, so it is written with the other
