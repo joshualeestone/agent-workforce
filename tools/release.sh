@@ -34,6 +34,25 @@ const j=JSON.parse(fs.readFileSync(p,'utf8'));
 if(j.version!=='$V'){ j.version='$V'; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n'); console.log('   bumped to $V'); }
 else console.log('   already $V');"
 
+# 🛑 AND THE BUMP IS COMMITTED BEFORE ANYTHING IS BUILT, because otherwise THE
+# GUARD IN STEP 1 IS DEFEATED BY STEP 2. It checks a clean tree, then this makes
+# the tree dirty, and the bundle is stamped `<sha>-DIRTY` by
+# `git describe --dirty` — which is honest and means the artifact people are
+# running is not checkoutable. 0.2.11 and 0.2.12 both shipped that way, and both
+# times somebody had to hash the bundle against a commit to establish that
+# nothing unexpected was in it.
+#
+# ⚠️ THE POINT IS NOT TIDINESS. A version stamp that cannot be resolved to a
+# commit means "what is this person running" is answerable only by comparison,
+# which is exactly the question a release exists to make cheap.
+if ! git -C "$REPO" diff --quiet -- package.json; then
+  git -C "$REPO" add package.json
+  git -C "$REPO" commit -q -m "v${V//./} -- version"
+  echo "   committed the bump, so the build is stamped at a real commit"
+fi
+[ -z "$(git -C "$REPO" status --porcelain)" ] || {
+  echo "the tree is dirty after the bump; the bundle would ship as -DIRTY"; exit 1; }
+
 echo "== 3. the whole suite, on the tree that ships =="
 ( cd "$REPO" && yarn test 2>&1 | grep -E '^ℹ (tests|pass|fail)' )
 
