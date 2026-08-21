@@ -4456,7 +4456,7 @@ function ring(a) {
      third cue after arc length and colour. The unknown-memory fact is carried
      three ways: this ring's aria-label ("Memory could not be read."), the dashed
      shape the pack pairs with the unknown card, and -- since the caption was
-     restored as `.membadge unk` -- the visible word "Unknown" in the same
+     restored as `.membadge unk` -- the visible word from `memUnknown` in the same
      .agauge container. ⚠️ The two strings are deliberately disjoint, so an
      assertion about one cannot be satisfied by the other; see the badge. ⚠️ This used to say the
      caption "is gone at Josh's call", which stopped being true when the badge
@@ -4591,7 +4591,7 @@ function lrow(a) {
      caption went onto the card and its neighbour was left holding the defect,
      which is the shape this branch has repeated all day.
      ⚠️ THE WORD, NOT A GLYPH, and never blank (Mona Lisa's ruling). `.pct` is a
-     `min-width`, not a fixed column, so the cell GROWS for "Unknown" and the
+     `min-width`, not a fixed column, so the cell GROWS for either unknown word and the
      flex bar beside it shrinks -- the outcome is fine and the earlier claim that
      it "already sizes for 100%" described a property the rule does not have.
      The two channels then match
@@ -5241,7 +5241,7 @@ async function tick() {
        user keeps the information and a sighted person is left with dashed rings
        and nothing naming what dashed means.
        ✅ THE SECOND HALF IS PAID ON BOTH LAYOUTS: `.membadge unk` carries
-       "Unknown" as a visible word on the card, and the list row's percent
+       the visible word on the card, and the list row's percent
        slot carries the same word instead of a blank. Per the pack's own section
        10 ("shape distinguishes, words identify"), ported from
        FROZEN-2026-08-19.
@@ -5979,7 +5979,7 @@ function memoryBox(a) {
   const pct = pctOf(a.context);
   if (pct === null) {
     /* ⚠️ THE WORD, matching the card and the list row. This kept a bare `?`
-       after the ruling moved the other two surfaces to "Unknown" -- three
+       after the ruling moved the other two surfaces to the word -- three
        surfaces, one fact, and the third left on the old treatment. Not
        dishonest, since the sentence below states it in full, but not the rule
        either, and the rule exists so the three cannot drift apart. */
@@ -7264,7 +7264,7 @@ function openDetail(sessionName) {
      shared derivations the board uses (memBand/pctOf/modelLine). */
   const dpct = pctOf(a.context);
   /* ⚠️ THE FOURTH SURFACE OF ONE FACT. `card()`, `lrow()` and `memoryBox()` all
-     say "Unknown" at `pct === null`; this stayed a two-state slot (percent or
+     say the shared unknown word at `pct === null`; this stayed a two-state slot (percent or
      nothing) while the card's `.membadge` became a three-state one. The fact is
      still stated on this screen by the Memory box, so it was never an honesty
      failure — but "three surfaces, one fact, and the third left on the old
