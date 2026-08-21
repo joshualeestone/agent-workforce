@@ -868,6 +868,324 @@ function questionIn(text) {
   return { text: lines.slice(from).join('\n').replace(/\s+$/, '') };
 }
 
+/**
+ * The numbered choices inside a question, when we can be sure of them.
+ *
+ * ⚠️ THIS IS THE ONE PLACE IN THE PRODUCT THAT READS A PANE AS STRUCTURE, so
+ * it refuses far more than it accepts. `questionIn` above deliberately does not
+ * parse — it scrolls the terminal to the right place and lets the person read
+ * it. This goes one step further because the pack draws BUTTONS, and a button
+ * carrying the wrong option's words sends an answer the person did not give.
+ * When anything is off, it returns null and the screen falls back to the
+ * question as it stands today. NEVER GUESS: an unparsed menu costs a person one
+ * line of typing; a mis-parsed one answers for them.
+ *
+ * Confident means ALL of: the numbers run 1..n with no gap and no repeat; there
+ * are between 2 and 9 of them; they are CONSECUTIVE lines of the capture; and
+ * one of them carries the selection marker the TUI draws.
+ *
+ * WARNING: THE LAST TWO RULES ARE WHAT SEPARATE A MENU FROM PROSE, and without
+ * them this function was confidently wrong on ordinary agent output. Measured
+ * against the shipped version:
+ *
+ *   '1. Do X' + forty lines of anything + '2. Do Y'   -> a two-button menu
+ *   'Would you like to review the plan?
+ *     1. Delete the old build folder
+ *     2. Rebuild from scratch'                        -> a two-button menu
+ *
+ * The second is the dangerous one: `Would you like to` is itself a
+ * NEEDS_YOU_MARKER (engine/status.js), so `asking` is true for exactly that
+ * shape, and the page would have drawn a button that types `1` into a live
+ * pane and recorded that the person chose "Delete the old build folder".
+ *
+ * ADJACENCY says the lines belong to one list rather than being scattered
+ * through a paragraph. THE MARKER says a TUI drew it: every real menu this
+ * product meets highlights one row, and prose does not contain that glyph.
+ * Both refusals land on state 5, which is the screen this page shows today.
+ *
+ * ⚠️ THE REPEAT RULE IS DOING REAL WORK. A pane accumulates, so an ALREADY
+ * ANSWERED menu can still be on screen above the live one — `questionIn` takes
+ * the last marker but its run-up slice can reach back over the earlier one.
+ * That reads as 1,2,1,2, which fails contiguity, which lands on state 5. The
+ * screen showing no buttons over a real menu is a small loss; buttons built
+ * from a menu that was answered ten minutes ago is a wrong answer sent
+ * confidently.
+ *
+ * The frame is stripped from BOTH ends before matching. Claude draws its
+ * prompts inside a box on some versions and bare on others (the captures in
+ * `engine/connect.test.js` are bare, taken from a real v2.1.229), and a leading
+ * `│` would make every option line invisible to a pattern anchored at the
+ * number.
+ *
+ * ⚠️ ONLY THE BOX-DRAWING `│` IS FRAME, at either end. An earlier version also
+ * took an ASCII `|` off the LEFT and not the right, which is one end believing
+ * in ASCII frames while the other does not: an ASCII-framed menu then parsed
+ * with the padding and the closing pipe inside every label. Nothing this
+ * product meets draws boxes in ASCII, so such a menu now simply refuses, which
+ * is the safe end of that choice. And `2. use a pipe |` keeps its final
+ * character, which the verbatim rule two lines down requires.
+ *
+ * Labels ride VERBATIM, which is the pack's rule: a button carries the option's
+ * own words, not our summary of them.
+ */
+// One digit, 1-9, not `\d+`. The count is capped at 9 anyway, and `\d+`
+// accepted `01.` as option 1 through Number() -- a shape no menu draws and one
+// more way for prose to look like a list.
+const OPTION_LINE = /^(❯\s*)?([1-9])[.)]\s+(\S.*)$/;
+// ⚠️ ANY digit count, deliberately wider than OPTION_LINE. It is what sees a
+// line the single-digit pattern cannot read -- a tenth option -- so a menu
+// longer than we can read is refused rather than served as its first nine.
+const ANY_NUMBERED = /^(?:❯\s*)?\d+[.)]\s+\S/;
+
+/**
+ * The text ABOVE a confident option run, which is what tells two menus with the
+ * same labels apart.
+ *
+ * ⚠️ IT EXISTS BECAUSE THE 409 SCREEN-CHECK WAS WEAKER THAN ITS OWN COMMENT.
+ * That guard says it stops "sending an answer to a question they never saw",
+ * and it compared only the LABEL for the pressed digit. Claude's
+ * edit-permission menu draws the same labels for every file -- this codebase
+ * says so in two places -- so a pane that redrew from "Edit file src/a.js?" to
+ * "Edit file src/b.js?" between the paint and the POST passed verification, and
+ * `1` approved a file the person never chose.
+ *
+ * The page has carried this discriminator since the hold was written
+ * (`talkKey`'s `above` half). It simply never sent it, and the server never
+ * asked. This is the engine's twin of that rule, so the comparison is made
+ * against the same fact on both sides rather than two spellings of it.
+ *
+ * Returns null when there is no confident run at all -- there is then nothing
+ * to disagree about, and `optionsIn` has already refused.
+ */
+function questionAbove(questionText) {
+  const opts = optionsIn(questionText);
+  if (!opts) return null;
+  const lines = String(questionText == null ? '' : questionText).split('\n');
+  const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
+    l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
+  /**
+   * ⚠️ EVERY MEANINGFUL LINE ABOVE THE RUN, and this rule has had three shapes.
+   * Each earlier one was broken by a blind pass, and the reason to stop here is
+   * not that this one is perfect -- it is that its failure is on the SAFE side.
+   *
+   *   CONTAINMENT   accepted a pane that had ACCUMULATED a new question above
+   *                 the answered one, because the new window contains the old.
+   *                 Measured end to end: "1" went through against `rm -rf`.
+   *                 Fails OPEN.
+   *   LAST THREE    dropped the discriminating text whenever it sits more than
+   *                 three meaningful lines above the menu. Measured on Claude's
+   *                 own edit-permission prompt: a path line above a two-line
+   *                 diff hunk, so `src/alpha/index.js` and `src/beta/index.js`
+   *                 produced the SAME identity and "1" approved an edit to a
+   *                 file nobody chose. Fails OPEN, on the shape this function's
+   *                 own docblock cites as its reason to exist.
+   *   EVERY LINE    refuses a send when the window's TOP moves, which happens
+   *                 when the cursor leaves the marked option: `questionIn`
+   *                 anchors on the last needs-you marker and `❯ 1. Yes` is one,
+   *                 so arrowing to 2 re-anchors on the prose above and the
+   *                 window gains lines. Fails CLOSED.
+   *
+   * 🛑 A FALSE REFUSAL COSTS ONE MORE PRESS. A false ACCEPT types a digit into
+   * somebody's terminal answering a question they never read. Those are not
+   * comparable, and an earlier comment of mine that called a false refusal
+   * "worse than the hole it closes" had the emphasis backwards: it is worse
+   * than a guard that is RIGHT, not worse than a guard that is wrong the other
+   * way.
+   *
+   * The cursor case is a KNOWN, MEASURED cost, not an oversight: the person
+   * presses again and the second press carries the new identity. The route's
+   * sentence is written to be true of both causes. Narrowing it further wants a
+   * cursor-independent anchor, which is its own change with its own blind pass.
+   *
+   * ⚠️ NULL WHEN NOTHING IDENTIFIES IT. A window of only blanks or frame means
+   * the screen carries nothing that could tell one question from another, and
+   * inventing an identity from the options is the collision this exists to
+   * prevent. Null leaves the caller with the label check it had before.
+   */
+  const above = lines.slice(0, first)
+    .filter((l) => l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').trim() !== '');
+  if (!above.length) return null;
+  return above.join('\n').trim() || null;
+}
+
+function optionsIn(questionText) {
+  const whole = String(questionText == null ? '' : questionText);
+  if (!whole.trim()) return null;
+  const found = [];
+  let marked = false;
+  const lines = whole.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    // The frame comes off both ends, and only the box-drawing character counts
+    // as frame: an ASCII `|` may be the last character of somebody's label.
+    const body = lines[i].replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
+    const bare = body.replace(/^\s+/, '');
+    const m = OPTION_LINE.exec(bare);
+    if (!m) continue;
+    if (m[1]) marked = true;
+    found.push({ n: Number(m[2]), label: m[3], at: i });
+  }
+  if (found.length < 2) return null;
+  for (let i = 0; i < found.length; i += 1) {
+    // 1..n, no gap and no repeat.
+    if (found[i].n !== i + 1) return null;
+    /**
+     * ⚠️ CONSECUTIVE LINES OF THE CAPTURE. A list, not two sentences that
+     * happen to start with numbers, and not a list with anything drawn between
+     * its rows -- which is also what refuses a menu whose label wrapped, since
+     * the wrapped line sits between two options. That refusal is deliberate;
+     * see the note above the scan.
+     */
+    if (i > 0 && found[i].at !== found[i - 1].at + 1) return null;
+  }
+  /**
+   * WHY ANYTHING BELOW THE RUN MATTERS AT ALL.
+   *
+   * A NUMBERED line is a menu longer than the single-digit pattern can read.
+   * Nine buttons over a ten-option prompt is worse than none, because it reads
+   * as the whole choice. (This replaced a `found.length > 9` test that the
+   * one-digit pattern had made unreachable.)
+   *
+   * An INDENTED line is either a wrapped label, which we have decided not to
+   * guess at, or pane furniture. See the note above the scan for why those two
+   * cannot be told apart from a capture alone.
+   *
+   * ⚠️ THIS BLOCK USED TO OPEN "NOTHING MAY HANG BELOW THE RUN … three shapes,
+   * all three refusals", named two, and was contradicted by the docblock
+   * directly beneath it. The correction was written and the sentence it
+   * corrected was left standing, so a reader going top-down was told an
+   * absolute the code deliberately does not have. Deleted rather than softened.
+   */
+  const lastRun = found[found.length - 1];
+  /**
+   * WARNING: WHAT MAY FOLLOW THE RUN, and the previous version of this guard
+   * was wrong in three ways at once.
+   *
+   * It said "nothing may hang below" and named three shapes while checking
+   * two, and neither claim was true: a line at or LEFT of the options was
+   * accepted, one BLANK line let a tenth option through, and the indent it
+   * compared against came from the LAST option -- whose own indent depends on
+   * where the cursor is sitting, since the marked row starts a column left of
+   * the others. The same menu with the cursor moved gave different answers.
+   *
+   * So: the comparison is against the DEEPEST option, which is the indent of
+   * the unmarked rows and is where the box actually starts its content -- the
+   * marked row is drawn a column left of it, so the shallowest option moves
+   * with the cursor and the deepest does not. (Measured: using the shallowest
+   * put the reference at the marked row and refused every real screen,
+   * including a composer line sitting at column zero.) Blank lines are skipped
+   * when looking for a numbered continuation, because a gap does not make a
+   * tenth option disappear. And a following line at or past that indent is
+   * refused rather than only one that is deeper, which is what stops a
+   * same-indent wrapped label being silently truncated onto the button.
+   *
+   * ⚠️ AND SOMETHING UNINDENTED BELOW IS FINE ON PURPOSE. A live pane always
+   * has its composer under the menu, and `questionIn` slices to the end of the
+   * capture, so a rule refusing everything below would refuse every real
+   * screen. The indent is what separates the box's own contents from what
+   * comes after it.
+   */
+  const optIndent = found.reduce((deepest, o) => {
+    const body = lines[o.at].replace(/^\s*│\s?/, '');
+    const indent = body.length - body.replace(/^\s+/, '').length;
+    return Math.max(deepest, indent);
+  }, 0);
+  for (let i = lastRun.at + 1; i < lines.length; i += 1) {
+    const body = lines[i].replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '');
+    const bare = body.replace(/^\s+/, '');
+    // A blank or frame-only line does not end the search for a numbered
+    // continuation: a menu with a gap in it is still a menu we cannot read.
+    if (!bare) continue;
+    if (ANY_NUMBERED.test(bare)) return null;
+    const indent = body.length - bare.length;
+    if (indent >= optIndent) return null;
+    break;
+  }
+  /**
+   * ⚠️ AND PAST THE COMPOSER, FOR THE CONTINUATION ONLY.
+   *
+   * The loop above stops at the first unindented line, deliberately, because a
+   * live pane always has its composer under the menu. That left the guard's
+   * whole purpose reachable around it: MEASURED on the shipped parser, a menu
+   * of ten whose tenth option sits below any unindented line ("Press esc to
+   * cancel") returned NINE buttons -- exactly the "nine over a ten-option
+   * prompt reads as the whole choice" harm the block above names, arrived at
+   * by walking around the check rather than through it.
+   *
+   * So the scan continues past that line, but only for the CONTINUATION: a
+   * line numbered exactly one past the run. Not for any numbered line, because
+   * `questionIn` slices to the end of the capture and unrelated output below a
+   * composer routinely contains "1." or "2." -- refusing on those would refuse
+   * real menus for text that has nothing to do with them. A line numbered
+   * `found.length + 1` is the signature of a list this pattern truncated, and
+   * almost nothing else.
+   */
+  const CONTINUATION = new RegExp('^(?:❯\\s*)?0*' + (found.length + 1) + '[.)]\\s+\\S');
+  for (let i = lastRun.at + 1; i < lines.length; i += 1) {
+    const bare = lines[i].replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '');
+    if (CONTINUATION.test(bare)) return null;
+  }
+  // Somebody's TUI drew this. Prose does not carry a selection marker.
+  if (!marked) return null;
+  /**
+   * WARNING: NOTHING MAY ASK A NEWER QUESTION BELOW THE MENU.
+   *
+   * The adjacency and marker rules above say "this is a list something drew".
+   * They do NOT say the list belongs to the question being asked now, and a
+   * pane accumulates. Measured, on the shape a permission prompt actually
+   * leaves behind:
+   *
+   *     Do you want to proceed?
+   *     ❯ 1. Yes
+   *       2. No
+   *
+   *     Build cleaned. Would you like to run the tests now?
+   *
+   * `questionIn` takes the LAST marker (the prose question at the bottom) and
+   * slices from six lines above it, so the ANSWERED menu rides along inside the
+   * slice -- adjacent, marked, numbered 1..n. The docblock's repeat rule does
+   * not cover this: that one only fires when the live question ALSO draws a
+   * menu, and here the live question is prose, which is the exact shape the
+   * marker rule was added for.
+   *
+   * So: if any line BELOW the run is itself a needs-you marker, something newer
+   * is being asked and this menu is not its answer. Lines inside the run are
+   * excluded, because an option's own label can legitimately contain one
+   * ("2. No, and ask permission to continue").
+   */
+  /* ⚠️ FROM JUST AFTER THE LAST OPTION'S OWN LINE. Starting ON it would refuse
+     a menu whose own label says "No, and ask permission to continue" -- that
+     is the label's words rather than a newer question, and there is a test for
+     exactly it. */
+  for (let i = lastRun.at + 1; i < lines.length; i += 1) {
+    if (status.NEEDS_YOU_MARKERS.some((re) => re.test(lines[i]))) return null;
+  }
+
+  /**
+   * WARNING: A CONTROL CHARACTER REFUSES THE WHOLE MENU rather than one option.
+   * A label carrying one cannot be kept (`messageProblem` refuses it on the way
+   * into the record), so the button would send the digit and the bubble would
+   * silently degrade to a bare "1" -- the record describing a mechanism the
+   * person did not use. And a capture with escapes in it is not a screen we
+   * understand well enough to put buttons on.
+   */
+  if (found.some((o) => messageProblem(o.label))) return null;
+  found.forEach((o) => { delete o.at; });
+  /**
+   * ⚠️ THERE IS NO EMPTY-LABEL CHECK HERE, and its absence is deliberate rather
+   * than an oversight. One was written, and it could not fail: the pattern's
+   * capture is `(\S.*)`, so a matched line always has a non-space first
+   * character. `1. ` does not produce an empty label, it produces NO MATCH, and
+   * a menu of two such lines lands on the length test above.
+   *
+   * It was removed rather than left, for the reason 18e removed the dead
+   * `.pjthread` declarations: a guard that reads as protection and cannot fire
+   * teaches the next reader that the case is handled here. The refusal is real
+   * and it is one line up — the test that names it now says which test catches
+   * it.
+   */
+  return found;
+}
+
 /* ── what is ours to keep ────────────────────────────────────────────────── */
 
 /**
@@ -895,6 +1213,15 @@ function questionIn(text) {
 const PROJECT_ID = /^[a-z0-9_-]{1,128}$/;
 
 /**
+ * The scope token for the thread between the person and ONE agent, which
+ * belongs to no project. It is deliberately a value PROJECT_ID refuses (`@` is
+ * outside the charset), so a project route can never reach the direct arm by
+ * accident: those resolve an id through `projects.get` and 404 before this
+ * module is asked anything.
+ */
+const DIRECT = '@you';
+
+/**
  * ⚠️ The agent name must ALREADY be its own key. `store.safeKey` strips, so
  * `worker.2` and `worker2` collapse to one file — `engine/commitments.js`
  * guards the identical hazard the identical way, and for a thread a collision
@@ -903,10 +1230,25 @@ const PROJECT_ID = /^[a-z0-9_-]{1,128}$/;
 function threadFile(projectId, agent) {
   const id = String(projectId == null ? '' : projectId);
   const name = String(agent == null ? '' : agent);
-  if (!PROJECT_ID.test(id)) throw badRequest('that is not a project we can read');
+  const direct = id === DIRECT;
+  if (!direct && !PROJECT_ID.test(id)) throw badRequest('that is not a project we can read');
   let key;
   try { key = store.safeKey(name); } catch { key = null; }
   if (!key || key !== name) throw badRequest('that is not an agent name we can keep a thread under');
+  /**
+   * ⚠️ TWO DOTS, AND THE SECOND ONE IS THE GUARD. A project id never contains
+   * a dot (PROJECT_ID forbids it), so no project thread can ever produce or
+   * collide with `direct..<key>.json` — including a real project literally
+   * named "Direct", whose file is `direct.<key>.json` with one dot. Reserving
+   * the id `direct` in projects.idFor instead would have left every
+   * already-existing project of that name colliding on disk; the filename
+   * makes the collision impossible rather than merely unlikely.
+   *
+   * The token itself (`@you`) fails PROJECT_ID, so a project route can never
+   * reach this arm by accident: those resolve the id through projects.get
+   * first and 404 before chat is asked anything.
+   */
+  if (direct) return path.join(DIR(), `direct..${key}.json`);
   return path.join(DIR(), `${id}.${key}.json`);
 }
 
@@ -1074,7 +1416,11 @@ const LOCK_WAIT_MS = 2000;
  * waiting, which is the cost to weigh before raising LOCK_WAIT_MS. And the
  * lock is the SMALL half of the request's blocking budget: deliver's tmux
  * path is up to three execFileSync calls at 5s timeout each (probe, text,
- * Enter), so a wedged tmux stalls the whole board ~15s on its own.
+ * Enter), so a wedged tmux stalls the whole board ~15s on its own. ⚠️ A
+ * NUMBERED ANSWER ADDS A FOURTH: the route reads the pane once more to check
+ * the words against the menu before sending, so that path is ~20s. The number
+ * in this sentence has already been wrong once by being left behind when a
+ * call was added.
  * Consistent with the codebase's synchronous design; named so the number
  * being watched is the real one (round 19).
  */
@@ -1307,6 +1653,22 @@ function appendLocked(projectId, agent, entry, bornAt) {
     messages: [...existing.messages, {
       at: (entry && entry.at) || new Date().toISOString(),
       text: cleanMessage(entry && entry.text),
+      /**
+       * ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered
+       * answer sends the digit the agent's prompt is waiting for and shows the
+       * option's own words, so `text` alone would either read as a bare "1" a
+       * week later or misdescribe the mechanism. Null on every message the
+       * person TYPES, because there the two are the same thing; set only by a
+       * button send. (It said "every message today" when written, which stopped
+       * being true in the same branch that wrote it.)
+       */
+      /* ⚠️ THROUGH `cleanMessage`, LIKE `text` ONE FIELD UP. This module's
+         contract is that what was CHECKED is what gets KEPT, and for `wire`
+         the checking lived entirely in the one caller: an engine that claims
+         the guarantee was taking this field on trust. A no-op for every value
+         produced today (the digit), which is exactly when to move a guarantee
+         back inside the thing that promises it. */
+      wire: (entry && typeof entry.wire === 'string' && cleanMessage(entry.wire)) || null,
       delivery: {
         state: (entry && entry.delivery && entry.delivery.state) || DELIVERY.COULD_NOT,
         because: (entry && entry.delivery && entry.delivery.because) || null,
@@ -1468,9 +1830,9 @@ function looksLikeManager(role) {
 }
 
 module.exports = {
-  DELIVERY, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
+  DELIVERY, DIRECT, MAX_TEXT, MAX_MESSAGES, VIEWPORT_LINES,
   cleanMessage, messageProblem, addressable, paneTarget, wireText,
-  deliver, viewport, questionIn, waitingNote, spawnFailure, verifyAtSend,
+  deliver, viewport, questionIn, optionsIn, questionAbove, waitingNote, spawnFailure, verifyAtSend,
   threadFile, readThread, appendMessage, supersede, withThreadLock,
   defaultAgentFor, looksLikeManager,
   setRunner, setDryRun, resetForTests,

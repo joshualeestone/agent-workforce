@@ -1887,3 +1887,403 @@ test('an unwritable chats directory is a reported keeping-failure, never a throw
     fs.chmodSync(root, 0o755);
   }
 });
+
+/* ── the direct thread, and the options inside a question ────────────────── */
+
+test('the direct thread is its own file, and a project literally named "Direct" cannot collide with it', () => {
+  // ⚠️ PRESENCE BEFORE ABSENCE: both files are written and both are read
+  // back, so "they are distinct" is a comparison of two things that exist
+  // rather than a pair of ENOENTs agreeing with each other.
+  const direct = chat.threadFile(chat.DIRECT, 'casey');
+  const project = chat.threadFile('direct', 'casey');
+  assert.equal(path.basename(direct), 'direct..casey.json', 'the reserved name is the two-dot one');
+  assert.equal(path.basename(project), 'direct.casey.json');
+  assert.notEqual(direct, project);
+
+  chat.appendMessage(chat.DIRECT, 'casey', { text: 'just between us', delivery: { state: chat.DELIVERY.PLACED } });
+  chat.appendMessage('direct', 'casey', { text: 'about the Direct project', delivery: { state: chat.DELIVERY.PLACED } });
+
+  const mine = chat.readThread(chat.DIRECT, 'casey');
+  const theirs = chat.readThread('direct', 'casey');
+  assert.equal(mine.messages.length, 1);
+  assert.equal(theirs.messages.length, 1);
+  assert.equal(mine.messages[0].text, 'just between us');
+  assert.equal(theirs.messages[0].text, 'about the Direct project', 'a real project of that name keeps its own thread');
+});
+
+test('the direct token is not a spelling any project id can produce', () => {
+  // ⚠️ THIS IS ABOUT THE ID RULES, NOT ABOUT A ROUTE — the earlier name
+  // claimed the second and the body only ever checked the first. The route-level
+  // arm (a project id resolves through `projects.get` and 404s before this
+  // module is asked anything) is the server suite's to hold, not this one's.
+  // The token is only reachable as the module's own constant; anything shaped
+  // like it, arriving as an id from a URL, is refused by the charset check
+  // exactly as `..` is.
+  assert.throws(() => chat.threadFile('@you-as-typed', 'casey'), /not a project we can read/);
+  assert.throws(() => chat.threadFile('..', 'casey'), /not a project we can read/);
+  assert.equal(chat.DIRECT, '@you');
+});
+
+test('a direct thread carries a time on every message and no project stamp', () => {
+  chat.appendMessage(chat.DIRECT, 'mara', { text: 'are you there', delivery: { state: chat.DELIVERY.PLACED } });
+  const got = chat.readThread(chat.DIRECT, 'mara');
+  assert.equal(got.projectBornAt, null, 'a thread that outlives every project has no project to be born with');
+  assert.match(got.messages[0].at, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('questionAbove is the identity of a question, and never an empty one', () => {
+  /**
+   * ⚠️ THE ENGINE'S OWN SUITE HAD NONE OF THESE. `questionAbove` shipped with
+   * its only coverage in `server.test.js` (agreement with the page's copy) and
+   * two route tests, while `optionsIn` -- the function it wraps -- carries a
+   * large refusal suite in this file. A new export with no tests beside its
+   * sibling is the gap this closes.
+   */
+  assert.equal(chat.questionAbove('Would you like to say more?'), null,
+    'no confident run means there is nothing to be the identity of');
+  assert.equal(chat.questionAbove('Edit file src/a.js?\n❯ 1. Yes\n  2. No'), 'Edit file src/a.js?');
+  assert.equal(chat.questionAbove('│ boxed?\n│ ❯ 1. Yes\n│   2. No'), '│ boxed?',
+    'the frame is what the pane drew, and stripping it here would disagree with the page');
+  assert.notEqual(chat.questionAbove('Edit file src/a.js?\n❯ 1. Yes\n  2. No'),
+    chat.questionAbove('Edit file src/b.js?\n❯ 1. Yes\n  2. No'),
+    'two files with identical labels must not share an identity');
+
+  /* ⚠️ NEVER EMPTY, which is the whole point and was the defect. A run-up
+     window of blank lines -- an ordinary pane after `/clear`, where tmux pads
+     and only the trailing end is trimmed -- returned '' from the branch
+     written to avoid ''. Empty is FALSY, and the route skips its check on a
+     falsy value, so the guard turned itself off on exactly the screens
+     carrying the least identifying text. */
+  const padded = chat.questionIn('Welcome back.' + '\n'.repeat(9) + '❯ 1. Yes\n  2. No\n\n> ');
+  assert.ok(padded, 'CONTROL: the padded capture is still a question');
+  assert.deepEqual(chat.optionsIn(padded.text), [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+    'CONTROL: and still a confident menu, so an identity is required for it');
+  /* ⚠️ NULL, AND THE PREVIOUS VERSION OF THIS LINE COULD NOT FAIL. It asserted
+     the identity was truthy, at a moment when the fallback returned the whole
+     slice -- which `optionsIn` has already guaranteed is non-empty. So it was
+     tautological, while the invariant nineteen lines up (two questions with
+     identical labels must not share an identity) was BROKEN by that same
+     fallback: two padded captures both keyed on the options and collided.
+     A blank run-up window means the screen carries nothing that identifies the
+     question. Null says so; inventing an identity from the options is the
+     collision this function exists to prevent. */
+  assert.equal(chat.questionAbove(padded.text), null,
+    'a screen with no text above its menu cannot be told from another one, and must say so');
+  const paddedB = chat.questionIn('Delete the production database?' + '\n'.repeat(9) + '❯ 1. Yes\n  2. No\n\n> ');
+  assert.ok(paddedB, 'CONTROL: the second padded capture is also a question');
+  assert.equal(chat.questionAbove(paddedB.text), null,
+    'and the collision is closed by refusing to guess rather than by guessing differently');
+
+  /* ⚠️ THE IDENTITY DOES NOT MOVE WITH THE CURSOR, which is why equality is
+     safe again. `questionIn` anchors on the LAST needs-you marker and the
+     marked option line is itself one, so arrowing from 1 to 2 moves the window
+     top. The last meaningful lines above the run do not move with it. */
+  /* ⚠️ THE PROSE MARKER IS LOAD-BEARING IN THIS FIXTURE. With the cursor on 2,
+     `❯ 1. Yes` no longer matches, so a capture whose only marker was that line
+     is not a question at all -- `questionIn` returns null and this case cannot
+     be built. "Do you want to proceed?" is a marker in its own right, which is
+     what makes the cursor-move case reachable. (Written with "Proceed?" first,
+     which is not a marker, and the fixture threw rather than asserting.) */
+  const onOne = chat.questionIn('L2\nL3\nL4\nL5\nL6\nsixth\nI will run the tests now.\nDo you want to proceed?\n❯ 1. Yes\n  2. No');
+  const onTwo = chat.questionIn('L2\nL3\nL4\nL5\nL6\nsixth\nI will run the tests now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No');
+  assert.ok(onOne && onTwo, 'CONTROL: both cursor positions are questions the route can serve');
+  assert.notEqual(onOne.text, onTwo.text, 'CONTROL: the two captures really do differ');
+  /* ⚠️ THIS ASSERTS THE KNOWN COST, not the behaviour anyone wants. The window
+     gains lines at the top when the anchor moves, so the identities differ and
+     the route refuses a send answering the question actually on screen. It is
+     recorded as a test rather than a comment because the day somebody makes the
+     anchor cursor-independent, THIS is the assertion that should start failing
+     and tell them the cost is gone. The alternative shapes all failed OPEN --
+     see `questionAbove` -- and a false refusal costs one more press where a
+     false accept types a digit at a question nobody read. */
+  assert.notEqual(chat.questionAbove(onOne.text), chat.questionAbove(onTwo.text),
+    'the cursor case is stable now, so the false refusal it causes is gone and this test should be rewritten');
+  /* ⚠️ AND THE COST IS BOUNDED BY THE RUN-UP WINDOW. `questionIn` slices from
+     `max(0, at - 6)`, so a prompt with six or fewer lines above its menu clamps
+     to zero at BOTH cursor positions and the identity does not move. That is
+     the ordinary permission prompt, which is why this cost is narrow rather
+     than everyday -- and it is measured here rather than asserted in prose. */
+  const shortOne = chat.questionIn('I will run the tests now.\nDo you want to proceed?\n❯ 1. Yes\n  2. No');
+  const shortTwo = chat.questionIn('I will run the tests now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No');
+  assert.equal(chat.questionAbove(shortOne.text), chat.questionAbove(shortTwo.text),
+    'a prompt shallower than the run-up window clamps to the same slice, so the cursor cannot move it');
+
+  /* ⚠️ THE DISCRIMINATOR CAN SIT WELL ABOVE THE MENU, which is what broke the
+     last-three-lines rule. Claude's own edit-permission prompt puts the PATH
+     above a diff hunk, so two files with the same basename and the same hunk
+     collided and "1" approved an edit to a file nobody chose. Driven through
+     `questionIn` rather than handed a slice, because the slice is the thing
+     that was dropping it. */
+  const alpha = chat.questionIn('src/alpha/index.js\n\n12 - import { z } from "./z"\n12 + import { z } from "./zz"\n\nDo you want to make this edit to index.js?\n❯ 1. Yes\n  2. No');
+  const beta = chat.questionIn('src/beta/index.js\n\n12 - import { z } from "./z"\n12 + import { z } from "./zz"\n\nDo you want to make this edit to index.js?\n❯ 1. Yes\n  2. No');
+  assert.ok(alpha && beta, 'CONTROL: both edit prompts are questions the route can serve');
+  assert.deepEqual(chat.optionsIn(alpha.text), chat.optionsIn(beta.text),
+    'CONTROL: the labels are identical, which is why the label gate cannot tell these apart');
+  assert.notEqual(chat.questionAbove(alpha.text), chat.questionAbove(beta.text),
+    'two files with the same basename and the same hunk share an identity, so a press approves the wrong one');
+
+  /* ⚠️ AND AN ACCUMULATED NEW QUESTION IS NOT THE SAME ONE, which is what
+     containment got wrong: a pane accumulates, so the new window CONTAINS the
+     answered one's text. */
+  const before = chat.questionIn('Do you want to proceed?\n❯ 1. Yes\n  2. No\n\n> ');
+  const after = chat.questionIn('rm -rf /Users/josh/build\nDo you want to proceed?\n❯ 1. Yes\n  2. No');
+  assert.notEqual(chat.questionAbove(before.text), chat.questionAbove(after.text),
+    'a newer question above the same menu answered as the old one is a wrong digit in a live terminal');
+
+  /* ⚠️ AND A MENU WITH NOTHING ABOVE IT HAS NO IDENTITY EITHER, which is the
+     same ruling as the padded case and the opposite of what this assertion
+     said when the fallback returned the whole slice. The page's `talkKey`
+     DIVERGES here and falls back, deliberately: its collision costs a
+     suppressed question for thirty seconds, this one's costs a digit typed
+     into a live terminal. */
+  assert.equal(chat.questionAbove('❯ 1. Yes\n  2. No'), null,
+    'a menu with nothing above it cannot be told from another menu with nothing above it');
+});
+
+test('optionsIn reads a real menu, both the two-option prompt and a long one', () => {
+  // The shapes are the captures this repo already holds: engine/chat.test.js's
+  // own permission prompt above, and connect.test.js's theme screen, taken
+  // from a real claude v2.1.229.
+  const yesNo = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No');
+  assert.deepEqual(yesNo, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+
+  // ⚠️ THE REAL CAPTURE, read out of the file that holds it, not a
+  // hand-truncated three-of-seven retyped here. The earlier version claimed to
+  // be "the captures this repo already holds" while being a subset somebody
+  // typed -- and a fixture that describes itself as real is worse than one that
+  // does not, because the next reader stops checking.
+  const connectSrc = fs.readFileSync(path.join(__dirname, 'connect.test.js'), 'utf8');
+  const at = connectSrc.indexOf('const SCREEN_THEME = `');
+  assert.ok(at > -1, 'the real theme capture moved; re-point this fixture');
+  const real = connectSrc.slice(connectSrc.indexOf('`', at) + 1, connectSrc.indexOf('`;', at));
+  const theme = chat.optionsIn(real);
+  assert.equal(theme.length, 7, 'all seven options a real claude v2.1.229 drew');
+  assert.equal(theme[1].label, 'Dark mode ✔', 'the label is the option’s own words, marker and all');
+});
+
+test('optionsIn sees through the pane frame, and does not eat a label that ends in one', () => {
+  const boxed = chat.optionsIn('│ ❯ 1. Yes                 │\n│   2. No, tell me more    │');
+  assert.deepEqual(boxed, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No, tell me more' }]);
+  // ⚠️ THE TWO ENDS STRIP DIFFERENT SETS. Everything left of the number is
+  // frame by definition; the last character of a label is the label's. A
+  // symmetric strip took the pipe off this option's own words, silently,
+  // against the verbatim rule.
+  const piped = chat.optionsIn('\u276f 1. use a pipe |\n  2. do not');
+  assert.deepEqual(piped, [{ n: 1, label: 'use a pipe |' }, { n: 2, label: 'do not' }]);
+});
+
+test('optionsIn refuses everything it cannot be sure of, and a refusal is the ordinary screen', () => {
+  // ⚠️ EVERY CASE BELOW CARRIES THE SELECTION MARKER, deliberately. Once the
+  // marker rule existed, a case written without one would be refused for THAT
+  // and pass while the rule it is named for did nothing -- a test passing for
+  // a reason other than the one on the label, which is how a guard goes dead
+  // without anybody noticing.
+  // ⚠️ THE FIRST CASE IS THE ONE THAT MATTERS. A pane accumulates, so an
+  // already-answered menu can sit above the live one; 1,2,1,2 must not
+  // become a two-button panel wired to the older question.
+  assert.equal(chat.optionsIn('❯ 1. Yes\n  2. No\nthen later\n❯ 1. Yes\n  2. No'), null, 'a repeated menu is not a menu');
+  assert.equal(chat.optionsIn('❯ 1. Yes\n  3. No'), null, 'a gap in the numbering');
+  assert.equal(chat.optionsIn('❯ 2. Yes\n  3. No'), null, 'a run that does not start at 1');
+  assert.equal(chat.optionsIn('❯ 1. Yes'), null, 'one option is not a choice');
+  // ⚠️ REFUSED, NOT TRUNCATED. The pattern reads one digit, so a ten-option
+  // menu parses as nine -- and nine buttons over a ten-option prompt reads as
+  // the whole choice, which is worse than no buttons at all.
+  assert.equal(chat.optionsIn('❯ ' + Array.from({ length: 10 }, (_, i) => `${i + 1}. option`).join('\n  ')), null,
+    'a menu longer than we can read is refused whole');
+  // ⚠️ AND WITH THE CURSOR ANYWHERE ELSE. The line above puts the marker on
+  // option 1, which is the one arrangement where the tenth line is not
+  // swallowed: the marker sits a column LEFT of the unmarked rows (measured in
+  // this repo's own real capture), so with the cursor further down, line 10 is
+  // deeper than line 9 and was folded into it as though it were wrapped text --
+  // nine buttons over an eleven-option prompt, reading as the whole choice,
+  // with the guard that refuses over-long menus never seeing a tenth line.
+  const eleven = Array.from({ length: 11 }, (_, i) => (i === 8 ? '❯ ' : '   ') + (i + 1) + '. item ' + (i + 1));
+  assert.equal(chat.optionsIn(eleven.join('\n')), null, 'refused wherever the cursor happens to be');
+  // ⚠️ NAMED FOR WHAT ACTUALLY CATCHES IT. This reads like an empty-label
+  // guard and there is no empty-label guard: `1. ` does not match at all
+  // (the pattern's capture needs a non-space first character), so the two
+  // lines produce ZERO options and the length test refuses them. The
+  // assertion is right; the name it used to carry pointed at code that
+  // could not run.
+  assert.equal(chat.optionsIn('❯ 1. \n  2. '), null, 'a numbered line with no words is not an option at all');
+  assert.equal(chat.optionsIn('❯ I tried 1. and it did not work'), null, 'prose that mentions a number');
+  assert.equal(chat.optionsIn('Do you want to proceed?'), null, 'a question with no menu at all');
+  assert.equal(chat.optionsIn(''), null);
+  assert.equal(chat.optionsIn(null), null);
+});
+
+test('optionsIn refuses PROSE that happens to be numbered, which is the dangerous false positive', () => {
+  // ⚠️ MEASURED AGAINST THE EARLIER VERSION, which said yes to both of these.
+  // The second is the one that mattered: "Would you like to" is itself a
+  // NEEDS_YOU marker, so `asking` is true for exactly this shape, and the page
+  // would have drawn a button that types 1 into a live pane and recorded that
+  // the person chose "Delete the old build folder".
+  assert.equal(chat.optionsIn('Would you like to review the plan?\n 1. Delete the old build folder\n 2. Rebuild from scratch'),
+    null, 'a numbered list in prose is not a menu');
+  assert.equal(chat.optionsIn('\u276f 1. Do X\n' + Array.from({ length: 40 }, () => 'filler').join('\n') + '\n2. Do Y'),
+    null, 'two numbered lines forty lines apart are not one list');
+  assert.equal(chat.optionsIn(' 1. Yes\n 2. No'), null, 'nothing drew this: no selection marker');
+  assert.equal(chat.optionsIn('\u276f 01. Yes\n  2. No'), null, 'a shape no menu draws');
+});
+
+test('optionsIn refuses a whole menu whose label carries what we would not keep', () => {
+  // ⚠️ THE WHOLE MENU, not the one option. A label with a control character
+  // cannot go into the record (messageProblem refuses it), so the button would
+  // send the digit and the bubble would degrade to a bare "1" -- the record
+  // describing a mechanism the person did not use.
+  const esc = String.fromCharCode(27);
+  assert.equal(chat.optionsIn('\u276f 1. Yes' + esc + '[0m\n  2. No'), null);
+  // The control: the same menu without it is still a menu.
+  assert.deepEqual(chat.optionsIn('\u276f 1. Yes\n  2. No'),
+    [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+});
+
+test('a menu whose label WRAPPED is refused whole, and that is a decision with four defects behind it', () => {
+  // ⚠️ THIS TEST USED TO ASSERT THE OPPOSITE. Folding a wrapped label back
+  // together was attempted three times and produced four defects: an indented
+  // follow-up question eaten into a label, a tenth option folded into the
+  // ninth, a box footer folded into whatever option it sat under, and finally a
+  // fullness rule measured against the widest line in the slice -- which is
+  // normally the tool line the prompt is ABOUT, so the real permission prompt
+  // got no buttons at any width where wrapping happens.
+  //
+  // All four were guesses at one unmeasurable quantity: the width the box was
+  // drawn at. So a wrapped menu is refused, and the cost is the screen this
+  // page shows today.
+  const wrapped = ['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don’t ask again for rm commands in", '     /Users/agent1/work',
+    '  3. No, and tell Claude what to do differently'].join('\n');
+  assert.equal(chat.optionsIn(wrapped), null, 'refused rather than folded or truncated');
+
+  // ⚠️ THE CONTROL, and it is what stops this being "the parser refuses
+  // everything": the same prompt drawn wide enough that nothing wraps reads in
+  // full, verbatim, labels and all.
+  const unwrapped = ['Do you want to proceed?', '❯ 1. Yes',
+    "  2. Yes, and don’t ask again for rm commands in /Users/agent1/work",
+    '  3. No, and tell Claude what to do differently'].join('\n');
+  const got = chat.optionsIn(unwrapped);
+  assert.equal(got.length, 3);
+  assert.equal(got[1].label, "Yes, and don’t ask again for rm commands in /Users/agent1/work");
+});
+
+test('anything drawn between two options breaks the run, whatever it looks like', () => {
+  // ⚠️ NAMED FOR WHAT ACTUALLY CATCHES IT. This used to be called a rule about
+  // continuations and to explain how they are recognised; nothing in
+  // `optionsIn` recognises continuations any more, and both cases below are
+  // refused by the adjacency check alone. The old name would have survived the
+  // indent guard being deleted entirely.
+  assert.equal(chat.optionsIn('❯ 1. Do X\n' + Array.from({ length: 40 }, () => 'filler').join('\n') + '\n2. Do Y'),
+    null, 'unindented lines between options are not a wrapped label');
+  assert.equal(chat.optionsIn('❯ 1. Do X\n    line a\n    line b\n    line c\n  2. Do Y'),
+    null, 'a page of indented text under a numbered line is a document, not a button');
+});
+
+test('a menu with a NEWER question below it is not that question’s menu', () => {
+  // ⚠️ THE CASE THE MARKER AND ADJACENCY RULES DO NOT COVER. A pane
+  // accumulates: an answered prompt sits above, `questionIn` takes the LAST
+  // marker (prose at the bottom) and slices six lines above it, so the stale
+  // menu rides along -- adjacent, marked, numbered 1..n. Buttons built from it
+  // would answer a question that was already answered, and record the person
+  // as having chosen words they were only reading.
+  const capture = ['● Bash(rm -rf build)', '  Removed 4 files', '',
+    'Do you want to proceed?', '❯ 1. Yes', '  2. No', '',
+    'Build cleaned. Would you like to run the tests now?'].join('\n');
+  const slice = chat.questionIn(capture);
+  assert.ok(slice, 'the control: the capture really does read as a question');
+  assert.match(slice.text, /Would you like to run the tests/, 'and it is the LAST question');
+  assert.equal(chat.optionsIn(slice.text), null, 'so the older menu is not offered for it');
+  // The control that makes the refusal mean something: the same menu with
+  // nothing newer under it is still a menu.
+  assert.deepEqual(chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No'),
+    [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+  // And an option's OWN label may contain a marker phrase without refusing.
+  const withMarker = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No, and ask permission to continue');
+  assert.equal(withMarker.length, 2, 'a marker inside a label is the label’s, not a newer question');
+});
+
+test('nothing drawn under a menu is folded into it, wherever it sits', () => {
+  // Every one of these was a separate defect when folding existed. They are one
+  // rule now: a line under an option, indented past it, refuses the menu.
+  const under = (rows) => chat.optionsIn(rows.join('\n'));
+  assert.equal(under(['❯ 1. Yes', '  2. No', '     Reading src/index.js']), null,
+    'tool output under the last option');
+  assert.equal(under(['❯ 1. Yes', '     Reading src/index.js', '  2. No']), null,
+    'and under a middle one, which breaks the run');
+  assert.equal(under(['│ ❯ 1. Yes    │', '│   2. No     │', '│    esc      │']), null,
+    'a box footer');
+  assert.equal(under(['Do you want to proceed?', '❯ 1. Yes',
+    '  2. No, and tell Claude what to do differently (esc)',
+    '     Press esc to go back', '  3. Yes, and do not ask again']), null,
+    'and a hint line under the widest option, which the fullness rule could not see');
+
+  // The control: the same menus with nothing under them still read.
+  assert.deepEqual(under(['❯ 1. Yes', '  2. No']),
+    [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+});
+
+test('what may follow the run, and the reference is the option indent the cursor cannot move', () => {
+  // ⚠️ SOMETHING UNINDENTED BELOW IS FINE ON PURPOSE. A live pane always has
+  // its composer under the menu, and `questionIn` slices to the end of the
+  // capture, so a rule refusing everything below would refuse every real
+  // screen.
+  const ok = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No\nesc to interrupt');
+  assert.equal(ok.length, 2, 'a composer line below the box is not part of the menu');
+
+  // ⚠️ AND THE REFERENCE IS THE DEEPEST OPTION, not the shallowest. The MARKED
+  // row is drawn a column left of the others, so the shallowest moves with the
+  // cursor: measured, using it refused every real screen. These two differ only
+  // in where the cursor sits and must agree.
+  const a = chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No\n  esc to interrupt');
+  const b = chat.optionsIn('Do you want to proceed?\n  1. Yes\n❯ 2. No\n  esc to interrupt');
+  assert.equal(a, null);
+  assert.equal(b, null, 'the same menu must not answer differently because the cursor moved');
+
+  // A same-indent continuation is refused rather than truncated onto a button:
+  // "No, and tell Claude what to do" is not what that option says.
+  assert.equal(chat.optionsIn('Do you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do\n  differently'),
+    null);
+
+  // ⚠️ AND A BLANK LINE DOES NOT MAKE A TENTH OPTION DISAPPEAR. The guard used
+  // to inspect only the line straight after the run, so one gap restored the
+  // nine-buttons-over-a-ten-option defect it exists to prevent.
+  const nine = '❯ ' + Array.from({ length: 9 }, (_, i) => (i + 1) + '. j').join('\n  ');
+  assert.equal(chat.optionsIn(nine + '\n\n  10. j'), null, 'a gap is not an ending');
+  // ⚠️ THE CONTROL, and my first version of it asserted null, which would have
+  // made the case above pass for any reason at all. Nine options IS readable,
+  // so the refusal above is about the tenth and nothing else.
+  assert.equal(chat.optionsIn(nine).length, 9, 'the control: nine alone reads as nine');
+  /**
+   * ⚠️ AND A COMPOSER LINE DOES NOT MAKE ONE DISAPPEAR EITHER, which is the
+   * generalisation the blank-line case stopped one short of.
+   *
+   * The scan below the run breaks at the first UNINDENTED line on purpose: a
+   * live pane always has its composer under the menu, so a rule refusing
+   * everything below would refuse every real screen. That left the guard's
+   * entire purpose reachable by walking around it. MEASURED on the shipped
+   * parser before this fix: a tenth option below "Press esc to cancel" came
+   * back as NINE BUTTONS -- the exact "nine over a ten-option prompt reads as
+   * the whole choice" harm, one line further down than the previous fix looked.
+   *
+   * The previous correction generalised from "the line straight after the run"
+   * to "skip blanks". This one generalises from "skip blanks" to "the
+   * continuation is refused wherever it is", which is a property of the MENU
+   * rather than of what happens to sit between its rows.
+   */
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel\n  10. j'), null,
+    'a composer line is not an ending either');
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel\n\n  10. j'), null,
+    'nor a composer line and a gap together');
+  /* ⚠️ THE CONTROL FOR THE CONTROL: the same capture WITHOUT the tenth option
+     still reads as nine. Without this, the two refusals above would pass on a
+     parser that simply refused anything with a composer line in it, which is
+     every real screen. */
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel').length, 9,
+    'the control: a composer line alone does not refuse a readable menu');
+  /* ⚠️ AND NOT ANY NUMBER, only the continuation. `questionIn` slices to the
+     end of the capture, so output below a composer routinely contains a "1."
+     that has nothing to do with the menu. Refusing on those would refuse real
+     menus for unrelated text. Nine options with an ELEVENTH-numbered line
+     below is not evidence this list was truncated at nine. */
+  assert.equal(chat.optionsIn(nine + '\nPress esc to cancel\n  11. j').length, 9,
+    'a number that is not the continuation is not evidence of truncation');
+});

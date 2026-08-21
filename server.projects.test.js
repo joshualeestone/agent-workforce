@@ -1728,3 +1728,556 @@ test('the reveal-folder route: guard inherited, server-derived path, honest refu
     projects.setRevealRunner(null);
   }
 });
+
+/* ── the thread between the person and ONE agent ─────────────────────────── */
+/**
+ * ⚠️ THESE LIVE IN THE PROJECTS SUITE, and the branch plan said `server.test.js`.
+ * The reason is that everything they need is here: `withThread`'s chats-store
+ * clear, `armChat`'s runner seam with its just-before-sending probe, and the
+ * `fleet` fixtures. Moving them would mean a second copy of all three, which is
+ * the habit this codebase keeps paying to remove. Recorded rather than left as
+ * a silent departure from the plan.
+ */
+
+/**
+ * The agent's own thread needs no project, which is the point of it. The chats
+ * store is cleared for the same reason `withThread` clears it: the direct
+ * thread's filename is derived from the NAME alone, so every test here would
+ * otherwise inherit the previous one's messages and measure a world it did not
+ * arrange.
+ */
+async function withAgent(spec, answers, fn) {
+  try { fs.rmSync(path.join(require('./engine/store').ROOT, 'chats'), { recursive: true, force: true }); }
+  catch { /* nothing kept yet */ }
+  const board = fleet.install([spec]);
+  const calls = armChat(answers);
+  try {
+    return await fn({ board, calls });
+  } finally {
+    chat.resetForTests();
+    board.restore();
+  }
+}
+
+test('the agent’s own thread hands back the question AND its options, when the menu is certain', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('I want to delete the old build folder.\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      assert.equal(body.asking, true);
+      assert.ok(body.question, 'the panel must not be empty under a card that says it is asking');
+      assert.deepEqual(body.options, [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }]);
+      assert.equal(body.questionBecause, null);
+      assert.equal(body.presence, 'on');
+    });
+});
+
+test('a question with no menu we can be sure of serves NO options, which is today’s screen', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('Do you want to proceed? Tell me in your own words what I should do.\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      assert.equal(body.asking, true);
+      assert.ok(body.question, 'the question still shows');
+      assert.equal(body.options, null, 'no buttons is the honest answer; a guessed button answers for the person');
+    });
+});
+
+test('an agent that is not asking anything is offered no options at all', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }),
+    [said('❯ 1. Yes\n  2. No\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      // ⚠️ The menu IS on the screen and is still not offered: the board's
+      // word decides whether a question is live, so the panel cannot
+      // contradict the card that sent the person here.
+      assert.equal(body.asking, false);
+      assert.equal(body.options, null);
+      assert.equal(body.question, null);
+    });
+});
+
+test('a STOPPED agent keeps its thread, and the composer is told what is wrong with the window', async () => {
+  reset();
+  // ⚠️ THE RECORD OUTLIVES THE CONVERSATION. Gating this route on
+  // `knownAgent` (which the branch plan asked for) would hide a stopped
+  // agent's own thread -- the commitments route learned this first.
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    const sent = json(await post('/api/agent/zeta/thread', { text: 'before you stopped' }));
+    assert.equal(sent.recorded, true);
+    // The SAME agent, its Claude now gone from the pane. The thread store is
+    // untouched; only the board changes.
+    const stopped = fleet.install([fleet.agent('zeta', { state: 'stopped' })]);
+    try {
+      const res = await req('/api/agent/zeta/thread');
+      assert.equal(res.status, 200, 'a stopped agent’s conversation is still the person’s to read');
+      const body = json(res);
+      assert.equal(body.presence, 'off');
+      // ⚠️ The SEND GATE's own sentence, not a second derivation of it: a
+      // stopped agent's pane is alive and its name is ours, so a
+      // card-exists check answered 'on' and the composer invited a message
+      // deliver would refuse. And the sentence tells apart the two ways a
+      // pane can be unreachable, which "the agent is off" cannot.
+      assert.match(body.presenceBecause, /no Claude running in its window/);
+      assert.equal(body.messages.length, 1, 'and the message is still in it');
+      assert.equal(body.messages[0].text, 'before you stopped');
+    } finally {
+      stopped.restore();
+    }
+  });
+});
+
+test('a pane holding the name untied is refused, on the read as well as the write', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { ours: false, state: 'idle' }), [said()], async () => {
+    const res = await req('/api/agent/zeta/thread');
+    assert.equal(res.status, 404, 'a stranger’s pane must not serve this agent’s private thread');
+    assert.match(json(res).error, /no agent by that name/);
+    // The STANDING half of the pair above: this name answers 404 every time.
+    assert.equal(json(res).because, 'borrowed');
+    const sent = await post('/api/agent/zeta/thread', { text: 'are you there' });
+    assert.equal(sent.status, 404);
+  });
+});
+
+test('a button answer that never reached the pane is still recorded, wire and all', async () => {
+  reset();
+  /**
+   * ⚠️ THE GAP THIS FILLS WAS FOUND ON A SCREEN, not here: the thread drew
+   * "sent as 1" beside "Could not deliver", because the row's wire suffix was
+   * unconditional. The PAGE is fixed; this pins the half that belongs to the
+   * record, which is the opposite half. `could_not` means nothing reached the
+   * pane, and the record still keeps BOTH the words chosen and the digit that
+   * would have been typed -- a thread that remembers only the successes
+   * rewrites its own history. The screen decides what to SAY about it; the
+   * store decides what is KEPT, and they are not the same decision.
+   */
+  /* TWO runner entries, because a `chose` send captures the pane FIRST to check
+     the words against the visible menu and only then types. One entry was
+     eaten by the capture and the send got a default success -- which the
+     control below caught, on its first run. */
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(), { ran: true, spawnFailed: false, status: 1, out: '', err: 'no such pane' }],
+    async () => {
+      const res = json(await post('/api/agent/zeta/thread', { text: '1', chose: '14 days' }));
+      /* ⚠️ THE EXACT STATE, not "not placed". `unconfirmed` is also not placed and
+       it is the state where the text DID reach the pane -- so a control that
+       only excludes `placed` is blind to the one distinction this test exists
+       beside, in the same commit whose whole subject is that the two must be
+       treated differently on screen. */
+    assert.equal(res.delivery.state, 'could_not', 'CONTROL: this send was supposed to reach nothing');
+      assert.equal(res.recorded, true);
+      const back = json(await req('/api/agent/zeta/thread'));
+      assert.equal(back.messages[0].text, '14 days', 'the bubble keeps the words the person chose');
+      assert.equal(back.messages[0].wire, '1', 'and the digit that would have been typed');
+      assert.equal(back.messages[0].delivery.state, res.delivery.state);
+    });
+});
+
+test('a name NO pane runs at all reads as an empty conversation and refuses the send', async () => {
+  reset();
+  /**
+   * ⚠️ THE ASYMMETRY IS WRITTEN INTO THE ROUTE AND WAS HELD BY NOTHING. Its
+   * comment states it exactly: a name with no pane behind it passes the read
+   * gate and answers 200 with an empty thread, while the POST 404s. That is
+   * deliberate -- the record is the person's and must stay readable for an
+   * agent that is not running -- but the branch above it found a NEIGHBOURING
+   * comment that claimed a behaviour the code did not have, and the only
+   * difference between the two was that neither had a test.
+   *
+   * The borrowed-name test above covers a pane that EXISTS untied. This is the
+   * other half: no pane by that name anywhere.
+   */
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said()], async () => {
+    // CONTROL: the fleet really is installed, so a 200 below is this route
+    // answering rather than a fixture that never came up.
+    assert.equal((await req('/api/agent/zeta/thread')).status, 200);
+
+    const res = await req('/api/agent/nobodyhere/thread');
+    assert.equal(res.status, 200, 'a name nothing runs is not an error, it is an empty conversation');
+    const body = json(res);
+    assert.deepEqual(body.messages, [], 'and nothing is in it');
+    assert.equal(body.presence, 'off', 'with the composer told there is nobody to hand it to');
+    assert.equal(body.asking, false);
+
+    const sent = await post('/api/agent/nobodyhere/thread', { text: 'are you there' });
+    assert.equal(sent.status, 404,
+      'the WRITE refuses: there is no pane to type into, and a record of a send that never happened is a lie');
+  });
+});
+
+test('a numbered answer records the WORDS and keeps what was typed beside them', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(), said()], async ({ calls }) => {
+    const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes, and don’t ask again' });
+    assert.equal(res.status, 200);
+    assert.equal(json(res).recorded, true);
+    // The DIGIT is what reached the pane: the prompt is waiting for it.
+    const typed = calls.sends().map((args) => args.join(' ')).join('\n');
+    assert.match(typed, /(^|\s)1(\s|$)/, 'the agent’s prompt is answered with the number it asked for');
+
+    const body = json(await req('/api/agent/zeta/thread'));
+    const row = body.messages[body.messages.length - 1];
+    // ⚠️ BOTH, or the record lies one way or the other: the words alone
+    // misdescribe the mechanism, the digit alone is unrecognisable a week
+    // later.
+    assert.equal(row.text, 'Yes, and don’t ask again', 'the bubble shows what the person chose');
+    assert.equal(row.wire, '1', 'and the record keeps what was actually sent');
+  });
+});
+
+test('an ordinary message carries no wire text, because the two are the same thing', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: 'have a look at the lease' });
+    const body = json(await req('/api/agent/zeta/thread'));
+    assert.equal(body.messages[0].text, 'have a look at the lease');
+    assert.equal(body.messages[0].wire, null);
+  });
+});
+
+test('a message we could not send is still written down, with the verdict on it', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }),
+    [{ ran: true, spawnFailed: false, status: 1, out: '', err: 'no such pane' }],
+    async () => {
+      const body = json(await post('/api/agent/zeta/thread', { text: 'did this land' }));
+      assert.notEqual(body.delivery.state, 'placed');
+      assert.equal(body.recorded, true, 'a thread that remembers only the successes rewrites its own history');
+      const back = json(await req('/api/agent/zeta/thread'));
+      assert.equal(back.messages[0].delivery.state, body.delivery.state);
+    });
+});
+
+test('a message we would never send is refused before anything is typed', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said()], async ({ calls }) => {
+    const res = await post('/api/agent/zeta/thread', { text: '   ' });
+    assert.equal(res.status, 400);
+    assert.equal(calls.sends().length, 0, 'nothing reached a pane');
+  });
+});
+
+test('a roster we could not read closes this route rather than serving a private thread', async () => {
+  reset();
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: 'just between us' });
+    let blind = null;
+    try {
+      blind = fleet.blind();
+      const res = await req('/api/agent/zeta/thread');
+      // ⚠️ FAILS CLOSED, and this is the arm that decided the route's shape.
+      // `borrowedName` cannot rule out a stranger's pane holding this name
+      // when it cannot look at all, and what is behind this route is the
+      // person's private conversation with one agent. The sibling
+      // commitments route made the same call for the same reason.
+      //
+      // ⚠️ This is also why the payload's `presence: 'unsure'` arm has no
+      // test: the roster read that would produce it fails this gate first.
+      // It is recorded in the route rather than removed.
+      assert.equal(res.status, 404, 'a thread must not be served off a roster we could not read');
+      /* ⚠️ AND THE REASON, which is the half the SCREEN reads. Both causes of
+         this 404 used to arrive at the page as one boolean, so a tmux hiccup
+         on an ordinary tied agent drew the sentence written for a name that
+         will refuse forever -- permanent-sounding, with no cause anywhere on
+         the panel. 'unreadable' is what makes the page keep its time phrase. */
+      assert.equal(json(res).because, 'unreadable');
+    } finally {
+      if (blind) blind.restore();
+    }
+  });
+});
+
+test('the thread is bounded, and the page is told how many it is not showing', async () => {
+  reset();
+  // ⚠️ THE BOUND EXISTS because this route rides a 5s poll: at the engine's
+  // own ceiling a full thread is a multi-megabyte parse-and-stringify every
+  // tick. `olderCount` is what stops the visible list implying it is
+  // everything.
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [], async () => {
+    const many = Array.from({ length: 205 }, (_, i) => ({
+      at: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+      text: 'message ' + (i + 1),
+      delivery: { state: 'placed' },
+    }));
+    // Written through the ENGINE, so the fixture cannot hold a shape the
+    // producer does not make.
+    for (const m of many) chat.appendMessage(chat.DIRECT, 'zeta', m);
+    const body = json(await req('/api/agent/zeta/thread'));
+    assert.equal(body.messages.length, 200, 'the tail is bounded');
+    assert.equal(body.olderCount, 5, 'and the payload says how many it is not showing');
+    assert.equal(body.messages[0].text, 'message 6', 'the LATEST 200, not the first');
+    assert.equal(body.messages[199].text, 'message 205');
+  });
+});
+
+test('an agent whose name cannot be filed under is a third fact, not an unreadable store', async () => {
+  reset();
+  // ⚠️ A capitalised name is exactly what the adoption path produces and
+  // exactly what Josh asked for, so this is a STANDING condition rather than
+  // an edge case: sending works, nothing is kept, and the two facts have to
+  // arrive apart or the screen says both "we cannot read what you sent" (there
+  // is no file) and "this is not saying you have sent nothing" (nothing is
+  // kept, here or ever).
+  await withAgent(fleet.agent('Zeta', { state: 'idle' }), [said(), said()], async () => {
+    const body = json(await req('/api/agent/Zeta/thread'));
+    assert.equal(body.historyUnfilable, true);
+    assert.ok(body.historyBecause, 'and it says why, in the engine’s own words');
+    assert.deepEqual(body.messages, [], 'an empty list is the honest shape: there is no file');
+    // The standing fact behind it: the send itself still goes through.
+    const sent = json(await post('/api/agent/Zeta/thread', { text: 'this arrives and is not kept' }));
+    assert.equal(sent.delivery.state, 'placed');
+    assert.equal(sent.recorded, false, 'delivered and not kept, reported separately');
+    assert.ok(sent.recordedBecause);
+  });
+});
+
+test('a question we cannot find on the screen is SAID, not rendered as no question', async () => {
+  reset();
+  // "We read its screen and the question is not in the capture" is not "we
+  // could not read its screen at all". They were one string once, so a failed
+  // capture rendered as a claim about what IS on a screen nobody read.
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('nothing on this screen matches a question marker\n')],
+    async () => {
+      const body = json(await req('/api/agent/zeta/thread'));
+      assert.equal(body.asking, true);
+      assert.equal(body.question, null);
+      assert.match(body.questionBecause, /cannot find the question on its screen/);
+    });
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [], async () => {
+    // The capture itself fails: a pane we could not read at all.
+    const blind = fleet.unreadable();
+    let body;
+    try {
+      // ⚠️ THE CONTROL for this arm: with the roster unreadable the route
+      // closes at borrowedName, so this asserts the CLOSED door rather than
+      // pretending to reach the sentence. The sentence's other arm is what
+      // the first half of this test holds.
+      const res = await req('/api/agent/zeta/thread');
+      body = res;
+    } finally {
+      blind.restore();
+    }
+    assert.equal(body.status, 404, 'a roster we could not read closes the route');
+  });
+});
+
+test('the raw window is NOT served from this route, so engineering mode has nothing to gate here', async () => {
+  reset();
+  // ⚠️ THE PLAN ASKED FOR AN ENG-MODE GATE ON THIS PAYLOAD and the payload no
+  // longer carries a window to gate: the agent page already has
+  // /api/agent/:name/window, behind that switch, with its own box. A second
+  // copy here was an unread surface on a 5-second poll. This pins the absence
+  // so it cannot come back by habit.
+  const restoreEng = withEngMode(true);
+  try {
+    await withAgent(fleet.agent('zeta', { state: 'idle' }), [said('a screen nobody asked this route for')],
+      async () => {
+        const res = await req('/api/agent/zeta/thread');
+        // ⚠️ THE CONTROL FIRST. Three `!('x' in body)` clauses are satisfied by
+        // `{error: …}` — so this test passed against a 404 or a 500, i.e.
+        // against a route broken in any way at all. Absence means nothing
+        // until something is present.
+        assert.equal(res.status, 200);
+        const body = json(res);
+        assert.ok('presence' in body && 'messages' in body, 'the payload really is the thread payload');
+        assert.ok(!('viewport' in body), 'the thread route is serving a raw window again');
+        assert.ok(!('agentsUnreadable' in body), 'presence already carries this fact');
+        assert.ok(!('agent' in body), 'the page names the agent from the card it already holds');
+      });
+  } finally {
+    restoreEng();
+  }
+});
+
+test('a button the visible screen contradicts is refused, and nothing is typed', async () => {
+  reset();
+  // ⚠️ `chose` is the one half of the pair the server does not derive: the
+  // digit is what it types, the words are what the client hands it. A record
+  // whose whole job is not to lie about the mechanism must not carry words the
+  // visible screen contradicts.
+  const menu = 'Do you want to proceed?\n❯ 1. 14 days\n  2. 30 days\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async ({ calls }) => {
+    // ⚠️ REFUSED, NOT STRIPPED. An earlier version dropped the words and sent
+    // the digit anyway, which treated losing the label as the whole problem
+    // when the label was the evidence that the DIGIT was stale too: a button's
+    // number only means anything against the menu it was drawn from.
+    const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'something nobody was offered' });
+    assert.equal(res.status, 409);
+    assert.match(json(res).error, /changed on its screen/);
+    assert.equal(calls.sends().length, 0, 'and nothing was typed into the pane');
+    const body = json(await req('/api/agent/zeta/thread'));
+    assert.deepEqual(body.messages, [], 'nothing recorded either');
+  });
+  reset();
+  // The control: the SAME send with the label the screen really shows is kept.
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async () => {
+    await post('/api/agent/zeta/thread', { text: '1', chose: '14 days' });
+    const body = json(await req('/api/agent/zeta/thread'));
+    const row = body.messages[body.messages.length - 1];
+    assert.equal(row.text, '14 days', 'the option’s own words, as the person read them');
+    assert.equal(row.wire, '1');
+  });
+});
+
+test('a pane that has already moved on is not asked to prove what the person read', async () => {
+  reset();
+  // ⚠️ THE ASYMMETRY IS DELIBERATE. A prompt closes the moment it is answered,
+  // so by the next send the menu is gone -- and demanding proof from a screen
+  // that has moved on would strip the words in the ORDINARY case to defend
+  // against one the single-origin write guard already covers.
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said('working on it now, no menu here\n'), said(), said()], async () => {
+      await post('/api/agent/zeta/thread', { text: '1', chose: '14 days' });
+      const body = json(await req('/api/agent/zeta/thread'));
+      const row = body.messages[body.messages.length - 1];
+      assert.equal(row.text, '14 days', 'the words the person read are kept');
+      assert.equal(row.wire, '1', 'and the record still says what was typed');
+    });
+});
+
+test('a button whose digit the visible menu does not offer is refused, not sent', async () => {
+  reset();
+  // ⚠️ THE CASE THE FIRST GUARD MISSED. With a menu on screen and a `text`
+  // that is not one of its numbers, there was no row to compare against, so an
+  // unverified label was kept -- which is precisely "words the visible screen
+  // contradicts", the thing the guard exists for.
+  const menu = 'Do you want to proceed?\n❯ 1. 14 days\n  2. 30 days\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }), [said(menu), said(), said()], async ({ calls }) => {
+    const res = await post('/api/agent/zeta/thread', { text: '7', chose: '14 days' });
+    assert.equal(res.status, 409, 'a digit the visible menu does not offer is a stale button');
+    assert.equal(calls.sends().length, 0);
+  });
+});
+
+test('a menu that redrew into a DIFFERENT question with the SAME labels is refused', async () => {
+  reset();
+  /**
+   * ⚠️ THE CASE THE LABEL CHECK CANNOT SEE, and it is this product's most
+   * common menu. Claude's edit-permission prompt draws "❯ 1. Yes / 2. No" for
+   * EVERY file, so verifying the words for the pressed digit verifies nothing
+   * about which question they answered. A pane that redrew between the paint
+   * and the POST passed every existing guard, and `1` approved a file the
+   * person never chose.
+   *
+   * The page has held the discriminating half since the answered-hold was
+   * written (`talkKey`'s `above`); it simply never sent it. `asked` is that
+   * text and `chat.questionAbove` is the engine's twin of the rule.
+   */
+  const bPrompt = 'Edit file src/b.js?\n❯ 1. Yes\n  2. No\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(bPrompt), said(), said()], async ({ calls }) => {
+      const chatEngine = require('./engine/chat');
+      const asked = chatEngine.questionAbove(chatEngine.questionIn('Edit file src/a.js?\n❯ 1. Yes\n  2. No').text);
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
+      assert.equal(res.status, 409, 'the screen is asking about a different file now');
+      assert.equal(calls.sends().length, 0, 'and nothing was typed into the pane');
+    });
+});
+
+test('the same question still on screen is sent, so the check above is not refusing everything', async () => {
+  reset();
+  /* ⚠️ THE CONTROL FOR IT. Without this, the refusal above passes for a server
+     that 409s every button send, which would be worse than the hole it closes:
+     the buttons are the pack's whole point. */
+  const aPrompt = 'Edit file src/a.js?\n❯ 1. Yes\n  2. No\n';
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(aPrompt), said(), said()], async ({ calls }) => {
+      const chatEngine = require('./engine/chat');
+      const asked = chatEngine.questionAbove(chatEngine.questionIn(aPrompt).text);
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
+      assert.equal(res.status, 200, 'the question it was answering is the one on screen');
+      assert.equal(calls.sends().length > 0, true, 'and the digit reached the pane');
+    });
+});
+
+test('a pane that ACCUMULATED a new question above the same menu is refused', async () => {
+  reset();
+  /**
+   * ⚠️ THE CASE CONTAINMENT LET THROUGH, and neither existing test covered it.
+   * The two tests beside this one use "src/a.js" and "src/b.js", which contain
+   * neither other, so a containment guard passes them both and looks correct.
+   * A pane ACCUMULATES: the answered question's prose stays on screen above the
+   * new one, so the new identity legitimately CONTAINS the old. Measured
+   * through the producers: asked "Do you want to proceed?", screen now reads
+   * "rm -rf /Users/josh/build" above the same Yes/No menu, and containment
+   * called that the same question.
+   *
+   * Equality refuses it. The reason equality is safe again is that the identity
+   * no longer moves with the cursor -- see `questionAbove`.
+   */
+  const chatEngine = require('./engine/chat');
+  const painted = 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n\n> ';
+  const accumulated = 'rm -rf /Users/josh/build\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n';
+  const asked = chatEngine.questionAbove(chatEngine.questionIn(painted).text);
+  assert.ok(asked, 'CONTROL: the painted screen has an identity');
+  const nowIdent = chatEngine.questionAbove(chatEngine.questionIn(accumulated).text);
+  assert.ok(nowIdent && nowIdent.includes(asked),
+    'CONTROL: the new identity really does CONTAIN the old one, which is what containment got wrong');
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(accumulated), said(), said()], async ({ calls }) => {
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
+      assert.equal(res.status, 409, 'answering the older question would type 1 at the newer one');
+      assert.equal(calls.sends().length, 0, 'and nothing reached the pane');
+    });
+});
+
+test('the cursor moving inside a SHORT prompt still sends, because the window clamps', async () => {
+  reset();
+  /**
+   * ⚠️ THE FALSE REFUSAL THE FIRST VERSION OF THIS GUARD SHIPPED WITH, and a
+   * guard that refuses correct sends is worse than the hole it closes.
+   *
+   * `questionIn` anchors on the LAST needs-you marker and `❯ 1. Yes` is itself
+   * one, so the anchor is the option line while the cursor sits on 1 and the
+   * prose line above it once the person arrows to 2. The run-up window shifts
+   * with the anchor, so `above` changes while the question, the options and
+   * the labels do not. Equality refused that send and told the person their
+   * screen was asking something else. Containment accepts it, because one
+   * window is a prefix of the other whenever only the anchor moved.
+   */
+  /* ⚠️ THE IDENTITY IS DERIVED, NOT TYPED. A hand-written `asked` pins what the
+     test's author believed the page sends, which is how this test kept passing
+     against an identity rule that had changed underneath it. `chat.questionAbove`
+     is the same function the page's copy is pinned against, so the test now
+     sends what a real client would. */
+  const chatEngine = require('./engine/chat');
+  const painted = 'I will run the test suite now.\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n';
+  const moved = 'I will run the test suite now.\nDo you want to proceed?\n  1. Yes\n❯ 2. No\n';
+  const asked = chatEngine.questionAbove(chatEngine.questionIn(painted).text);
+  assert.ok(asked, 'CONTROL: the painted screen has an identity to send');
+  await withAgent(fleet.agent('zeta', { state: 'needs_you' }),
+    [said(moved), said(), said()], async ({ calls }) => {
+      const res = await post('/api/agent/zeta/thread', { text: '1', chose: 'Yes', asked });
+      /* ⚠️ AND THE COST IS NARROWER THAN IT LOOKS, which this fixture measures.
+         The identity is every meaningful line above the menu, and the window
+         gains lines at the top when the cursor leaves the marked option -- but
+         `questionIn` slices from `max(0, at - 6)`, so a prompt with SIX OR
+         FEWER lines above the menu clamps to zero at both cursor positions and
+         the identity does not move at all. That is the ordinary permission
+         prompt. The false refusal needs a capture DEEPER than the run-up
+         window, and `engine/chat.test.js` holds that case. */
+      assert.equal(res.status, 200, 'a short prompt clamps to the same window at either cursor position');
+      assert.equal(calls.sends().length > 0, true, 'and the answer reached the pane');
+    });
+});
+
+test('words on a button are not kept when nothing is being asked', async () => {
+  reset();
+  // ⚠️ `chose` is a claim that these words were on a button. If the board does
+  // not say this agent is asking anything, there was no button -- and because
+  // a non-question screen parses to no menu, the contradiction check below it
+  // would be SKIPPED, so an unverified label went straight into the record.
+  await withAgent(fleet.agent('zeta', { state: 'idle' }), [said(), said()], async () => {
+    const res = await post('/api/agent/zeta/thread', { text: 'ok', chose: 'Approve the wire transfer' });
+    assert.equal(res.status, 200, 'the message still sends: only the words are refused');
+    const body = json(await req('/api/agent/zeta/thread'));
+    const row = body.messages[body.messages.length - 1];
+    assert.equal(row.text, 'ok', 'the record keeps what was actually sent');
+    assert.equal(row.wire, null, 'and claims no mechanism that did not happen');
+  });
+});

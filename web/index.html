@@ -34,6 +34,35 @@
      manual data-theme toggle remains #40's. */
   --k-bg: #faf9f7; --k-ink: #14161a; --k-ink-2: #4a4f57; --k-rule: #e3e1dc;
   --k-surface: #ffffff; --k-track: rgba(20,22,26,.16); --k-knob: #ffffff;
+  /* ⚠️ DEFINED HERE, not inherited from a fallback. The pack writes this token
+     as `var(--k-sunk, rgba(20,22,26,.05))` everywhere and defines it nowhere,
+     which works in light and is nearly invisible in dark: a 5%-black wash on a
+     #17191c surface is not a sunk panel, it is a missing one. Mona Lisa found
+     the same undefined token failing two opposite ways in her drawings on
+     2026-08-19 -- silently on a background, loudly on an SVG fill -- and the
+     lesson she drew is the one applied here: a borrowed token needs its
+     definition, not just the defence its source happened to carry. The
+     fallbacks stay at the usage sites anyway, verbatim from the pack. */
+  --k-sunk: rgba(20,22,26,.05);
+  /* ⚠️ THE OPTION BUTTON'S BOUNDARY IS A CONTRAST FLOOR, not a preference.
+     `--k-rule` measures 1.18:1 against the question panel in light and 1.10:1
+     in dark, and WCAG SC 1.4.11 asks 3:1 of anything that identifies a control.
+     A button whose edge nobody can see is a button nobody can find. What
+     `docs/browser-checks/render-talk.js` PINS is the 3:1 floor, on every state
+     that has buttons, in both themes; the numbers it last printed were 3.27:1
+     light and 3.13:1 dark (2026-08-20, headed). Those two decimals are a
+     reading, not a guard -- nothing fails if they move, only if they fall
+     under three -- and they are written here with their date so the next
+     person does not read them as pinned. (An earlier version carried 3.26 and
+     3.14, from a hand calculation, which is two numbers nothing measures at
+     all.) They are the
+     lightest values that clear the floor, deliberately, so the pack's quiet
+     treatment survives.
+     ⚠️ The app's OTHER buttons have the same problem (`.btn` measures 1.31:1
+     against a card) and this fixes only the control this branch adds; widening
+     it is a change to every button in the product and belongs in its own diff,
+     flagged rather than silently taken. */
+  --k-optline: #82878f;
   --gold: #d6a62e; --gold-bright: #e3b341; --gold-deep: #b88920;
   --k-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -122,6 +151,10 @@
     --k-rule:    #2a2d31;
     --k-track:   rgba(245,245,244,.22);
     --k-knob:    #e8e9eb;
+    /* The inverse: a raised-looking wash on the dark ground, because a
+       darker-than-black panel is not a thing anybody can see. */
+    --k-sunk:    rgba(245,245,244,.06);
+    --k-optline: #6e7278;
   }
 }
 /* ⚠️ THIS BLOCK USED TO BREAK DARK MODE, and it sits after the dark block, so it
@@ -1171,6 +1204,147 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .delivery.placed { border-color: rgba(47,125,90,.5); }
 .delivery.failed { border-color: rgba(179,38,30,.5); }
 .delivery.unsure { border-style: dashed; }
+
+/* ---- the person's own thread with one agent (pack FROZEN-2026-08-19) ----
+   Ported from the freeze's `.dbox` chat, values verbatim. The composer is the
+   BUILD's control pair (`.frow` + `<input>` + `.btn`), NOT the pack's
+   `.inp`/`.btn-gold`: neither of those classes exists in this app, and
+   introducing a gold button for one control would make this page's Send the
+   only gilded commit in the product. Recorded as an alignment item rather than
+   silently resolved either way. */
+.dmthread { display: flex; flex-direction: column; gap: 12px; min-height: 7rem;
+  max-height: 15rem; overflow-y: auto; padding-right: 4px; }
+.dm { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.dm.mine { align-items: flex-end; }
+/* ⚠️ THE INCOMING BUBBLE HAS NO PRODUCER, and that is worth stating rather
+   than leaving as a rule nobody can reach. The pack's dbox draws both sides of
+   this conversation; the build stores only the person's side, because there is
+   no record anywhere of an agent saying something to the person -- its side is
+   read live off the pane and is not kept (see `chat.viewport`, which had its
+   only timestamp removed on the unread-surface rule). That is the SAME missing
+   record the silence card is blocked on, arriving on a second surface.
+   So every bubble this page emits today is `.mine`, and the base background
+   below waits on that record rather than on a style decision. Kept, not
+   deleted: when the agent's side lands, the drawing is already right and this
+   is the rule it needs. (Distinct from the 18e `.pjthread` case, which was a
+   rule that DID have an element and was silently outranked by another rule.) */
+.dm-b { max-width: 92%; padding: 9px 13px; border-radius: 12px; font-size: .9375rem;
+  line-height: 1.45; background: var(--k-sunk, rgba(20,22,26,.05));
+  overflow-wrap: anywhere; }
+.dm.mine .dm-b { background: rgba(214,166,46,.14); }
+.dm-w { font-size: .75rem; color: var(--k-ink-2); }
+/* ⚠️ THE META LINE FOLLOWS ITS BUBBLE. `.dm.mine` is `align-items: flex-end`,
+   which right-aligns the SPAN while it is narrower than the row -- and a
+   verdict long enough to wrap makes the span full width, at which point its
+   text left-aligns and the receipt jumps to the opposite side of the panel
+   from the message it belongs to. Both committed screenshots of a wrapped
+   verdict showed it: "You · sent as 1" at the far left with its bubble at the
+   far right, and the pill spanning nearly the whole box, which reads as an
+   alert about the panel rather than a receipt for one message. (Named by shape
+   rather than by filename on purpose: this sentence cited talk-4-failed until a
+   LATER fix removed the wire suffix from failed rows, and the citation went
+   false with nobody editing it.) Removing the stranded separator (the previous round) fixed the
+   symptom above the fold and not this. */
+.dm.mine .dm-w { text-align: right; }
+.dmnone { font-size: .875rem; color: var(--k-ink-2); margin: 0; }
+.dmoff { margin-top: 12px; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2);
+  border-left: 3px solid var(--k-rule); padding-left: 12px; }
+/* ⚠️ The question box is NOT red. It is a thing to answer, not a thing that has
+   gone wrong, and the product already spends red on genuine attention. Making
+   an ordinary question look like a fault is how people start ignoring red.
+   (The pack's sentence, carried with the rule it explains.) */
+.qask { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 14px;
+  padding: 12px 14px; border-radius: 10px; background: var(--k-sunk, rgba(20,22,26,.05)); }
+.qask b { font-size: .9375rem; }
+.qask p { margin: 4px 0 0; font-size: .9375rem; line-height: 1.45; color: var(--k-ink-2); }
+/* ⚠️ THE QUESTION IS THE AGENT'S SCREEN, not our prose. The drawing renders it
+   as a sentence because a drawing can; what we actually hold is a slice of the
+   pane, and `questionIn` is documented as NOT a parser. So it keeps the
+   screen treatment this app already uses for it in the room, inside the pack's
+   box. Rewording a terminal into prose would be a claim about what was asked. */
+.qask .pj-screen { margin-top: 6px; max-height: 200px; }
+/* ⚠️ A PERSISTENT SCROLLBAR ON THE QUESTION, and it replaces a fade that would
+   have needed logic. `white-space: pre` is deliberate -- a captured line is
+   what the agent's screen showed, and wrapping a permission prompt destroys
+   the column alignment its options are drawn in -- so a line wider than the
+   box is CUT. Measured 2026-08-20: the box shows 100 characters of a session
+   `connect.js` creates at `-x 220`, and MOST of the question-bearing states in
+   `render-talk.js` cut -- the count is not quoted because it moved the moment
+   two states were added, in the same commit that wrote the third copy of it.
+   macOS hides the OVERLAY scrollbar until somebody
+   scrolls, so there was no affordance saying anything was missing, on the one
+   screen whose whole job is that a person READS the question.
+
+   Styling the pseudo-element opts this box out of overlay behaviour and back
+   to a bar that is always there when it is needed. It is better than the fade
+   it replaces for a reason worth keeping: the BROWSER owns the condition, so
+   it cannot draw when nothing is cut and cannot keep claiming "there is more"
+   once you have scrolled to the end -- the two lies a hand-drawn edge has to
+   be tested against. And the thumb's LENGTH says how much more, which a fade
+   cannot say at all.
+
+   Scoped to THIS box rather than to `.pj-screen`, which the room also uses:
+   the room's panes have the same defect and fixing them is not this branch's
+   surface. `-webkit-` is not a gamble here -- Kosmos opens the default
+   browser, which on a stock Mac is Safari, and both engines this product
+   meets are WebKit or Chromium. */
+/* ⚠️ BOTH AXES. `.pj-screen` is `overflow: auto`, not `overflow-x`, and the
+   question box is capped at 200px against a viewport `chat.js` reads 60 lines
+   of -- so a question that scrolls VERTICALLY is the ordinary case, not the
+   exotic one. Styling only `height` opted the element out of overlay
+   behaviour on both axes while sizing one of them, which left the vertical bar
+   at the engine's default thickness: a different width from its horizontal
+   sibling, eating layout width the box never reserved before. The cut this
+   fix was written for was horizontal; the rule reaches an axis nobody had
+   looked at. */
+#d-qask-text::-webkit-scrollbar { height: 6px; width: 6px; -webkit-appearance: none; }
+/* No fallback on the thumb either, and this one was worse than the track's:
+   `--k-ink-2` is defined at `:root` and in the dark block, so it could never
+   render -- and `rgba(20,22,26,.4)` matches NEITHER theme's value, where the
+   pack-verbatim fallbacks elsewhere in this file at least equal their token. */
+#d-qask-text::-webkit-scrollbar-thumb { background: var(--k-ink-2); border-radius: 3px; }
+/* No fallback on the track: `--k-sunk` is defined unconditionally at `:root`
+   and per theme, so a fallback here can never render -- and the one written
+   first was `.08`, a deliberately stronger wash than the token's `.05`, which
+   made it a value nobody would ever see rather than a defence. */
+#d-qask-text::-webkit-scrollbar-track { background: var(--k-sunk); border-radius: 3px; }
+.qopts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+/* An option. Deliberately NOT the page's commit styling: a question with two
+   equal answers has no primary, and emphasising one would recommend it.
+   ⚠️ ONE VALUE DROPPED FROM THE DRAWING: `white-space: nowrap`. The labels are
+   the agent's own words, unbounded in length ("Yes, and don't ask again for
+   this project"), and a nowrap button inside a wrapping row cannot shrink --
+   it stretches the page sideways, which is the exact failure round 21 measured
+   at 1262px on this app's message rows. The drawing's labels are short; real
+   ones are not. */
+.qopt { font: inherit; font-size: .9375rem; font-weight: 600;
+  color: var(--k-ink); background: var(--k-surface);
+  border: 1px solid var(--k-optline); border-radius: 10px;
+  padding: .5em 1.05em; cursor: pointer; }
+.qopt:hover { border-color: var(--k-ink-2); }
+.qopt:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+.qopt[disabled] { opacity: .5; cursor: not-allowed; }
+/* The out. One line, and it points DOWN at the composer this page already has
+   rather than away to another screen. */
+/* ⚠️ `.qask p.qout`, NOT `.qout`. `.qask p` above is (0,1,1) and beat a bare
+   class (0,1,0) on specificity, so every declaration here except `color` was
+   dead and the line rendered at .9375rem/4px -- the same size as the question
+   label two inches above it, which is what the committed screenshot shows.
+   Measured before: 15px/4px. This is the `.pjthread` precedent this stylesheet
+   already cites: a rule that HAS its element and is silently outranked reads
+   in the diff exactly like a rule that works. */
+.qask p.qout { margin: 10px 0 0; font-size: .8125rem; color: var(--k-ink-2); }
+.dmbar { margin-top: 14px; }
+#d-say { flex: 1 1 auto; }
+/* ⚠️ A CLOSED BOX HAS TO LOOK CLOSED. The pack dims its disabled composer
+   (`.dmbar .btn-gold[disabled], .dmbar .inp[disabled] { opacity: .5 }`) and the
+   build has no `.btn[disabled]` rule at all -- so a Send that cannot send was
+   rendered identically to one that can, under a sentence saying the agent
+   cannot be handed a message. Scoped to this bar rather than to `.btn`: the
+   room's own Send has the same gap and widening the fix is a change to every
+   button in the app, which belongs in its own diff (flagged, not silently
+   taken). */
+.dmbar .btn[disabled], .dmbar input[disabled] { opacity: .5; cursor: not-allowed; }
 /* The room valve's row: reassurance, not an error. */
 .msg-valve { font-size: .8125rem; color: var(--k-ink-2); border-left: 2px solid var(--k-rule);
              padding-left: 10px; }
@@ -2421,6 +2595,64 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <p class="dhint" id="d-convo-gap" style="margin:12px 0 0;" hidden><b>This agent does not know how to message your other agents.</b> You can still message it yourself.</p>
   </section>
 
+  <!-- ⚠️ THE PERSON'S OWN THREAD WITH THIS AGENT, and the question they are
+       being asked, above the box they answer in. The pack's note is the whole
+       design and it predates the panel: "the question is at the top of the
+       thread rather than on a page of its own, because the box you answer in
+       is the thing you need next to it."
+
+       Everything here is empty in the markup and filled by paintTalk(): a
+       shipped sentence naming an agent would be a claim about whichever agent
+       happens to be open. -->
+  <section class="dbox" id="d-talk-box" tabindex="-1">
+    <h3 class="dlab" id="d-talk-label"></h3>
+    <p class="dhint" id="d-talk-hint" style="margin:0 0 12px;"></p>
+    <div class="qask" id="d-qask" hidden>
+      <span class="haz" aria-hidden="true">!</span>
+      <div style="min-width:0;flex:1 1 auto;">
+        <b id="d-qask-lab"></b>
+        <!-- The agent's screen, in the treatment this app already uses for a
+             question in the room. Not prose: we did not write it. -->
+        <pre class="pj-screen" id="d-qask-text" tabindex="0" hidden
+             role="region" aria-labelledby="d-qask-lab"></pre>
+        <div class="qopts" id="d-qopts" hidden></div>
+        <p class="qout" id="d-qout" hidden>Or write your own answer below.</p>
+        <!-- ⚠️ A HINT, NOT A VERDICT PILL, ruled by Mona Lisa 2026-08-20 after a
+             reviewer read the picture. This line is a RECOVERY INSTRUCTION and
+             its whole job is to say the buttons still work; the failure
+             sentence lives on the message row above, deliberately. It wore
+             `.delivery.failed`, which put a red pill on the good news INSIDE
+             the question's own box -- and the stylesheet's own rule is that a
+             question must not look like a fault, because "making an ordinary
+             question look like a fault is how people start ignoring red". The
+             send failed; the question is fine.
+             `.delivery` is also the message row's grammar ("this is what
+             happened to a message I sent"), which is true one container up and
+             false of a line about buttons: borrowing a class across containers
+             inherits a claim written for the other container. The plan
+             specified `.delivery.failed` here and the plan was wrong. -->
+        <p class="qout" id="d-qask-fail" hidden></p>
+      </div>
+    </div>
+    <div class="dmthread" id="d-dmthread"></div>
+    <p class="dhint" id="d-talk-older" style="margin:10px 0 0;" hidden></p>
+    <div class="dmoff" id="d-dmoff" hidden></div>
+    <div class="frow dmbar">
+      <!-- ⚠️ THE ACCESSIBLE NAME SHIPS IN THE MARKUP. paintTalk refines it to
+           name the agent, but every early return in that function (a failed
+           fetch, an agent switched mid-flight) leaves the element as it was,
+           and an unnamed text input is a WCAG 4.1.2 failure on the one control
+           this box exists for. The room's own box carries a static label for
+           the same reason. -->
+      <input type="text" id="d-say" maxlength="2000"
+             aria-label="Type a message for this agent" placeholder="Message this agent…">
+      <button class="btn" id="d-send" type="button">Send</button>
+    </div>
+    <p class="fmsg" id="d-say-msg" role="alert" aria-live="assertive"></p>
+    <!-- ⚠️ THE THREAD PERSISTS, THE AGENT'S RECOLLECTION DOES NOT, and a chat
+         window normally conflates the two. The pack's sentence, verbatim. -->
+    <p class="dhint" id="d-persist" style="margin:12px 0 0;"></p>
+  </section>
   <section class="dbox">
   <div class="field">
     <!-- ⚠️ "SPECIAL PURPOSE", AND THE FILENAME IS NEVER THE LABEL. Josh,
@@ -4753,7 +4985,41 @@ async function tick() {
          panel-visibility term matters because CURRENT survives closing
          the detail, and a capture every five seconds for an invisible
          surface is a standing subprocess. */
-      if (ENG_ON && !WINDOW_OPENING && !document.getElementById('panel-detail').hidden) {
+      /* ⚠️ The agent's own thread rides the SAME cadence, not a second timer.
+         Its live values are the agent's screen and whether it is asking
+         something, and both change on their own -- a question painted once
+         goes on asserting a screen that stopped being true. Not while a send
+         is in flight: that would repaint the box from underneath the send's
+         own refresh, and not for an invisible panel (a capture every five
+         seconds for a surface nobody is looking at is a standing subprocess). */
+      /* ⚠️ THE GATE IS PER AGENT, like every other flight check on this page.
+         A send to A used to freeze the repaint of whichever agent was open for
+         the whole flight, which can honestly run many seconds: open B while A
+         is sending and B's screen stops updating for reasons that have nothing
+         to do with B. `TALK_FLIGHT` is the same term `paintTalk` already uses
+         to decide whose controls to disable. */
+      /* ⚠️ THE TAB AS WELL AS THE PANEL, which the gate below used to conflate.
+         `panel-detail` being open says the surface is on screen IN THIS PAGE;
+         it says nothing about whether the page is the front tab. This route is
+         the most expensive poll the app has -- `nameRefusal`'s uncached
+         list-panes, then `safeRoster`'s list-panes plus a capture per agent,
+         then a second capture when the agent is asking -- on a single-threaded
+         server whose tmux calls block. An agent panel left open in a
+         background tab paid all of that every five seconds, forever. The
+         projects poll settled this exact question in round 33 and its comment
+         is three hundred lines below; this is that rule, applied to the poll
+         that costs the most. */
+      if (!(TALK_SENDING && TALK_FLIGHT === CURRENT.sessionName)
+          && !document.hidden
+          && !document.getElementById('panel-detail').hidden) {
+        paintTalk(CURRENT.sessionName, CURRENT.name);
+      }
+      /* The same tab gate as the poll above, for the same reason: this is a
+         capture-pane every five seconds. Engineering mode is off by default so
+         the exposure is narrower, but the rule the comment above states does
+         not get to apply selectively inside one tick. */
+      if (ENG_ON && !WINDOW_OPENING && !document.hidden
+          && !document.getElementById('panel-detail').hidden) {
         if (fresh && fresh.isNamedOurs === true) {
           paintAgentWindow(CURRENT.sessionName, { cachedFlag: true });
         } else {
@@ -5873,6 +6139,1018 @@ async function paintConversation(sessionName, agentName) {
   }
 }
 
+/* ── the person's own thread with this agent ─────────────────────────────── */
+/**
+ * The ONE writer for the thread box.
+ *
+ * ⚠️ A CACHE WITH FOUR WRITERS IS NOT A CACHE, IT IS A TRAP, and this element
+ * had four: the paint, the paint's failure arm, openDetail's clear, and the
+ * empty-thread arms. Only the paint knew about the key, so the other writers
+ * left it describing markup that was no longer on screen, and the next paint
+ * skipped a rewrite it needed. Measured: reopening an agent whose newest
+ * message is over an hour old left the box reading "Opening…" FOREVER, because
+ * the rendered markup is byte-identical from then on and every later poll took
+ * the same skip. A transient read failure stranded its own sentence the same
+ * way.
+ *
+ * That is the identical defect this branch fixed for the option row one commit
+ * earlier, re-created one element over, by adding a second cache the same way
+ * rather than by removing the shape. The room does not have it because
+ * `#pj-msgs` has exactly ONE writer (`setLive`), which is why its key cannot
+ * drift. This is that.
+ *
+ * The scroll key rides here too: the MARKUP decides whether to rewrite, the
+ * message COUNT decides whether to jump to the bottom -- a new message should
+ * land in view, an unchanged list should not move under a reader.
+ */
+function setThread(el, html, count) {
+  if (el.__lastThread !== html) {
+    el.__lastThread = html;
+    el.innerHTML = html;
+  }
+  // ⚠️ `count` is null for every not-a-list state (opening, unreadable,
+  // nothing yet). Those must not leave a number behind that a later thread of
+  // the same length would match, so the key is cleared rather than kept.
+  if (el.__lastCount !== count) {
+    el.__lastCount = count;
+    if (count !== null) el.scrollTop = el.scrollHeight;
+  }
+}
+
+/**
+ * ⚠️ THIS IS THE ONE PLACE ON THIS PAGE THAT TYPES INTO A RUNNING AGENT, and
+ * the one place a question can be answered without meeting a number. The pack's
+ * note is the design and it predates the panel: the question sits at the top of
+ * the thread rather than on a page of its own, because the box you answer in is
+ * the thing you need next to it.
+ */
+/**
+ * What makes one question different from another, for the answered-hold.
+ *
+ * ⚠️ TWO PARTS, AND EACH ONE FIXES THE OTHER'S FAILURE.
+ *
+ * Keyed on the whole capture slice, the hold released whenever the pane moved
+ * on underneath the menu -- which a pane always does, and which is the thing
+ * the hold exists to survive.
+ *
+ * Keyed on the OPTIONS alone, it suppressed a genuinely new question whose
+ * labels happened to match. That is not exotic: Claude's edit-permission menu
+ * draws the same three labels for every file, so answering one hid the next,
+ * with the board card still saying the person was needed.
+ *
+ * So the key is the options PLUS what is written above them. The text above the
+ * first option line is the question itself; everything below is the pane
+ * accumulating. One half tells two prompts apart, the other ignores the noise.
+ */
+function talkKey(body) {
+  if (!body.asking || !Array.isArray(body.options) || !body.question) return null;
+  const lines = String(body.question.text || '').split('\n');
+  /* ⚠️ `optionsIn`'s LINE HANDLING, transcribed rather than approximated,
+     because this is the same fact asked a second time: where the option run
+     starts. The engine is not reachable from the page, so this is a copy; a
+     copy that is nearly the same is the dangerous kind. Every drift so far
+     could only disagree DOWNWARD, moving `first` up and shortening the
+     `above` that gives the answered-hold its identity -- and a shorter
+     `above` is how two different questions collide on one key and a live
+     question gets suppressed. Four drifts have been found and removed:
+       - an ASCII `|` counted as frame, so a prose line "| 1. see the lease"
+         matched here and not there;
+       - `\d+` matched any digit count, so a stray "10. leftover" above a
+         genuine menu matched here (`optionsIn` reads one digit, 1-9, so `01.`
+         cannot arrive as option 1);
+       - a RUN of frame characters was stripped rather than one, so `││ 1. x`
+         matched here alone;
+       - the label was only required to start with a non-space, so a
+         frame-only line `│ 1. │` matched here while `optionsIn`, which strips
+         the trailing frame BEFORE requiring a label, produced no option.
+     The three replaces and the pattern below are `optionsIn`'s, verbatim. */
+  const first = lines.findIndex((l) => /^(?:❯\s*)?[1-9][.)]\s+\S.*$/.test(
+    l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').replace(/^\s+/, '')));
+  /* ⚠️ NOTHING ABOVE THE RUN IS NOT THE SAME AS NO IDENTITY. `questionIn`
+     normally hands over six lines above the marker, so `first` is normally
+     positive -- but a SHORT capture clamps that slice to 0, and then an
+     `above` of '' keys the hold on the options alone. That is exactly the
+     collision this key exists to prevent: Claude's edit-permission menu draws
+     the same three labels for every file, so two different questions become
+     one key and the second is suppressed for the whole hold -- panel gone, no
+     buttons, while the board card still says the person is needed.
+     Falling back to the WHOLE slice costs the other direction: text
+     accumulating below the menu spends the hold early, so the buttons come
+     back over a question that was already answered and a second press types
+     the digit into the live pane again.
+     ⚠️ AN EARLIER VERSION OF THIS COMMENT CLAIMED THE 409 SCREEN-CHECK CATCHES
+     THAT, AND IT DOES NOT. The 409 fires when the visible menu DISAGREES with
+     the words that were chosen; this case is the SAME menu still on screen
+     with text changing underneath it, so the label matches, nothing is
+     refused, and the send goes through. There is no second line of defence in
+     either direction. The fallback is still the better arm -- a suppressed
+     live question leaves the person unable to answer at all, while a second
+     press requires them to press again over a question they can see they have
+     answered -- but it is a choice between two harms and not a free one. */
+  /* ⚠️ THE LAST THREE MEANINGFUL LINES ABOVE THE RUN, matching
+     `chat.questionAbove` exactly -- see its docblock for why the whole window,
+     containment, and the whole-slice fallback were each wrong. The short
+     version: the window's TOP moves with the cursor, a newly accumulated
+     question inserts its lines NEAREST the menu, and the options alone are
+     what two different questions share. */
+  /* `first` can be -1 when no line matches, and `slice(0, -1)` would silently
+     drop the last line rather than falling back. Unreachable through the route
+     (a non-null `options` implies a match) and guarded anyway, because this
+     copy exists precisely because a nearly-the-same copy is the dangerous
+     kind. */
+  const aboveLines = (first < 0 ? [] : lines.slice(0, first))
+    .filter((l) => l.replace(/^\s*│\s?/, '').replace(/[\s│]+$/, '').trim() !== '');
+  /* ⚠️ AND HERE THE FALLBACK STAYS, WHERE THE ENGINE'S TWIN RETURNS NULL. The
+     two functions compute the same `above` and then diverge ON PURPOSE, because
+     the cost of a weak identity is not the same on both sides:
+       this key decides whether to keep HIDING buttons. A collision suppresses a
+       live question for up to thirty seconds -- bad, bounded, and strictly
+       better than having no key at all, which suppresses every question.
+       `questionAbove` decides whether to TYPE A DIGIT into a live terminal. A
+       collision there answers a question nobody read, so it refuses to guess
+       and the route falls back to the label check it had before.
+     Same rule, different answer to "what if the rule yields nothing", and the
+     agreement test asserts both halves rather than pretending they match. */
+  const above = aboveLines.join('\n').trim() || lines.join('\n').trim();
+  return JSON.stringify(body.options) + '\u0000' + above;
+}
+
+let TALK_LOAD = 0;
+let TALK_SENDING = false;
+// Which agent the in-flight send belongs to. `TALK_SENDING` alone is a fact
+// about the page; the controls it disables belong to one agent.
+let TALK_FLIGHT = null;
+/**
+ * ⚠️ THE DRAFT IS PARKED PER AGENT, like the room's `PJ_DRAFTS`. Without this,
+ * opening the board and coming back destroyed whatever was half-typed — the
+ * never-delete rule this branch holds on disk, broken in the one place the
+ * words exist only in the DOM.
+ */
+const TALK_DRAFTS = {};
+/**
+ * The question this person has just answered, per agent, and when.
+ *
+ * ⚠️ THIS IS WHY THE BUTTONS GO AFTER A SEND (drawing, states 2 and 3): a
+ * second press answers a numbered prompt twice, and the poll that runs a beat
+ * later can still be looking at a pane that has not redrawn yet — so the
+ * server's `asking` alone would put the buttons straight back.
+ *
+ * ⚠️ AND IT EXPIRES, which matters more than the suppression. Keyed on the
+ * question TEXT and bounded in time: if the same question is still on screen
+ * 30 seconds later, the answer demonstrably did not take, and a panel that
+ * stayed hidden on the strength of our own optimism would strand the person in
+ * front of an agent that is still waiting. The stranded state is the thing this
+ * whole feature exists to remove, so the suppression fails OPEN.
+ */
+const TALK_ANSWERED = {};
+const TALK_ANSWER_HOLD_MS = 30000;
+/**
+ * The last send to this agent could not be delivered.
+ *
+ * Drives the drawing's state-4 line. ⚠️ Not read off the last row in the
+ * thread, which was the first version: a failure from days ago then put "The
+ * buttons still work." under a fresh, unrelated question. This is about THIS
+ * send, which is what the drawing means.
+ */
+const TALK_FAILED = {};
+/**
+ * The KEY of the question last painted for each agent (see `talkKey`: the
+ * options plus the text above them, not the capture slice and not the options
+ * alone).
+ *
+ * ⚠️ Read at press time rather than at verdict time: by the time the send
+ * answers, the poll may have repainted with a different capture, and the hold
+ * has to be keyed on the question the person was actually looking at when they
+ * pressed. Otherwise the suppression is about a question nobody answered.
+ */
+const TALK_QUESTION = {};
+
+/**
+ * One message the person sent, in the pack's bubble.
+ *
+ * The VERDICT comes from `pjVerdict`, which the room's rows use too: the three
+ * delivery states and their sentences are decided once, or the same send would
+ * be described two ways on two screens.
+ */
+function dmRow(m, name) {
+  const v = pjVerdict(m, name);
+  /* ⚠️ WHAT WAS TYPED, when it is not what the bubble shows. A numbered answer
+     sends the digit the agent's prompt is waiting for and shows the option's
+     own words; the record keeps both, so the screen says both. Without this the
+     thread would describe a mechanism that did not happen. (Copy is provisional
+     -- flagged to Mona Lisa; the FACT is not optional, the wording is hers.)
+     ⚠️ AND NOT ON A SEND THAT NEVER HAPPENED. `could_not` is documented in
+     engine/chat.js as "NOTHING of the person's text reached the pane", so "sent
+     as 1" beside "Could not deliver just now" is the screen contradicting
+     itself in the one place this file keeps saying the record must not lie
+     about the mechanism. It was in both committed screenshots of state 4.
+     `unconfirmed` KEEPS the phrase: there the text was typed and only the
+     submit could not be confirmed, so "sent as" is what happened. The record
+     still holds `wire` either way -- this is what the SCREEN says, not what is
+     kept. */
+  /* ⚠️ THE SAME SPLIT `pjVerdict` AND `sendTalk` USE, not a third derivation of
+     it. Asking `!== 'could_not'` answers TRUE for a record whose delivery is
+     missing or carries a state nothing recognises, while `pjVerdict` prints
+     "Could not deliver" for exactly those -- so the row would have said "sent
+     as 1" beside it again, for the class this time rather than the instance.
+     `readThread` validates only that `text` is a string, so an unrecognised
+     state is a shape the store can hold. */
+  const reached = ((m && m.delivery && m.delivery.state) || '') === 'placed'
+    || ((m && m.delivery && m.delivery.state) || '') === 'unconfirmed';
+  const wire = (m.wire && reached) ? ' &middot; sent as ' + esc(m.wire) : '';
+  /* ⚠️ NO SEPARATOR BEFORE THE PILL. `.delivery` is an inline-block, so a
+     verdict long enough to wrap took the whole pill to the next line and left
+     the middot stranded at the end of the one above: "You · sent as 1 ·",
+     which reads as a sentence that stopped. The pill carries a border and its
+     own ground, so it needs no character to separate it. Closed by
+     construction rather than by a check: there is no separator left to
+     strand.
+     ⚠️ HALF OF THE ORIGINAL DEFECT IS STILL DRAWN, and saying so is the point.
+     The receipt used to sit at the far LEFT under a right-aligned bubble AND
+     the pill used to span nearly the whole box; `.dm.mine .dm-w` fixed the
+     first. The second remains: `.delivery` is an inline-block, so a verdict
+     long enough to wrap is as wide as the line box, and a wrapped one still
+     reads more like a panel-level alert than a receipt for one message. That
+     is a design question about how a long verdict should look, which is Mona
+     Lisa's, and the alignment check cannot see it -- it reads `text-align`.
+     Flagged rather than quietly left. */
+  return '<div class="dm mine"><div class="dm-b">' + esc(m.text) + '</div>'
+    + '<span class="dm-w">You' + wire + ' '
+    + '<span class="delivery' + (v.mark || ' placed') + '">' + v.said + '</span></span></div>';
+}
+
+async function paintTalk(sessionName, agentName) {
+  const box = document.getElementById('d-talk-box');
+  if (!box) return;
+  // The INSTR_LOAD/CONVO_LOAD pattern: two fetches for the SAME agent (A, B, A
+  // quickly) pass the sessionName guard both times, and the older answer must
+  // not paint last.
+  const mine = ++TALK_LOAD;
+  /**
+   * ⚠️ THE FIVE SENTENCES THAT NAME THE AGENT ARE WRITTEN FIRST, before the
+   * fetch, because not one of them depends on its answer.
+   *
+   * Written after it, they carried the PREVIOUS agent's name over every failed
+   * open — and a 404 is a standing condition here, not a blip: a pane holding a
+   * name untied answers 404 on every poll forever. Measured: open April, then
+   * open a borrowed-name agent, and the panel reads "Talk to April", "Just
+   * between you and April", "April will not remember it", with an aria-label
+   * and placeholder naming April, over the sentence saying this conversation
+   * cannot be shown. Indefinitely.
+   *
+   * The markup ships these EMPTY for exactly this reason — "a shipped sentence
+   * naming an agent would be a claim about whichever agent happens to be open"
+   * — and a stale sentence is that same claim with a different way of being
+   * wrong.
+   */
+  const name = agentName || sessionName;
+  document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
+  document.getElementById('d-talk-hint').textContent =
+    'Just between you and ' + name + '. Nothing here belongs to a project.';
+  /* ⚠️ THE TEXT HERE, THE VISIBILITY ON THE SUCCESS PATH, and the first
+     version of this fix got that backwards. Whether the line says the right
+     agent's name does not depend on the fetch, so it is written with the other
+     four; whether the box may PROMISE it keeps things does depend on it. Set
+     `hidden = false` here and a standing refusal re-shows "This stays here
+     after a restart" for the whole of every poll's round trip -- two uncached
+     `list-panes` plus a capture per agent, easily hundreds of milliseconds --
+     and hides it again on arrival: the contradiction this fix removed, back on
+     a five-second cadence and only visible mid-flight, where a check that
+     awaits each paint cannot see it. */
+  document.getElementById('d-persist').textContent =
+    'This stays here after a restart. ' + name + ' will not remember it. '
+    + 'Anything that needs to last belongs in their instructions.';
+  const say = document.getElementById('d-say');
+  say.setAttribute('aria-label', 'A message for ' + name);
+  say.placeholder = 'Message ' + name + '…';
+  let body;
+  // 404 is the route's standing refusal (a pane holding this name untied), not
+  // a read that failed this second. The sentence below branches on it.
+  let standing = false;
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(sessionName) + '/thread', { cache: 'no-store' });
+    body = await res.json();
+    /* ⚠️ THE ROUTE'S OWN REASON, not the status. A 404 here has two causes and
+       only one of them is standing: a pane holding this name untied answers
+       404 forever, while tmux failing to answer once does not (`borrowedName`
+       fails closed, so a five-second hiccup on an ordinary TIED agent lands
+       here too). Reading permanence off the status alone described a blip as
+       forever, on a panel where nothing else says why -- `#d-untied` is hidden
+       for a tied card. An older server that does not send `because` reads as
+       transient, which is the arm that keeps its time phrase and its detail. */
+    if (!res.ok) { standing = body.because === 'borrowed'; throw new Error(body.error || 'we could not read this conversation'); }
+  } catch (err) {
+    if (mine !== TALK_LOAD) return;
+    if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+    /* ⚠️ WHERE THE PERSON IS STANDING, READ BEFORE ANYTHING HIDES OR DISABLES.
+       Disabling a focused control blurs it synchronously, so asking afterwards
+       always answers BODY. The success path carries four rescues for exactly
+       this and this arm carried none: one failed poll -- a restart, a 500 --
+       while a keyboard user stood on an option button, inside the question
+       region or in the composer dropped them onto the document, and it
+       recurred on every five-second tick that failed. */
+    const stoodInside = box.contains(document.activeElement) && document.activeElement !== box;
+    /* ⚠️ COULD-NOT-LOOK, never a blank box that reads as no-conversation --
+       and never an empty composer either: a box that accepts text over a
+       thread we could not read is the two-state lie the pack's own rule is
+       about. */
+    /* ⚠️ "JUST NOW" IS A CLAIM ABOUT TIME and it is wrong for a standing
+       refusal: a name a pane holds without being that agent answers 404 every
+       time, and telling somebody to try again is telling them to wait for
+       something that will not change. A transient read failure keeps the
+       time phrase, because there it is true. */
+    /* ⚠️ THE SERVER'S OWN SENTENCE IS NOT PAINTED HERE, and the window box
+       twenty lines up refuses the identical 404 for the identical reason: its
+       body is "no agent by that name", and putting that inside the open panel
+       of an agent the person is looking at, beside a card carrying that name,
+       is the screen contradicting itself. The standing arm is reached only for
+       `because: 'borrowed'`, which is a card on the board under this name that
+       is not tied to it -- so `#d-untied` is showing directly above this box,
+       saying WHY. This sentence therefore states the consequence and claims no
+       cause of its own, a cause this arm did not compute. Measured on the
+       fixture fleet: `#d-untied` visible at y=243 with the full explanation,
+       this box at y=454; and before the fix rook's panel read "We cannot show
+       this conversation. No agent by that name." over a visible card named
+       rook. */
+    setThread(document.getElementById('d-dmthread'), '<p class="dmnone">'
+      + (standing
+        ? 'We cannot show a conversation for this name.'
+        : 'We could not read this conversation just now. ('
+          + esc((err && err.message) || 'no detail') + ')')
+      + '</p>', null);
+    document.getElementById('d-qask').hidden = true;
+    /* ⚠️ AND THE TWO SENTENCES FROM THE LAST GOOD PAINT. "5 older messages are
+       still kept" standing over "we could not read this conversation" is the
+       screen asserting a count it just said it could not see. */
+    document.getElementById('d-dmoff').hidden = true;
+    document.getElementById('d-talk-older').hidden = true;
+    /* ⚠️ AND THE PERSISTENCE LINE, which is the same contradiction and was the
+       one left standing: "This stays here after a restart" is a promise about
+       a conversation, printed directly under the sentence saying there is no
+       conversation to show. It is written before the fetch (with the other
+       four that name the agent) precisely because it does not depend on the
+       answer -- but "there is a box that keeps things" does. */
+    document.getElementById('d-persist').hidden = true;
+    document.getElementById('d-say').disabled = true;
+    document.getElementById('d-send').disabled = true;
+    /* The section itself, never the composer this arm just closed: the
+       success path's own rule, that a rescue must not hand focus to a
+       control the same paint disables. `#d-talk-box` carries tabindex="-1"
+       for this. */
+    if (stoodInside) box.focus();
+    return;
+  }
+  if (mine !== TALK_LOAD) return;
+  if (!CURRENT || CURRENT.sessionName !== sessionName) return;
+
+
+  // Whose send is in the air, if any. Read before anything that disables.
+  const flying = TALK_SENDING && TALK_FLIGHT === sessionName;
+
+  /* --- the question, and the answers to it --- */
+  /**
+   * ⚠️ THE HOLD IS COMPUTED FIRST, because two things below read it and the
+   * first version declared it between them — a temporal-dead-zone
+   * ReferenceError that threw on EVERY paint, with all 931 text tests green,
+   * because nothing in the suite renders the page. Caught by rendering it.
+   */
+  /**
+   * ⚠️ KEYED ON THE MENU, NOT ON THE SLICE. `question.text` is what
+   * `questionIn` returns: six lines above the marker THROUGH TO THE END OF THE
+   * CAPTURE. So any character changing anywhere below the menu made this a
+   * "different question" and spent the hold -- and the pane accumulates, which
+   * is the whole reason the hold exists. Measured: answer a menu, let the agent
+   * print one more line underneath it, and within one poll the buttons were
+   * back, live, over the prompt just answered. A context percentage ticking
+   * from 42% to 41% did it too.
+   *
+   * The identity of a question, for this purpose, is the options it offers. If
+   * those are the same options, it is the same question, whatever else the pane
+   * has done since.
+   */
+  TALK_QUESTION[sessionName] = talkKey(body);
+  const answered = TALK_ANSWERED[sessionName];
+  const held = !!(answered && (Date.now() - answered.at) < TALK_ANSWER_HOLD_MS);
+  /**
+   * ⚠️ A POLL THAT COULD NOT READ THE SCREEN DOES NOT SPEND THE HOLD, and the
+   * first version let it. `question: null` under `asking: true` is a
+   * first-class route state with its own sentence — the capture failed, or the
+   * marker scrolled out of the slice — and treating it as "a different
+   * question" deleted the hold, so the NEXT good poll re-offered live buttons
+   * over a prompt this person had already answered. That is the second press
+   * the hold exists to prevent, and it is the we-could-not-look versus
+   * it-is-not-there conflation this codebase splits everywhere else, including
+   * in the route that feeds this very paint.
+   *
+   * So the hold is spent by exactly two things: TIME, and a question we can
+   * actually see that is a DIFFERENT one. Not by an absent one.
+   */
+  /**
+   * ⚠️ A QUESTION WE CAN SEE BUT CANNOT KEY IS NOT "the same question".
+   *
+   * `talkKey` returns null whenever `options` is null, and the first version of
+   * this guard read a null key as "no question to compare", which is the arm
+   * written for a question that is ABSENT. So: answer a menu, and within the
+   * thirty-second hold the agent asks anything the parser will not vouch for --
+   * a free-text question, or a new menu whose labels wrap, which `optionsIn`
+   * refuses by design -- and `different` stayed false, `stillTheSame` stayed
+   * true, and the WHOLE `#d-qask` block hid, question text included, while the
+   * board card said Needs you.
+   *
+   * That is verbatim the harm this file names two hundred lines up: "panel
+   * gone, no buttons, while the board card still said the person was needed."
+   * It is the same failure as the line-0 identity collapse fixed earlier on
+   * this branch, arriving through the other door: there the key was too weak to
+   * tell two questions apart, here it does not exist at all.
+   *
+   * The rule the comment above states is the right one and this is what
+   * implementing it looks like: spent by TIME, and by a question we can
+   * actually see that is not the one that was answered. Unkeyable is not
+   * absent. There is no double-answer risk in spending it here, because a
+   * payload with no options renders no buttons to press twice.
+   */
+  const cannotKey = !TALK_QUESTION[sessionName] && !!(body.asking && body.question);
+  const different = !!(answered && TALK_QUESTION[sessionName]
+    && answered.question !== TALK_QUESTION[sessionName]);
+  /**
+   * ⚠️ UNKEYABLE RELAXES THE HIDE AND DOES NOT SPEND THE HOLD, and the first
+   * version of this fix conflated them because one boolean fed both.
+   *
+   * Feeding `cannotKey` into `different` also deleted `TALK_ANSWERED`, and that
+   * re-opened the exact defect the hold was built for: answer a menu, let the
+   * pane print ONE indented line under the run (which `optionsIn` refuses by
+   * design, and which this branch's own example -- "✳ Thinking… (41% context
+   * left)" -- is), and the hold was forgotten. One tick later the line clears,
+   * the same menu re-parses, and the buttons are back LIVE over the prompt just
+   * answered. The 409 screen-check cannot catch that one: the visible menu
+   * still matches the label, so the send is consistent and wrong.
+   *
+   * Nothing was gained by the deletion. `opts` is null on an unkeyable tick
+   * anyway, so no buttons render whether the hold stands or not; the only thing
+   * the deletion changed was what happens on the tick AFTER.
+   *
+   * So they are separated: the panel is SHOWN (a question we can see must not
+   * be hidden while the board says Needs you) and the answer is REMEMBERED (the
+   * next keyable tick decides by equality, as it always did). The cost is that
+   * the question text can appear for a tick and go again when the menu
+   * re-parses, which is the honest price of not being able to tell one
+   * unkeyable question from another.
+   */
+  const stillTheSame = held && !different && !cannotKey;
+  if (answered && (!held || different)) delete TALK_ANSWERED[sessionName];
+  /* --- the question, and the answers to it --- */
+  const qask = document.getElementById('d-qask');
+  const qlab = document.getElementById('d-qask-lab');
+  const qtext = document.getElementById('d-qask-text');
+  const qopts = document.getElementById('d-qopts');
+  const qout = document.getElementById('d-qout');
+  const live = body.presence === 'on';
+  const nowHidden = !body.asking || stillTheSame;
+  /**
+   * ⚠️ THE RESCUE COMES BEFORE EVERY HIDE IN THIS SECTION, and its first
+   * version did not.
+   *
+   * It sat just above `qask.hidden = nowHidden`, which reads as "before the
+   * hide" and is not: the branch below clears the question and hides
+   * `#d-qask-text` first, and `#d-qask-text` is `tabindex="0"`, so a person
+   * standing in it had already been dropped to <body> by the time the rescue
+   * asked whether anyone was standing there. The check then found nobody and
+   * did nothing. **Both of those lines were written in the same round, forty
+   * minutes apart, and the second defeated the first.**
+   *
+   * Measured: stand in the question region with the composer closed, let the
+   * question go, and focus landed on the document.
+   *
+   * ⚠️ AND THE BOX MAY BE DISABLED, in which case focusing it silently does
+   * nothing and the rescue would report success. The panel takes focus
+   * instead; `tabindex="-1"` makes it focusable without adding a tab stop.
+   */
+  /**
+   * ⚠️ THE COMPOSER'S NEXT STATE, NOT ITS LAST ONE. `say.disabled` is written
+   * two hundred lines below this, so reading it here reads the PREVIOUS paint.
+   * On the paint where the agent's Claude exits, `asking` goes false and
+   * `presence` goes 'off' together: the rescue saw a composer that was still
+   * open, handed focus to it, and the line below then disabled it -- and
+   * disabling a focused element blurs it synchronously, which is the mechanism
+   * `sendTalk` documents having measured. Focus landed on the document, which
+   * is the exact state this rescue exists to prevent.
+   *
+   * This is the fourth defect in these few lines, and every one of them has
+   * been an ORDERING: the rescue after the hide, the rescue reading a stale
+   * flag. So it now derives what the composer is ABOUT to be, from the same
+   * payload the disable will use.
+   */
+  const closing = body.presence === 'off';
+  if (nowHidden && !qask.hidden && qask.contains(document.activeElement)) {
+    if (!closing) say.focus();
+    else document.getElementById('d-talk-box').focus();
+  }
+  if (body.asking && body.question) {
+    qlab.textContent = name + ' is waiting on an answer.';
+    // The agent's SCREEN, in the treatment the room already uses for it.
+    pjSetScreen(qtext, body.question.text);
+    qtext.hidden = false;
+  } else if (!body.asking) {
+    /* ⚠️ CLEARED WHEN NOTHING IS ASKING. They sit behind `hidden`, so nothing
+       was shown — but the render check reads them directly and found the last
+       question's sentence still loaded on every idle state, which is one
+       `hidden` away from showing one agent's question under another's name. */
+    qlab.textContent = '';
+    pjSetScreen(qtext, '');
+    qtext.hidden = true;
+  } else if (body.asking) {
+    /* ⚠️ SAID, not hidden. A "Needs you" card over an empty question box is
+       the stranded state this feature exists to remove. The ROUTE's own
+       sentence is used, for the reason the room records: a second wording
+       here drifts from that one the first time either is edited. */
+    qlab.textContent = name + ' is waiting on an answer, and '
+      + (body.questionBecause || 'we cannot find the question on its screen right now') + '.';
+    pjSetScreen(qtext, '');
+    qtext.hidden = true;
+  }
+  // The drawing's states 2 and 3: an answered question is no longer a thing
+  // waiting on you, and the answer takes its place in the thread below as an
+  // ordinary message. The whole block goes, not just its buttons.
+  qask.hidden = nowHidden;
+  /* The persistence line's other half (its text is written before the fetch):
+     shown once an answer is in hand, so a panel that recovers from a refusal
+     -- or an agent opened after one that failed -- has it back.
+     ⚠️ EXCEPT WHERE IT IS FALSE. `historyUnfilable` means we cannot keep a
+     conversation under this agent's name at all, and the thread arm says so in
+     as many words ("Nothing said here is kept for April."). "This stays here
+     after a restart" printed underneath that is the two sentences
+     contradicting each other on one screen, and the committed screenshot
+     talk-9-unfilable shows it happening. The thread arm already splits on this
+     fact; the promise splits with it. */
+  document.getElementById('d-persist').hidden = body.historyUnfilable === true;
+  /**
+   * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
+   * above a closed box promises a route that is shut, which is the same lie as
+   * a composer that swallows text: it looks like an answer and it is nowhere.
+   * So they are offered only when the menu is certain AND the agent can
+   * actually be typed into.
+   */
+  /**
+   * ⚠️ AND NOT WHILE THIS PERSON'S OWN ANSWER IS IN THE AIR. `asking` comes
+   * from a pane capture, and the pane has not necessarily redrawn in the beat
+   * between the send landing and this repaint — so the server can honestly
+   * still say "asking" about a question that has just been answered. Offering
+   * the buttons again there invites the second press that answers a numbered
+   * prompt twice.
+   */
+  const opts = (body.asking && !stillTheSame && live && Array.isArray(body.options)) ? body.options : null;
+  /* ⚠️ DEAD WHILE A SEND IS IN THE AIR. A paint that lands mid-flight rebuilds
+     these, and the first version rebuilt them ENABLED — undoing the send's own
+     disable. The double send was still refused by the TALK_SENDING guard, so
+     the press became a silent no-op: a button that looks pressable, is pressed,
+     and does nothing at all, for as long as a flight can honestly run. */
+  const dead = flying ? ' disabled' : '';
+  const wanted = opts
+    ? opts.map((o) => '<button class="qopt" type="button"' + dead + ' data-n="' + esc(String(o.n))
+        + '" data-label="' + esc(o.label) + '">' + esc(o.label) + '</button>').join('')
+    : '';
+  /**
+   * ⚠️ ONLY WHEN IT CHANGED. This paint runs every five seconds, and an
+   * unconditional `innerHTML =` destroys and recreates the buttons even when
+   * the markup is byte-identical — so a keyboard user who tabs onto an option
+   * loses focus to <body> within five seconds, over and over, on the one
+   * control this panel exists for. The room fixed exactly this at its own
+   * question region ("round 31 … the stranded-keyboard state, rebuilt by the
+   * poll five seconds after the fix for it").
+   */
+  /* ⚠️ COMPARED AGAINST WHAT WE WROTE, not against what the DOM reads back.
+     `esc()` writes `&quot;` and serialization returns a bare `"`, so an option
+     labelled `Yes, run "npm test"` never matched itself and rebuilt on every
+     poll — the exact round-trip the picker's own cache replaced in round 35,
+     with its comment saying so. Measured here in Chromium before the change:
+     rebuilt on a byte-identical repaint for that label and no other. */
+  if (qopts.__lastOpts !== wanted) {
+    qopts.__lastOpts = wanted;
+    // The focused button is about to stop existing, so the focus goes
+    // somewhere real first rather than to the document.
+    const losing = document.activeElement;
+    const wasMine = losing && qopts.contains(losing);
+    // ⚠️ THE SAME OPTION, not merely an option. Restoring to the first button
+    // moves somebody standing on "No" onto "Yes" -- silently, every five
+    // seconds, on a control whose whole job is which one they picked.
+    const wasN = wasMine ? losing.dataset.n : null;
+    qopts.innerHTML = wanted;
+    if (wasMine) {
+      const same = wasN ? qopts.querySelector('.qopt[data-n="' + wasN + '"]') : null;
+      // Same rule as the hide rescue above: never hand focus to a box this
+      // paint is about to disable.
+      if (same) same.focus();
+      else if (!closing) say.focus();
+      else document.getElementById('d-talk-box').focus();
+    }
+  }
+  qopts.hidden = !opts;
+  qout.hidden = !opts;
+
+  /* --- the thread --- */
+  const rows = Array.isArray(body.messages) ? body.messages : [];
+  const thread = document.getElementById('d-dmthread');
+  if (body.historyUnfilable && !rows.length) {
+    /**
+     * ⚠️ A THIRD FACT, not a flavour of unreadable. This agent's name cannot be
+     * filed under at all, so there is no file to read and there never will be
+     * one. Sending still WORKS — the words reach the session — and nothing is
+     * kept. Collapsing this into "we cannot read it" produced two false
+     * sentences at once in the room ("we cannot read what you have sent" over
+     * no file, and "this is not saying you have sent nothing" over a store that
+     * will never hold anything), which is why the route sends the two apart.
+     */
+    setThread(thread, '<p class="dmnone"><b>Nothing said here is kept for ' + esc(name) + '.</b> '
+      + esc(pjSentence(body.historyBecause || 'we cannot keep a conversation under this agent’s name'))
+      + ' You can still send, and it still arrives.</p>', null);
+  } else if (body.historyBecause && !rows.length) {
+    // We could not read a store that does exist. ⚠️ The room's load-bearing
+    // second sentence rides along: an unreadable file is not evidence that
+    // nothing was said, and silence here would render "we could not look" as
+    // "there is nothing".
+    /* ⚠️ AND THIS ARM DELIBERATELY KEEPS THE PERSISTENCE LINE, where the
+       unfilable arm and the refusal arm, both above, hide it. The three
+       are not the same fact and answering them alike would be the error:
+         unfilable      nothing IS kept under this name -> the promise is false
+         borrowed name  this box is not this agent's    -> the promise is false
+         unreadable     things ARE kept, we cannot READ them right now -> the
+                        promise is still true, and hiding it would say the
+                        opposite of what we know.
+       `talk-10-history-unreadable` shows the line standing under "we cannot
+       read what you have sent this agent", and that pairing is correct. */
+    setThread(thread, '<p class="dmnone">' + esc(pjSentence(body.historyBecause))
+      + ' This is not saying you have sent nothing: it is saying we cannot see it.</p>', null);
+  } else if (!rows.length) {
+    setThread(thread, '<p class="dmnone">Nothing here yet.</p>', null);
+  } else {
+    /**
+     * ⚠️ NOT REWRITTEN, AND NOT SCROLLED, WHEN NOTHING CHANGED. This box is
+     * `max-height: 15rem; overflow-y: auto` -- built to be scrolled -- and the
+     * first version rebuilt it and yanked it to the bottom on every 5s tick.
+     * Measured: a reader sitting at the top of a 30-message thread with a
+     * sentence selected was thrown 2343px down and lost the selection, every
+     * five seconds, for reading their own history.
+     *
+     * The room states the rule at its POSTS box, not at its project thread
+     * (which has no scroll management at all): "yanking a person who scrolled
+     * up to read history to the bottom on a poll tick is the poll fighting the
+     * reader." ⚠️ And its second key is built from post IDS, not a count --
+     * which is the stronger shape, because a count cannot tell two different
+     * lists of the same length apart. Recorded rather than copied, and the
+     * blind spot is narrower than it first reads:
+     *
+     *   - SWITCHING AGENTS is closed, and not by this key. `openDetail`'s
+     *     clear calls `setThread(..., null)`, so `__lastCount` is null on the
+     *     first paint of any agent and the next count always differs. Two
+     *     agents whose threads are the same length cannot collide through any
+     *     path that changes `CURRENT`.
+     *   - WHAT IT CANNOT SEE is a thread whose LENGTH is unchanged while its
+     *     contents are not, within one agent. The route's TAIL of 200 is the
+     *     producer that exists: at the bound, every new message drops the
+     *     oldest, so the count holds at 200 and a new arrival does not bring
+     *     itself into view.
+     */
+    setThread(thread, rows.map((m) => dmRow(m, name)).join(''), rows.length);
+  }
+  /**
+   * ⚠️ NOTHING WAS ANSWERED, SO NOTHING MAY LOOK ANSWERED (drawing, state 4).
+   * After a send that failed, the question stays and the buttons stay live --
+   * and this says so, because a person who has just been told their answer did
+   * not get through has every reason to assume the buttons are now spent.
+   *
+   * It carries the INSTRUCTION only, never the reason: the row in the thread
+   * above is the history and already states what happened. That split is the
+   * room's own (`pjMsg`: "a row is history, so it states what happened and
+   * stops; the instruction about what to do lives in the live line, once"),
+   * and saying the failure twice on one screen is the noise this codebase
+   * keeps removing.
+   */
+  /* ⚠️ THE FAILURE LINE BELONGS TO THE QUESTION IT FAILED AGAINST. Keyed the
+     same way as the hold, so a new question clears it: without that, a failed answer left
+     "The buttons still work." standing under every later menu, on a page that
+     polls every five seconds and stays open for days. */
+  const failed = TALK_FAILED[sessionName];
+  // Keyed the same way as the hold, for the same reason.
+  const nowQ = TALK_QUESTION[sessionName];
+  /* ⚠️ SPENT BY A DIFFERENT QUESTION, NOT BY AN ABSENT ONE -- the same rule as
+     the hold above, which was decided this way three lines up while this was
+     decided the other way. One poll that could not read the screen would
+     otherwise drop the state-4 sentence for a question still standing. It
+     costs a reassurance rather than an answer, and it is the same split. */
+  if (failed && nowQ && failed.question !== nowQ) {
+    delete TALK_FAILED[sessionName];
+  }
+  const qfail = document.getElementById('d-qask-fail');
+  qfail.textContent = (opts && TALK_FAILED[sessionName]) ? 'The buttons still work.' : '';
+  qfail.hidden = !qfail.textContent;
+
+  const older = document.getElementById('d-talk-older');
+  older.textContent = body.olderCount
+    ? 'Showing the latest ' + rows.length + '. ' + body.olderCount + ' older '
+      + (body.olderCount === 1 ? 'message is' : 'messages are') + ' still kept.'
+    : '';
+  older.hidden = !body.olderCount;
+
+  /* --- whether it can be handed a message at all --- */
+  const off = document.getElementById('d-dmoff');
+  if (body.presence === 'off') {
+    /* ⚠️ AN AGENT THAT CANNOT BE HANDED A MESSAGE gets a closed box rather
+       than one that swallows text. The pack's sentence, plus the ENGINE's
+       reason -- which tells apart a window with no Claude in it (what we typed
+       would be run as a command) from one scrolled back (it would go to the
+       scrollback). Both mean not delivered; only one of them could execute
+       something. */
+    /* ⚠️ NO "right now" HERE, and the count matters. `addressable` has six
+       refusals; four reach this arm (the empty-name one cannot, and the
+       untied-card one is 404'd by `nameRefusal` before the page sees it).
+       THREE of those four CARRY a "right now" of their own -- "we cannot see
+       an agent by exactly this name on this computer RIGHT NOW", "its window is
+       scrolled back RIGHT NOW", "there is no Claude running in its window RIGHT
+       NOW" -- so the wrapper's copy made each of them say it twice: "cannot be
+       handed a message right now: Its window is scrolled back right now".
+       The fourth, "we do not know which pane this agent is in", carries no time
+       phrase and needs none: it states a present fact rather than a duration,
+       which is the opposite of the standing-versus-transient problem the 404
+       sentence had. So the phrase belongs to the reason, where it is true when
+       it is there, and the wrapper states the consequence.
+       ⚠️ Only the copy-mode arm has a fixture (`6-off`), so the other three are
+       drawn by nothing in the render check. */
+    off.textContent = name + ' cannot be handed a message: '
+      + pjSentence(body.presenceBecause || 'we cannot reach its window');
+    off.hidden = false;
+  } else if (body.presence === 'unsure') {
+    off.textContent = 'We could not check whether ' + name + ' is running. '
+      + 'You can still send this, and we will tell you if it did not land.';
+    off.hidden = false;
+  } else {
+    off.textContent = '';
+    off.hidden = true;
+  }
+  /**
+   * ⚠️ THE BOX STAYS TYPEABLE WHILE A SEND IS IN FLIGHT, and only the button
+   * goes dead — the room's split, for the room's reason: a flight can honestly
+   * run many seconds (three 5s tmux timeouts plus the record lock), and a box
+   * that locks for it eats the keystrokes of somebody already typing the next
+   * message. The button is what stops a double send.
+   */
+  /* ⚠️ THE FLIGHT ONLY DISABLES THE AGENT IT BELONGS TO. Opening B while a send
+     to A is still in the air paints B — and keying the disable on the bare
+     TALK_SENDING flag left B's Send and B's option buttons dead, with no
+     sentence explaining it, until the next tick. A's own `finally` will not fix
+     it either, because that path declines to touch anything once the flight has
+     moved. The flag is about a NAME, so it is read against one. */
+  say.disabled = body.presence === 'off';
+  document.getElementById('d-send').disabled = body.presence === 'off' || flying;
+  // The parked draft comes back, and never over words already in the box.
+  if (!say.disabled && !say.value && TALK_DRAFTS[sessionName]) say.value = TALK_DRAFTS[sessionName];
+}
+
+/**
+ * Send one message to this agent, and say what became of it.
+ *
+ * `chose` is the option's own words on a button send. The DIGIT goes on the
+ * wire because that is what the agent's prompt is waiting for; the words go in
+ * the bubble because that is what the person answered.
+ *
+ * ⚠️ EVERY WRITE BELOW IS GATED ON THE FLIGHT NOT HAVING MOVED. A send can
+ * honestly take many seconds, and the person can open another agent inside that
+ * window — at which point `#d-say-msg` and `#d-say` belong to somebody else.
+ * Ungated, this painted "Placed into casey's session" under April's composer
+ * and cleared April's draft. `paintTalk` already guards its own paint this way;
+ * this path was the hole.
+ */
+async function sendTalk(text, chose) {
+  // ⚠️ ONE SEND AT A TIME IS THE RULE, and it is the page's rule rather than
+  // the agent's: the message line and the composer are single elements. What
+  // must not happen is a silent refusal — pressing Enter and having nothing at
+  // all occur is indistinguishable from a broken box.
+  if (TALK_SENDING) {
+    const busy = document.getElementById('d-say-msg');
+    if (busy) {
+      /* ⚠️ NO PROMISE OF A RETRY, because there is none: this arm returns
+         without sending and the words stay in the box for the person to send
+         again. "This will go through in a moment" was the screen undertaking
+         something no code does. */
+      /* ⚠️ THE DISPLAY NAME, not the session name: every other sentence in this
+         panel says "April" and this one said "april". And BOTH arms carry the
+         same instruction now -- the words stay in the box either way, so the
+         one that said nothing left a person looking at a dead press. */
+      const who = (TALK_FLIGHT && CURRENT && TALK_FLIGHT !== CURRENT.sessionName)
+        ? ((LAST || []).find((a) => a && a.sessionName === TALK_FLIGHT) || {}).name || TALK_FLIGHT
+        : null;
+      busy.textContent = who
+        ? 'Still sending your last message to ' + who + '. Try again in a moment.'
+        : 'Still sending your last message. Try again in a moment.';
+    }
+    return;
+  }
+  if (!CURRENT) return;
+  // The agent this send TOOK OFF from. Everything afterwards is about this
+  // name, never about whichever agent happens to be open when the verdict
+  // lands.
+  const sentName = CURRENT.sessionName;
+  const name = CURRENT.name || sentName;
+  /**
+   * ⚠️ READ NOW, NOT AT VERDICT TIME, and the difference is reachable. The poll
+   * only skips `paintTalk` when `TALK_SENDING` is ALREADY true, so a paint that
+   * entered its fetch a beat before this press lands inside the flight and
+   * rewrites `TALK_QUESTION` from a fresh capture. Reading it afterwards keyed
+   * the hold to a question nobody answered, so the buttons came straight back
+   * over an already-answered prompt — the exact harm the hold exists for.
+   * (The comment on `TALK_QUESTION` said this was done from the beginning. It
+   * was not; the comment described the intent and the code read it late.)
+   */
+  const askedAbout = TALK_QUESTION[sentName] || null;
+  const flightMoved = () => !CURRENT || CURRENT.sessionName !== sentName;
+  const msg = document.getElementById('d-say-msg');
+  const say = document.getElementById('d-say');
+  const send = document.getElementById('d-send');
+  /**
+   * ⚠️ ASKED BEFORE THE DISABLE, and the first version asked after — which is
+   * dead code with a comment claiming the opposite. MEASURED in Chromium:
+   * setting `disabled = true` on the focused button moves `document.
+   * activeElement` to <body> SYNCHRONOUSLY, so the test was false on every
+   * send and the rescue never once ran. Every keyboard or screen-reader send
+   * from this page stranded focus on the document.
+   *
+   * The room gets this right at its own send: it captures the flag first and
+   * restores at both exits. This does both halves too.
+   */
+  const sendHadFocus = document.activeElement === send;
+  const optHadFocus = document.activeElement && document.activeElement.classList
+    && document.activeElement.classList.contains('qopt');
+  TALK_SENDING = true;
+  TALK_FLIGHT = sentName;
+  /**
+   * ⚠️ EVERYTHING AFTER THE FLAG IS INSIDE THE TRY. Three DOM statements used
+   * to sit between the flag and the `try`, and a throw in any of them would
+   * have left `TALK_SENDING` true for the life of the page: Send dead, the
+   * option buttons dead, and the poll's own repaint skipped — the one stuck
+   * state with no sentence attached to it, because the code that writes the
+   * sentence is below.
+   */
+  try {
+    send.disabled = true;
+    // The box is the right landing place: it is where they were typing, it
+    // stays enabled through the flight, and it is where the answer they may
+    // want to type instead goes.
+    if (sendHadFocus || optHadFocus) say.focus();
+    /**
+     * ⚠️ THE BUTTONS GO DEAD FOR THE ROUND TRIP, and the paint is told so.
+     *
+     * A second press on a numbered prompt answers it twice, so they are
+     * disabled here. But writing `disabled` straight onto the elements put the
+     * DOM and the paint's cache into disagreement: the repaint afterwards
+     * builds the same markup string, matches `__lastOpts`, skips the rebuild,
+     * and the disable is never taken back.
+     *
+     * Measured, and it lands on the one state that must not have it: after a
+     * send that FAILED, both buttons stayed grey and inert FOREVER, under this
+     * panel's own sentence "The buttons still work." It did not self-heal on
+     * any later poll, because the cache key is the option markup and the
+     * options had not changed. State 4 exists to say the answer can still be
+     * given; it was the only state where it could not.
+     *
+     * Invalidating the cache is what keeps the paint the owner: whatever this
+     * writes by hand, the next paint is now guaranteed to write over.
+     */
+    const qoptsEl = document.getElementById('d-qopts');
+    qoptsEl.querySelectorAll('.qopt').forEach((b) => { b.disabled = true; });
+    qoptsEl.__lastOpts = null;
+    msg.textContent = 'Sending…';
+    const res = await fetch('/api/agent/' + encodeURIComponent(sentName) + '/thread', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      /* ⚠️ WHICH QUESTION THIS ANSWERS, sent so the server can refuse a pane
+         that has moved on. `askedAbout` is the key this page already keeps for
+         the answered-hold, and its `above` half is the only thing that tells
+         two menus with identical labels apart -- which is the shape Claude's
+         edit-permission prompt has for every file. Holding it and not sending
+         it left the server's own screen-check unable to make the distinction
+         its comment claims. */
+      /* ⚠️ `slice(1).join`, not `[1]`, and no `|| ''`. The key is
+         options + NUL + above, and an above that itself contains a NUL would be
+         truncated by `[1]` -- the page would then send a prefix, the server
+         would compute the whole string, and a legitimate send would be refused.
+         `|| ''` had its own version of the same: an above of exactly "0" is
+         falsy, and the server skips its check on a falsy value, so one
+         particular screen turned the guard off. */
+      body: JSON.stringify(chose
+        ? { text, chose, asked: askedAbout == null ? '' : askedAbout.split('\u0000').slice(1).join('\u0000') }
+        : { text }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'we could not send that');
+    const d = body.delivery || {};
+    const note = d.paneNote ? ' (' + d.paneNote + ')' : '';
+    /**
+     * ⚠️ RECORDED IS A QUESTION, NOT AN ASSUMPTION, and this is the defect the
+     * room documents at its own send: with `recorded: false` — an unwritable
+     * store, a held lock, or a name that cannot be filed under at all, which is
+     * a STANDING condition for every capitalised or dotted agent — clearing the
+     * box left the person's words in NO place. Not in the thread, not in the
+     * box.
+     *
+     * ⚠️ IT GATES THE TWO UNCERTAIN VERDICTS, NOT THE CERTAIN ONE, and the
+     * `placed` arm below deliberately does not consult it: a message that
+     * reached the agent HAS gone somewhere, so the box is not its only copy,
+     * even when nothing could be written down about it. That is the room's own
+     * rule at `pjSend` ("placed ... Clear it. Even unrecorded, the words
+     * reached the agent"), and the two screens must not disagree about what a
+     * send did. So the rule is "the box is the only copy when we did not keep
+     * it AND we cannot say it arrived", which is `unconfirmed` and, by leaving
+     * the words in place with no clear at all, `could_not`.
+     */
+    const inThread = body.recorded === true;
+    const clearSent = () => {
+      // Only the text THIS send took, and only if the box still holds exactly
+      // it: anything typed on top belongs to the next message.
+      if (!flightMoved() && say.value.trim() === text) say.value = '';
+      if ((TALK_DRAFTS[sentName] || '').trim() === text) delete TALK_DRAFTS[sentName];
+    };
+    let line;
+    if (d.state === 'placed') {
+      clearSent();
+      line = 'Placed into ' + name + '’s session' + note + '.';
+    } else if (d.state === 'unconfirmed') {
+      if (inThread) clearSent();
+      line = 'We could not confirm that reached ' + name + '’s session' + note + '. '
+        + pjSentence(d.because || 'we typed it and could not tell whether it arrived')
+        + (inThread ? ' Your message is kept above.' : ' Your message is still in the box below.');
+    } else {
+      /* Nothing was typed, so the text stays in the box in front of them and
+         no time phrase rides this line: "could not deliver just now" reads as
+         "not at this moment", which invites a retry we have no reason to
+         promise. The row in the thread carries the time. */
+      line = 'We could not get that to ' + name + ': '
+        + pjSentence(d.because || 'we could not put it into its session');
+    }
+    // Delivering and keeping are two acts and two sentences. Said whenever the
+    // record failed, on every verdict — a message that went through and could
+    // not be written down must not read as unsent, and one that was neither
+    // sent nor kept must not read as merely undelivered.
+    if (!inThread && body.recordedBecause) line += ' ' + pjSentence(body.recordedBecause);
+    /* The button suppression is bookkeeping about THIS send, so it is recorded
+       whether or not the flight moved: it is keyed on the agent, and coming
+       back to that agent must not re-offer an answer already given. */
+    /**
+     * ⚠️ ANY SEND MADE WHILE A MENU WAS UP IS AN ANSWER TO IT, not only a
+     * button press. The panel's own line invites the other path — "Or write
+     * your own answer below" — and gating this on `chose` meant a typed answer
+     * left the buttons live over a question it had just answered. That is the
+     * second-press harm arriving on the route the pack recommends.
+     * ⚠️ A MENU, not a question: `talkKey` returns null when `options` is null,
+     * so the no-parseable-menu screen records no hold. That is correct rather
+     * than a gap -- there are no buttons there to leave live, and the sentence
+     * this comment cites only exists beside buttons -- but the rule is narrower
+     * than "any question" and said so wrongly for two commits.
+     *
+     * The delivery states split two ways, not three: placed and unconfirmed
+     * both mean the words may be in that session, so neither may be offered
+     * again. Only an outright failure leaves the question live.
+     */
+    if (askedAbout) {
+      if (d.state === 'placed' || d.state === 'unconfirmed') {
+        TALK_ANSWERED[sentName] = { question: askedAbout, at: Date.now() };
+      } else {
+        // ⚠️ Nothing was answered, so nothing may look answered: the question
+        // stays, the buttons come back live, and the panel says so.
+        TALK_FAILED[sentName] = { question: askedAbout };
+        delete TALK_ANSWERED[sentName];
+      }
+    }
+    // ⚠️ CLEARED BY ANY SEND THAT GOT THROUGH, not only by a button one. The
+    // first version cleared it on a successful `chose` alone, so a failure
+    // followed by a typed answer left "The buttons still work." standing on a
+    // page that polls every five seconds and is left open for days. (The paint
+    // clears it too, when the question itself changes.)
+    if (d.state === 'placed' || d.state === 'unconfirmed') delete TALK_FAILED[sentName];
+    if (!flightMoved()) msg.textContent = line;
+  } catch (err) {
+    if (!flightMoved()) msg.textContent = pjSentence((err && err.message) || 'we could not send that');
+  } finally {
+    TALK_SENDING = false;
+    TALK_FLIGHT = null;
+    // The repaint is about the takeoff agent too: with the flight moved, the
+    // open page belongs to somebody else and its own poll is already painting
+    // it. The record is the account of what happened, visible when that agent
+    // is next opened.
+    if (!flightMoved()) {
+      await paintTalk(sentName, name);
+      // Put the keyboard back where it was. The button may not exist any more
+      // (an answered question takes the whole block), so the box is the
+      // fallback rather than an assumption.
+      if (sendHadFocus && !send.disabled) send.focus();
+      else if ((sendHadFocus || optHadFocus) && document.activeElement === document.body) say.focus();
+    }
+    /* ⚠️ NOTHING IS RE-ENABLED WHEN THE FLIGHT MOVED. That button belongs to
+       whichever agent is open now, and its own paint has already decided
+       whether it may be pressed — an unconditional re-enable put a live Send
+       over a closed box, beside a sentence saying the agent cannot be handed a
+       message. The open agent's poll owns its own controls. */
+  }
+}
+
 function openDetail(sessionName) {
   const a = LAST.find((x) => x.sessionName === sessionName);
   if (!a) return;
@@ -5951,6 +7229,47 @@ function openDetail(sessionName) {
   document.getElementById('d-convo').innerHTML = '<p class="cv-none">Opening&hellip;</p>';
   document.getElementById('d-convo-gap').hidden = true;
   paintConversation(a.sessionName, a.name);
+  /* ⚠️ CLEARED BEFORE the paint's awaits, like the window box below: agent A's
+     question and A's messages standing under B's name for two round-trips is
+     cross-agent misattribution, and this box holds the strongest version of it
+     -- a private conversation and a live question with buttons that send. */
+  {
+    document.getElementById('d-qask').hidden = true;
+    document.getElementById('d-qopts').innerHTML = '';
+    /* ⚠️ AND THE CACHE THAT SPEAKS FOR IT. The paint skips its rebuild when
+       `__lastOpts` matches what it is about to write, so clearing the markup
+       here without clearing the cache left the next identical paint believing
+       the buttons were already on screen. They were not: the person got the
+       hazard, the sentence, the terminal question, an empty options row, and
+       "Or write your own answer below." pointing at nothing -- and it never
+       recovered, because every later poll took the same skip. Reproduced two
+       ways: reopening the same agent, and opening a second agent sitting at
+       the identical prompt (the markup carries no name, so it matches). */
+    document.getElementById('d-qopts').__lastOpts = null;
+    document.getElementById('d-qopts').hidden = true;
+    document.getElementById('d-qout').hidden = true;
+    /* ⚠️ THE SENTENCE AND THE CAPTURED PANE TOO. They sit behind `hidden`, so
+       nothing was shown — but this block's own rule is that the box holds the
+       strongest version of cross-agent misattribution, and leaving one agent's
+       question text loaded under another agent's name is that, one `hidden`
+       away. The render check reads them directly and saw April's sentence on
+       every state, including the ones where nothing was asking. */
+    document.getElementById('d-qask-lab').textContent = '';
+    document.getElementById('d-qask-text').textContent = '';
+    document.getElementById('d-qask-text').hidden = true;
+    document.getElementById('d-qask-fail').textContent = '';
+    document.getElementById('d-qask-fail').hidden = true;
+    setThread(document.getElementById('d-dmthread'), '<p class="dmnone">Opening&hellip;</p>', null);
+    document.getElementById('d-talk-older').hidden = true;
+    document.getElementById('d-dmoff').hidden = true;
+    document.getElementById('d-say-msg').textContent = '';
+    /* ⚠️ The box is cleared because it belongs to the agent being LEFT, and
+       paintTalk restores whichever draft belongs to the one being opened. The
+       words are not lost: the input handler parks them under their own agent
+       on every keystroke. */
+    document.getElementById('d-say').value = '';
+  }
+  paintTalk(a.sessionName, a.name);
   /* Cleared BEFORE the paint's awaits: opening B with A's captured pane
      still in the box would show A's raw session under B's name for two
      network round-trips -- cross-agent misattribution, the same class
@@ -10301,7 +11620,14 @@ function pjWhen(at) {
  * as "it arrived and was understood", and all we know is that tmux took the
  * keystroke.
  */
-function pjMsg(m, name) {
+/**
+ * ⚠️ THE VERDICT IS DECIDED ONCE. Split out of `pjMsg` when the agent page's
+ * own thread arrived: the room draws a row and the agent page draws a bubble,
+ * and the SAME send described two ways on two screens is exactly the
+ * one-fact-two-derivations failure this codebase keeps paying for. The markup
+ * differs; the sentence does not.
+ */
+function pjVerdict(m, name) {
   const d = (m && m.delivery) || {};
   // The pane's state when we typed. "Placed into casey's session" is exactly
   // true and invites the wrong inference — that casey is reading it — so a
@@ -10345,6 +11671,11 @@ function pjMsg(m, name) {
     said = 'Could not deliver' + esc(pjWhenPart(m.at)) + ': '
       + esc(pjSentence(d.because || 'we could not put it into its session'));
   }
+  return { mark, said };
+}
+
+function pjMsg(m, name) {
+  const { mark, said } = pjVerdict(m, name);
   return '<div class="pj-msg' + mark + '">'
     + '<span class="pj-msg-text">' + esc(m.text) + '</span>'
     + '<span class="pj-msg-said">' + said + '</span>'
@@ -10397,6 +11728,22 @@ function pjAnnounce(text) {
 }
 
 /** Set a `pre`'s text only when it changed, so a poll cannot fight the scroll. */
+/**
+ * ⚠️ THE READER'S POSITION SURVIVES THE REWRITE, AND NOT BECAUSE OF ANYTHING
+ * HERE. `question.text` is `questionIn`'s slice through to the END of the
+ * capture, so it changes whenever the pane prints anything -- this file records
+ * a context percentage ticking from 42% to 41% doing it. Replacing
+ * `textContent` on a five-second poll therefore looked certain to drag a person
+ * who had scrolled RIGHT to read a cut line back to the start of it, which is
+ * the "poll fighting the reader" class named at the room's posts box.
+ *
+ * Measured 2026-08-20, Chromium, and it does not happen: with the offset at 33
+ * and the capture gaining a line, `scrollLeft` reads 33 after the rewrite. A
+ * save-and-restore was written here first and then removed, because it changed
+ * nothing and would have been code whose comment claimed a fix it was not
+ * making. `render-talk.js` block 9 asserts the property anyway, so the day this
+ * stops being true is a failure rather than a discovery.
+ */
 function pjSetScreen(el, text) {
   if (el.textContent !== text) el.textContent = text;
 }
@@ -11045,6 +12392,64 @@ async function pjSend() {
   }
 }
 
+/* --- the agent page's own composer, and the answers above it -------------- */
+document.getElementById('d-send').addEventListener('click', () => {
+  const say = document.getElementById('d-say');
+  /* ⚠️ THE TRIMMED TEXT IS WHAT IS SENT, matching pjSend's `box.value.trim()`
+     at the room's own composer. Sending the raw value while `clearSent`
+     compares `say.value.trim() === text` meant any message with a leading or
+     trailing space -- a paste, a stray space before Enter -- was delivered and
+     recorded and then cleared NEITHER the box nor the draft, leaving the
+     person's words armed under "Placed into its session": an invitation to
+     send the same line into a live pane twice. */
+  const text = say.value.trim();
+  if (text) sendTalk(text);
+});
+/* The park itself: every keystroke files the draft under the open agent, so no
+   navigation order can lose it. */
+document.getElementById('d-say').addEventListener('input', (e) => {
+  if (!CURRENT) return;
+  const v = e.target.value;
+  if (v.trim()) TALK_DRAFTS[CURRENT.sessionName] = v;
+  else delete TALK_DRAFTS[CURRENT.sessionName];
+});
+document.getElementById('d-say').addEventListener('keydown', (e) => {
+  // Enter sends, and the SAME IME rule as the room's box: the Enter that
+  // confirms a Japanese, Chinese or Korean candidate arrives here as an
+  // ordinary Enter, so without this the first word somebody types is sent
+  // half-composed. `isComposing` is the standard spelling; keyCode 229 is what
+  // older WebKit reports for the same keystroke.
+  if (e.key !== 'Enter') return;
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  const say = document.getElementById('d-say');
+  /* ⚠️ THE TRIMMED TEXT IS WHAT IS SENT, matching pjSend's `box.value.trim()`
+     at the room's own composer. Sending the raw value while `clearSent`
+     compares `say.value.trim() === text` meant any message with a leading or
+     trailing space -- a paste, a stray space before Enter -- was delivered and
+     recorded and then cleared NEITHER the box nor the draft, leaving the
+     person's words armed under "Placed into its session": an invitation to
+     send the same line into a live pane twice. */
+  const text = say.value.trim();
+  if (text) sendTalk(text);
+});
+/**
+ * An option button.
+ *
+ * ⚠️ DELEGATED, because the buttons are rebuilt by every poll -- a listener
+ * bound to the element would be attached to a button that no longer exists five
+ * seconds later, which is the class of bug where the first click works and none
+ * of the rest do.
+ *
+ * The DIGIT goes on the wire (it is what the agent's prompt is waiting for) and
+ * the option's own WORDS go in the bubble. Both, or the record misdescribes one
+ * or the other.
+ */
+document.getElementById('d-qopts').addEventListener('click', (e) => {
+  const btn = e.target.closest('.qopt');
+  if (!btn || btn.disabled) return;
+  sendTalk(btn.dataset.n, btn.dataset.label);
+});
 document.getElementById('pj-send').addEventListener('click', pjSend);
 // The park itself (round 34): every keystroke files the draft under the
 // open project, so no navigation order can lose it.

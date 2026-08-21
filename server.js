@@ -199,20 +199,38 @@ function claimantFor(name) {
 }
 
 /**
- * Is this spelling answered by a card we cannot tie to the name it is filed
- * under? The question for a READ.
+ * WHY a read of this name is refused, or null when it is not.
  *
- * ⚠️ Fails CLOSED. `paneRoster` throws when tmux cannot be asked, rather than
- * answering "nothing" — the realistic failure used to arrive here as an empty
- * roster and serve the record.
+ * ⚠️ TWO REASONS, AND THEY ARE NOT THE SAME FACT. `borrowedName` collapses
+ * both into one boolean, which is correct for the GATE and wrong for the
+ * SENTENCE: a pane holding this name untied is a STANDING condition that will
+ * answer 404 on every poll forever, while tmux failing to answer is a blip
+ * that clears by itself. The page said "we cannot show this" without a time
+ * phrase for both, so a five-second hiccup on a perfectly ordinary agent read
+ * as permanent, with no cause anywhere on the panel (`#d-untied` is hidden for
+ * a TIED card). Nothing can tell the two apart downstream of the boolean, so
+ * the reason is decided here, where it is known, and carried on the 404.
+ *
+ * ⚠️ Fails CLOSED either way. `paneRoster` throws when tmux cannot be asked,
+ * rather than answering "nothing" — the realistic failure used to arrive here
+ * as an empty roster and serve the record.
  */
-function borrowedName(name) {
+function nameRefusal(name) {
   try {
     const card = claimantFor(name);
-    return Boolean(card) && card.isNamedOurs !== true;
+    return (Boolean(card) && card.isNamedOurs !== true) ? 'borrowed' : null;
   } catch {
-    return true;
+    return 'unreadable';
   }
+}
+
+/**
+ * Is this spelling answered by a card we cannot tie to the name it is filed
+ * under? The question for a READ. ONE derivation: the reason above decides,
+ * this only forgets which one it was.
+ */
+function borrowedName(name) {
+  return nameRefusal(name) !== null;
 }
 
 /**
@@ -1666,6 +1684,441 @@ const server = http.createServer((req, res) => {
     }
     return;
   }
+  /**
+   * --- the thread between the person and ONE agent -------------------------
+   *
+   * The project thread's sibling, and the difference is what it is FOR: that
+   * one belongs to a project and an agent on it, this one belongs to nobody
+   * else. The pack puts the private exchange, and the answer to a question the
+   * agent is asking, on the agent's own page — so the record has to outlive
+   * every project the agent is or was on, which is why it is filed under
+   * `chat.DIRECT` and carries no project stamp.
+   *
+   * ⚠️ THE GATE IS `nameRefusal` (the reason `borrowedName` is a wrapper for),
+   * NOT `knownAgent`, and the commitments route learned this first: a record
+   * whose purpose is to outlive the conversation must stay readable when the
+   * agent is STOPPED. The danger is narrower than
+   * "is it running" — it is a pane sitting on the board under this name that is
+   * not tied to it, which would serve the real agent's private thread beside a
+   * stranger's card. If no pane claims the name, there is nobody to confuse it
+   * with. (The PLAN for this branch said 404-unknown; that would have hidden a
+   * stopped agent's own conversation, which is the thing the file exists for.)
+   */
+  const dm = pathname.match(/^\/api\/agent\/([^/]+)\/thread$/);
+  if (dm && (req.method === 'GET' || req.method === 'HEAD')) {
+    const name = decodeSegment(dm[1]);
+    // 404 on the read and 400 on the write for the same unreadable segment,
+    // which looks inconsistent and is the commitments route's own split: a
+    // read of a name we cannot even decode is "no such agent", a write is a
+    // malformed request. Matched to the sibling that shares this gate rather
+    // than to the project-thread route, which shares neither.
+    if (name === null) { sendJson(res, 404, { error: 'that is not a name we can read' }); return; }
+    /**
+     * ⚠️ A NAME NO PANE RUNS AT ALL passes this and gets a 200 with an empty
+     * thread, while the POST 404s. That asymmetry is deliberate and it is the
+     * commitments route's: a record stays READABLE for an agent that is not
+     * running (that is what a record is for), and is not WRITABLE, because
+     * there is nothing to type into.
+     *
+     * ⚠️ AND IT DOES NOT HIDE WHICH NAMES EXIST. An earlier version of this
+     * comment claimed it did — that an unknown name and a stopped agent
+     * "answer identically" — which is simply false: `presenceBecause` carries
+     * `addressable`'s own two sentences, and "we cannot see an agent by
+     * exactly this name" is plainly not "there is no Claude running in its
+     * window". The claim was never tested, and it was wrong. Nothing here is
+     * an authentication boundary (the whole app is an unauthenticated
+     * loopback server, as `start()` says at length), so this is recorded as
+     * what it is rather than defended: the route tells you whether a name is
+     * running, and so does every other route on this port.
+     */
+    /* ⚠️ THE REASON RIDES THE 404, because the page draws two different
+       sentences off it and cannot derive which from the status. See
+       `nameRefusal`: 'borrowed' is standing and 'unreadable' is a blip. */
+    const refusal = nameRefusal(name);
+    if (refusal) {
+      sendJson(res, 404, {
+        error: refusal === 'borrowed'
+          ? 'no agent by that name'
+          : 'we could not check which agents are running',
+        because: refusal,
+      });
+      return;
+    }
+    /**
+     * ⚠️ ONE roster read for everything DERIVED BELOW THIS LINE, which is a
+     * narrower claim than the one that used to sit here.
+     *
+     * The earlier comment said "one roster read for the whole request", and
+     * that is false: `nameRefusal` a few lines up runs `claimantFor` ->
+     * `paneRoster()`, its own uncached `tmux list-panes`. So a GET makes two,
+     * and the 404 gate is decided against a different look from the one the
+     * payload describes. The harm the comment warns about is therefore
+     * REACHABLE at that seam, and pretending otherwise is worse than saying so.
+     *
+     * ⚠️ AND THE SECOND HALF OF THAT SENTENCE WAS ALSO WRONG. It said every
+     * value below comes from this one snapshot. `presence` and `asking` do.
+     * `question` does NOT: `chat.viewport` runs its own, later `capture-pane`,
+     * with different flags and a different depth (60 lines with `-J`, against
+     * the snapshot's 40 without, of which `classify` reads the last 25).
+     * `questionIn`'s docblock documents that divergence at length, and
+     * `questionBecause` exists precisely because the two reads can disagree.
+     * So this route makes two roster reads AND two captures, and the honest
+     * claim is only that nothing below re-reads the ROSTER.
+     */
+    const roster = safeRoster();
+    const card = Array.isArray(roster)
+      ? (roster.find((a) => a && a.sessionName === name && a.isNamedOurs === true) || null)
+      : null;
+
+    /**
+     * ⚠️ TWO HISTORY CHANNELS, NOT THREE. `historyOther` has no meaning here:
+     * it says "an EARLIER project of this name has messages kept aside", and
+     * this thread has no project to have been born with. Carrying the field
+     * anyway would be a surface that can never be true.
+     */
+    let messages = null;
+    let historyBecause = null;
+    let historyUnfilable = false;
+    try {
+      // No `bornAt`: a direct thread outlives every project, so there is no
+      // birth date for it to be refused against.
+      messages = chat.readThread(chat.DIRECT, name).messages;
+    } catch (err) {
+      if (err && err.code === 'BAD_THREAD') {
+        // There is no file and there never will be one — the agent's name
+        // cannot be filed under. Sending still works; nothing is kept.
+        messages = [];
+        historyUnfilable = true;
+        historyBecause = String((err && err.message) || 'we cannot keep a conversation under this agent’s name');
+      } else {
+        historyBecause = String((err && err.message) || 'we cannot read what you have sent this agent');
+      }
+    }
+
+    // The board's word, through the engine's own constant. `tied` is implied
+    // by the card lookup above (isNamedOurs), which is the same conjunct the
+    // project route spells out.
+    const asking = Boolean(card) && card.state === STATE.NEEDS_YOU;
+    /**
+     * ⚠️ THE CAPTURE RUNS ONLY WHEN THE QUESTION NEEDS IT, and that is a
+     * DIFFERENT gate from the one the project thread refused.
+     *
+     * That route captures unconditionally, and its comment says why: an early
+     * version gated on ENGINEERING MODE and silently blinded the needs-you flow
+     * with the switch off. That was gating on a setting unrelated to the
+     * question. This gates on `asking` — the board's own word for whether there
+     * is a question at all — so the question path is untouched by construction:
+     * when `asking` is false there is nothing for `questionIn` to find.
+     *
+     * It matters because this route rides the 5s tick on the app's most-visited
+     * screen. `safeRoster()` is already one `list-panes` plus a `capture-pane`
+     * PER AGENT; an unconditional second capture here added another one every
+     * tick, for an idle agent, to feed nothing.
+     *
+     * ⚠️ AND THE RAW WINDOW IS NOT SERVED FROM HERE AT ALL. This page already
+     * has `/api/agent/:name/window` for that, behind Engineering mode, with its
+     * own box. A second copy on this payload was an unread surface on a poll —
+     * the thing rounds 19, 22 and 38 deleted three times.
+     */
+    const view = asking ? chat.viewport(name, roster) : null;
+    const question = (asking && view && view.text) ? chat.questionIn(view.text) : null;
+    // The same two sentences as the project route, and they stay two: "we read
+    // its screen and the question is not in the capture" is not "we could not
+    // read its screen at all".
+    const questionBecause = (asking && !question)
+      ? ((!view || view.text == null)
+        ? 'we could not read its screen just now to show the question'
+        : 'we cannot find the question on its screen right now')
+      : null;
+    /**
+     * ⚠️ THE BUTTONS ARE OFFERED ONLY WHEN THE MENU IS CERTAIN. `optionsIn`
+     * returns null for anything it cannot be sure of, and null here is not a
+     * degraded state — it is the screen this page shows today, the question as
+     * the terminal draws it, which the person can answer by typing.
+     */
+    const options = (asking && question) ? chat.optionsIn(question.text) : null;
+    /**
+     * ⚠️ PRESENCE IS THE SEND GATE'S OWN ANSWER, not a second derivation of it.
+     * The first version of this route asked whether a tied card existed, which
+     * is a WEAKER question than "can we type into it" and got a measurable case
+     * wrong: a STOPPED agent has a card (its pane is alive, its name is ours)
+     * and no Claude in the window, so the composer invited a message that
+     * `chat.deliver` would then refuse. Two derivations of one fact, disagreeing
+     * on screen, is this codebase's worst habit and it had crept back in.
+     *
+     * `addressable` also carries the SENTENCE, which is better copy than
+     * anything this route could compose: it tells apart a window with no Claude
+     * in it (what we typed would be run as a command) from one scrolled back in
+     * copy-mode (what we typed would go to the scrollback). The composer says
+     * whichever is true.
+     *
+     * ⚠️ THREE-VALUED, because "there is nobody there" and "we could not look"
+     * are different facts. The `unsure` arm is NOT reachable through today's
+     * producers — a roster read that fails also fails `nameRefusal` above,
+     * which fails closed at the 404 — so no test here holds it. It stays,
+     * recorded rather than quietly kept, because the two reads are separate
+     * calls (`snapshot` here, `listPanes` there) and the day they can disagree
+     * is the day this arm is the difference between "your agent is off" and the
+     * truth. Same posture as the thread route's `member.tied` conjunct.
+     */
+    const reach = chat.addressable(name, roster);
+    const presence = reach.ok ? 'on' : (!Array.isArray(roster) ? 'unsure' : 'off');
+    const presenceBecause = reach.ok ? null : reach.because;
+    const TAIL = 200;
+    const olderCount = Array.isArray(messages) && messages.length > TAIL
+      ? messages.length - TAIL : 0;
+    if (olderCount) messages = messages.slice(-TAIL);
+    /**
+     * ⚠️ EVERY FIELD HERE HAS A READER ON THE PAGE. The first version also
+     * carried `agent`, `viewport` and `agentsUnreadable` "for parity with the
+     * sibling route", and nothing on this screen read any of them — on a
+     * 5-second poll. This repo has deleted exactly that three times (the
+     * payload's agents copy in round 19, readIdentity's source in round 22, the
+     * POST's thread in round 38), and parity with a route that draws a
+     * different screen is not a reader.
+     *
+     * `presence` already carries what `agentsUnreadable` would have said, in
+     * the vocabulary the composer uses ('unsure'), so a second spelling of it
+     * would be two derivations of one fact again.
+     */
+    sendJson(res, 200, {
+      messages,
+      olderCount,
+      historyBecause,
+      historyUnfilable,
+      presence,
+      presenceBecause,
+      asking,
+      question,
+      questionBecause,
+      options,
+    });
+    return;
+  }
+
+  if (dm && req.method === 'POST') {
+    const name = decodeSegment(dm[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try {
+          body = JSON.parse(buf.toString('utf8') || '{}') || {};
+        } catch {
+          throw new Error('we could not read that request');
+        }
+        // Refused before anything is looked up, so a message we would never
+        // send does not cost a tmux fan-out.
+        const problem = chat.messageProblem(body.text);
+        if (problem) throw new Error(problem);
+        /**
+         * ⚠️ `chose` IS THE OPTION'S OWN WORDS, and it is bounded like any
+         * other text off the wire. It rides only on a button send: the bubble
+         * shows what the person CHOSE ("Yes, and don't ask again"), while the
+         * wire text — the digit the agent's prompt is waiting for — is kept
+         * beside it. A thread that recorded only the digit would show "1" for
+         * an answer nobody would recognise a week later; one that recorded
+         * only the words would misdescribe the mechanism. Both, or the record
+         * lies one way or the other.
+         */
+        /**
+         * ⚠️ CHECKED BY THE SAME GATE AS THE TEXT, not by a hand-rolled pair of
+         * conditions. `chose` is never typed into a pane, so the first version
+         * only bounded its length — but this module's contract is that what was
+         * CHECKED is what gets KEPT, and `cleanMessage` does not strip control
+         * characters. An ESC or a C1 byte in an option label would have gone
+         * into the stored thread and back out to the screen, refused everywhere
+         * else in the product and admitted here.
+         *
+         * A bad `chose` is not a bad send: the digit is still what the agent is
+         * waiting for. So it is dropped rather than refused, and the bubble
+         * falls back to showing what was actually sent.
+         */
+        let chose = (typeof body.chose === 'string' && !chat.messageProblem(body.chose))
+          ? body.chose : null;
+
+        // The write gate FIRST, then the expensive look. `knownAgent` is a
+        // `list-panes`; `safeRoster` is that plus a `capture-pane` per agent —
+        // so ordering them the other way made a POST for a name nobody runs
+        // pay for the whole fan-out before its 404, against this route's own
+        // rule two blocks up that a message we would never send must not cost
+        // a tmux fan-out.
+        // (`chat.deliver` refuses on its own too — exact match to permit, tied,
+        // and a pane with Claude in it. This one is about the NAME.)
+        if (!knownAgent(name)) {
+          const missing = new Error('no agent by that name');
+          missing.status = 404;
+          throw missing;
+        }
+        const roster = safeRoster();
+        /**
+         * ⚠️ THE WORDS ARE CHECKED AGAINST THE SCREEN WHERE WE CAN SEE IT.
+         * `chose` arrives from the client, and it is the half of the pair the
+         * server does not derive — so a client bug could put words in the
+         * record that were never on the person's screen, under a mechanism
+         * that says the opposite. Where the pane still shows a menu we can
+         * parse, the label for that digit must be the label we were handed.
+         *
+         * ⚠️ AND IT IS NOT REQUIRED WHERE WE CANNOT SEE IT. A pane that has
+         * already redrawn parses to nothing, and the person DID read those
+         * words a moment ago — dropping them there would make the record less
+         * faithful in the ordinary case to defend against a case this app's
+         * single-origin write guard already covers. So: never claim words the
+         * visible screen contradicts, and do not demand proof from a screen
+         * that has moved on. The digit is unaffected either way; only the
+         * bubble's wording is at stake.
+         */
+        if (chose) {
+          /**
+           * ⚠️ A BUTTON SEND IS REFUSED WHEN THE SCREEN CONTRADICTS IT, rather
+           * than stripped of its words and sent anyway.
+           *
+           * The first version dropped `chose` on a contradiction and still
+           * typed the digit. But a button's digit is only meaningful against
+           * the menu it was drawn from: if the pane has redrawn into a
+           * DIFFERENT menu, `3` no longer means what the person pressed, and we
+           * would be sending an answer to a question they never saw. Losing the
+           * words was treated as the whole problem when the words were the
+           * evidence that the digit was stale too.
+           *
+           * ⚠️ ONLY WHERE THERE IS POSITIVE EVIDENCE. A pane that has moved on
+           * parses to no menu at all, and that is NOT a contradiction: the
+           * person did read those words a moment ago, and refusing there would
+           * refuse the ordinary case. So: a menu we can read that disagrees is
+           * a refusal; a screen we cannot read a menu from is not.
+           */
+          /**
+           * ⚠️ AND ONLY WHERE SOMETHING IS BEING ASKED. `chose` is words the
+           * client says were on a button; if the board does not say this agent
+           * is asking anything, there was no button. A stale or buggy client
+           * could otherwise POST `{text:'ok', chose:'Approve the wire
+           * transfer'}` at an idle agent, and because a non-question screen
+           * parses to no menu, the verification below would be skipped and the
+           * record would keep words nobody was ever offered.
+           *
+           * The roster is already read, so this costs nothing.
+           */
+          const card = Array.isArray(roster)
+            ? (roster.find((a) => a && a.sessionName === name && a.isNamedOurs === true) || null)
+            : null;
+          if (!card || card.state !== STATE.NEEDS_YOU) chose = null;
+          const seen = chose ? chat.viewport(name, roster) : null;
+          const asked = (seen && seen.text) ? chat.questionIn(seen.text) : null;
+          const menu = asked ? chat.optionsIn(asked.text) : null;
+          const row = menu ? menu.find((o) => String(o.n) === String(body.text).trim()) : null;
+          /* ⚠️ COMPARED AS IT WILL BE STORED. `appendMessage` puts the bubble
+             text through `cleanMessage`, so comparing the raw string here
+             admitted a label that then changed on its way into the record --
+             small, and the whole point of this pair is that the record does not
+             drift from the screen. */
+          if (chose) chose = chat.cleanMessage(chose);
+          if (menu && (!row || chat.cleanMessage(row.label) !== chose)) {
+            const moved = new Error('that question changed on its screen before this was sent, '
+              + 'so we did not answer it. Its current question is on this page.');
+            moved.status = 409;
+            throw moved;
+          }
+          /**
+           * ⚠️ AND WHICH QUESTION, not only which words. The check above
+           * verifies the label for the pressed digit and nothing about the
+           * question it belongs to -- and this product's most common menu draws
+           * the SAME labels every time. Measured: "Edit file src/a.js? / ❯ 1.
+           * Yes / 2. No" and the same prompt for `src/b.js` produce identical
+           * options, so a pane that redrew between the paint and the POST
+           * passed verification and `1` approved a file nobody chose. The guard
+           * was weaker than the sentence describing it.
+           *
+           * The page has held the discriminator since the answered-hold was
+           * written; it just never sent it. `asked` is that text, and
+           * `questionAbove` is the engine's twin of the rule that computes it,
+           * so both sides compare the same fact rather than two spellings.
+           *
+           * Optional on the wire: a client that does not send it is no worse
+           * off than before, and a button send from this page always does.
+           */
+          /**
+           * ⚠️ BOUNDED, NOT GATED, and `messageProblem` here disabled the guard
+           * silently. It refuses over MAX_TEXT and on any control character,
+           * and a refusal made `askedAbove` null, which skips this check with
+           * no error and no log. `viewport` captures with `-J`, which JOINS
+           * wrapped lines, so one logical line of agent output can be
+           * arbitrarily long -- the guard would switch itself off on exactly
+           * the busiest screens. This field is compare-only and never stored,
+           * so the right treatment is to bound BOTH SIDES identically and
+           * compare what is left, rather than to stop looking.
+           */
+          const bound = (v) => chat.cleanMessage(v).slice(0, 2000);
+          const askedAbove = typeof body.asked === 'string' && body.asked.trim()
+            ? bound(body.asked) : null;
+          const nowAbove = asked ? chat.questionAbove(asked.text) : null;
+          const nowClean = nowAbove ? bound(nowAbove) : null;
+          /**
+           * ⚠️ EQUALITY, and containment was a hole rather than a fix.
+           *
+           * Containment was written for a false refusal: the identity moved
+           * when the cursor did, because `questionIn` anchors on the last
+           * needs-you marker and the marked option line is one. But a pane
+           * ACCUMULATES, so a genuinely new question's window legitimately
+           * contains the answered one's, and `includes` called that the same
+           * question. Measured end to end through the real producers: buttons
+           * drawn for "Do you want to proceed?", the pane redrew to `rm -rf
+           * /Users/josh/build` above the same Yes/No menu, both 409s passed,
+           * and "1" went through.
+           *
+           * The cursor problem is fixed where it belongs -- `questionAbove` now
+           * keys on the last three meaningful lines ABOVE the run, which do not
+           * move when the window's top does -- so equality is exact again, and
+           * exact is what a guard against answering the wrong question needs.
+           */
+          const sameQuestion = askedAbove !== null && nowClean !== null && nowClean === askedAbove;
+          if (askedAbove && nowClean && !sameQuestion) {
+            /* ⚠️ TRUE OF BOTH CAUSES. This fires when the screen genuinely moved
+               on AND when only the cursor moved inside the same question -- see
+               `questionAbove` for why the second is a known cost rather than an
+               oversight. "It is asking something else now" is false in the
+               second case, and a sentence that is false half the time it is
+               shown teaches people to ignore it. This one says what we know
+               (the screen moved since the press) and what to do about it. */
+            const moved = new Error('its screen moved between drawing that button and sending it, '
+              + 'so we did not send the answer. What is on this page now is current: press again '
+              + 'if it is still the one you want.');
+            moved.status = 409;
+            throw moved;
+          }
+        }
+        // Deliver first, then record the verdict with it — and record even a
+        // failure, exactly as the project thread does.
+        const delivery = chat.deliver(name, body.text, roster);
+        const kept = chat.appendMessage(chat.DIRECT, name, {
+          text: chose || body.text,
+          /**
+           * What was actually typed into the pane, when it is not what the
+           * bubble shows.
+           *
+           * ⚠️ THROUGH `cleanMessage`, because that is what `deliver` types.
+           * Storing the raw body made this field's own comment false: a text
+           * with interior padding or a newline is collapsed on the way to the
+           * pane and was kept here uncollapsed, so the record's account of the
+           * mechanism differed from the mechanism.
+           */
+          wire: chose ? chat.cleanMessage(body.text) : null,
+          at: delivery.at,
+          delivery,
+        });
+        // (No `agentsUnreadable`: nothing reads it here, and the GET on this
+        // same route deleted the identical field for the identical reason.
+        // One rule, both halves.)
+        sendJson(res, 200, {
+          delivery,
+          recorded: kept.recorded === true,
+          recordedBecause: kept.because || null,
+        });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || ((err && err.code === 'UNREADABLE') ? 500 : 400),
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
   if (pathname === '/api/messages' && (req.method === 'GET' || req.method === 'HEAD')) {
     // The record the screens draw conversations from; ?agent= filters to
     // one agent's messages. Read-only, best-effort history.

@@ -314,16 +314,51 @@ async function main() {
      goes unreported, on the renderer this branch wrote from scratch. */
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
-  /* One named exemption, SCOPED: opening an UNTIED agent's panel (the
-     rook check arms this flag around itself) fires the removal probe,
-     whose refusal for untied agents is a 400 by design and logs as a
-     failed-resource console error -- pre-existing product behavior this
-     drive newly exercises. Armed only around that block, so a tied
-     agent's probe 400ing anywhere else still fails the run. */
-  let expectRemoval400 = false;
+  /* TWO named exemptions, SCOPED to the same block: opening an UNTIED
+     agent's panel (the rook check arms this flag around itself) fires
+     two probes whose refusal is by design and logs as a failed-resource
+     console error.
+
+       - the removal probe, a 400 for untied agents (pre-existing);
+       - the agent's own thread, a 404 for a borrowed name -- the
+         `borrowedName` gate, which exists so one pane cannot serve the
+         real agent's private conversation beside a stranger's card.
+
+     Both are the product refusing correctly, and neither is suppressible
+     from the page: a browser logs any 4xx response as a failed resource.
+     Armed only around that block, so either probe failing anywhere else
+     -- for a TIED agent, where neither refusal is by design -- still
+     fails the run. The exemption is why the block below also ASSERTS
+     what the refusal draws: a tolerated request that draws nothing is
+     how a check turns into permission. */
+  /* 🛑 THE 400 EXEMPTION IS KEYED ON SCOPE, NOT ON TIMING, and it had to be.
+     It was armed around the block that opens the untied panel and disarmed
+     after it, which cannot work: the probe's console error is ASYNCHRONOUS
+     and lands after the disarm. Measured on this branch AND on origin/main,
+     four runs out of four, always
+     `[url=/api/agent/rook/removal] [armed=false]`. So the check failed for
+     everybody, on a product behaviour that is correct, and the failure says
+     "console error" rather than "your window closed too early".
+
+     A window defined by synchronous code position cannot contain an event
+     that arrives later. Keyed on the untied agent's NAME instead, which is a
+     property of the fixture rather than of the clock. `rook` is the only
+     borrowed name this server serves, and the block below asserts that it
+     really does arrive untied before relying on it.
+
+     ⚠️ The property the armed version existed for SURVIVES: a TIED agent's
+     removal probe 400ing still fails the run, because the exemption names
+     rook and nobody else. `exempt400` is a function so that can be asserted
+     rather than asserted about. */
+  const UNTIED_NAME = 'rook';
+  const exempt400 = (text, url) => /Failed to load resource.*400/.test(text)
+    && new RegExp('/api/agent/' + UNTIED_NAME + '/removal(\\?|$)').test(url);
+  let expectUntiedRefusals = false;
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
-    if (expectRemoval400 && /Failed to load resource.*400/.test(m.text()) && /removal/.test(m.location().url || '')) return;
+    const url = m.location().url || '';
+    if (exempt400(m.text(), url)) return;
+    if (expectUntiedRefusals && /Failed to load resource.*404/.test(m.text()) && /\/thread$/.test(url)) return;
     pageErrors.push(m.text());
   });
 
@@ -431,7 +466,20 @@ async function main() {
     // deletable-green otherwise): opening the borrowed-name panel with
     // Engineering mode ON must hide the box, and never paint a refusal
     // sentence into it about an agent the person is looking at.
-    expectRemoval400 = true;
+    /* ⚠️ THE EXEMPTION IS ASSERTED, NOT TRUSTED. A tolerated request that is
+       tolerated too widely is how a check turns into permission, and the
+       failure mode is silent: every 400 anywhere would pass. Both directions,
+       against the same predicate the handler uses. */
+    check(exempt400('Failed to load resource: the server responded with a status of 400 (Bad Request)',
+      'http://127.0.0.1/api/agent/' + UNTIED_NAME + '/removal'),
+      'CONTROL: the 400 exemption does not cover the untied removal probe it was written for');
+    check(!exempt400('Failed to load resource: the server responded with a status of 400 (Bad Request)',
+      'http://127.0.0.1/api/agent/casey/removal'),
+      'CONTROL: the 400 exemption swallows a TIED agent\'s removal refusal, which is not by design');
+    check(!exempt400('Failed to load resource: the server responded with a status of 500 (Server Error)',
+      'http://127.0.0.1/api/agent/' + UNTIED_NAME + '/removal'),
+      'CONTROL: the exemption swallows statuses other than 400 on that route');
+    expectUntiedRefusals = true;
     await rookCard.click();
     await page.waitForSelector('#panel-detail:not([hidden])', { timeout: 10000 });
     await page.waitForTimeout(700);
@@ -441,9 +489,40 @@ async function main() {
     }));
     check(rookWindow.boxHidden === true,
       'an untied agent\u2019s panel hides the window box (nothing here is its window to show)', JSON.stringify(rookWindow));
+    /* ⚠️ THE SAME RULE, ONE BOX LOWER, and it is the whole reason the 404
+       above is tolerated rather than merely silenced. The agent's own thread
+       404s for a borrowed name, and the arm that draws that refusal had no
+       assertion anywhere: it shipped painting the SERVER's sentence, "No
+       agent by that name", into the panel of an agent whose card the person
+       is looking at -- the exact thing the comment over the window box
+       forbids. Presence first, so the absence below has a control: if the
+       standing sentence is missing this fails before it can report the
+       server's sentence gone. */
+    const rookTalk = await page.evaluate(() => {
+      const box = document.getElementById('d-talk-box');
+      const say = document.getElementById('d-say');
+      const send = document.getElementById('d-send');
+      return {
+        text: box ? box.innerText.replace(/\s+/g, ' ') : null,
+        sayDisabled: say ? say.disabled : null,
+        sendDisabled: send ? send.disabled : null,
+      };
+    });
+    check(!!rookTalk.text && rookTalk.text.includes('We cannot show a conversation for this name.'),
+      'the borrowed-name panel says it cannot show a conversation for this name',
+      JSON.stringify(rookTalk.text));
+    check(!/no agent by that name/i.test(rookTalk.text || ''),
+      'and it does not paint the route\u2019s own "no agent by that name" beside a card carrying it',
+      JSON.stringify(rookTalk.text));
+    check(!/stays here after a restart/i.test(rookTalk.text || ''),
+      'and it does not promise the conversation is kept, under the sentence saying there is none to show',
+      JSON.stringify(rookTalk.text));
+    check(rookTalk.sayDisabled === true && rookTalk.sendDisabled === true,
+      'the composer is closed over a conversation we cannot read (a box that accepts text here is the two-state lie)',
+      JSON.stringify(rookTalk));
     await page.click('#detail-back');
     await page.waitForTimeout(300);
-    expectRemoval400 = false;
+    expectUntiedRefusals = false;
 
     // ⚠️ The click is the whole point. The button sits INSIDE the card, whose
     // own handler opens the detail panel — so a wrongly-ordered listener would
