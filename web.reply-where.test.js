@@ -21,18 +21,29 @@ const nodePath = require('node:path');
 
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 
-test('the line is written wherever the agent’s name is written, not on a fetch', () => {
+test('the line is written before the fetch, like the other lines that name the agent', () => {
   /**
-   * ⚠️ The neighbouring comment in the page makes this rule explicit for the
-   * other four lines: whether a line names the right agent does not depend on
-   * the fetch, so it is set with the label. A line set on the success path is
-   * absent exactly when a refusal leaves the box open.
+   * ⚠️ The neighbouring comment in the page makes this rule explicit: whether a
+   * line names the right agent does not depend on the fetch, and one set on the
+   * success path carries the PREVIOUS agent's name on a borrowed-name pane,
+   * because that arm returns early.
+   *
+   * 🛑 THIS USED TO MEASURE SOURCE PROXIMITY — 700 characters from the label's
+   * assignment — and a longer COMMENT broke it while the code was unchanged. A
+   * check a documentation edit can fail is measuring the wrong thing. It pins
+   * the ORDER against the fetch instead, which is the actual property.
    */
-  const at = PAGE.indexOf("document.getElementById('d-talk-hint').textContent");
-  assert.notEqual(at, -1, 'the hint the box heads itself with has moved');
-  const near = PAGE.slice(at, at + 700);
-  assert.match(near, /d-reply-where'\)\.textContent/,
-    'the reply-location line is no longer written beside the label');
+  const label = PAGE.indexOf("document.getElementById('d-talk-hint').textContent");
+  const line = PAGE.indexOf("document.getElementById('d-reply-where').textContent");
+  assert.notEqual(label, -1, 'the hint the box heads itself with has moved');
+  assert.notEqual(line, -1, 'the reply-location line is no longer written anywhere');
+
+  /* The first `await` after the label is where the fetch begins; both lines
+     must be written above it. */
+  const gate = PAGE.indexOf('await', label);
+  assert.notEqual(gate, -1, 'no fetch follows the label, so this test is aimed at nothing');
+  assert.ok(line > label && line < gate,
+    'the reply-location line is written after the fetch, so a refusal leaves it carrying the previous agent’s name');
 });
 
 test('it names the agent, says where the answer goes, and does not promise a fix', () => {
