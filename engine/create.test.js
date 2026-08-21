@@ -1999,3 +1999,66 @@ test('a rollback removes only the key it added, not the entry it found', () => {
   assert.equal('hasTrustDialogAccepted' in e, false, 'the key we added survived the rollback');
   create.setRunner(null);
 });
+
+test('an undo that could not run is recorded, because the sentence says it did', () => {
+  /**
+   * 🛑 THE TEST THIS REPLACES ASSERTED THE ABSENCE OF A STEP NOTHING PUSHED.
+   * `assert.ok(!r.steps.some(s => s.label === 'took back the folder trust'))`
+   * passed because that string existed nowhere in the product — the push had
+   * been lost to a `git checkout` during mutation testing, and an absence
+   * assertion cannot tell "it did not happen" from "it cannot happen".
+   *
+   * ⚠️ THE FAILURE IS INJECTED ON THE SECOND RENAME, which is the only way to
+   * have the trust write SUCCEED and its undo FAIL. Making the config
+   * unwritable fails both, and then there is nothing to take back.
+   */
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const realRename = fs.renameSync;
+  let n = 0;
+  fs.renameSync = function (...args) {
+    if (String(args[0]).includes('.kosmos-')) {
+      n += 1;
+      if (n === 2) { const e = new Error('injected'); e.code = 'EIO'; throw e; }
+    }
+    return realRename.apply(fs, args);
+  };
+  let r;
+  try {
+    r = create.createAgent({ ...BINS, name: 'trustfix-undo-fail', role: 'pm' });
+  } finally {
+    fs.renameSync = realRename;
+    create.setRunner(null);
+  }
+
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'the start did not fail, so no rollback ran');
+  assert.equal(n, 2, 'the undo never attempted a write, so nothing was injected into');
+  assert.ok(r.steps.some((s) => s.label === 'took back the folder trust' && s.ok === false),
+    'the undo failed and nothing on the machine says so, while the person is told we took it back');
+
+  const key = fs.realpathSync ? null : null;
+  void key;
+  assert.equal(Object.keys(readCfg().projects).length, 1,
+    'the entry was removed after all, so the injection did not reach the undo');
+});
+
+test('a successful undo adds no step, so the failure step means something', () => {
+  create.setRunner((file, args) => {
+    if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
+    return { ok: true };
+  });
+  create.setDryRun(false);
+  writeCfg({ projects: {} });
+
+  const r = create.createAgent({ ...BINS, name: 'trustfix-undo-ok', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL);
+  assert.deepEqual(Object.keys(readCfg().projects), [], 'the undo did not run, so this proves nothing');
+  assert.ok(!r.steps.some((s) => s.label === 'took back the folder trust'),
+    'a successful undo reported itself as a failure');
+  create.setRunner(null);
+});
