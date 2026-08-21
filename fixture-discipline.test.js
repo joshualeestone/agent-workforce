@@ -568,27 +568,60 @@ test('every suite that creates an agent sandboxes CLAUDE CODE’s config too', (
    * neighbour tried the filter and it did not work — block comments here have
    * unmarked continuation lines.
    */
-  const root = path.join(__dirname);
-  const files = [
-    ...fs.readdirSync(root).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, f)),
-    ...fs.readdirSync(path.join(root, 'engine')).filter((f) => f.endsWith('.test.js')).map((f) => path.join(root, 'engine', f)),
-  ];
+  /* ⚠️ EVERY `*.test.js` THE SUITE RUNS, found by walking rather than by naming
+     two directories. The rule is about the suite that does not exist yet, and a
+     scan pinned to the root and `engine/` misses it the moment somebody adds a
+     folder. */
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name.startsWith('.')) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.test.js')) files.push(full);
+    }
+  })(__dirname);
+
+  /* ⚠️ A WORD BOUNDARY, because `includes` was satisfied by a DIFFERENT
+     VARIABLE: `AGENT_WORKFORCE_CLAUDE_CONFIG_DIR` contains the name of the one
+     this rule is about, and two suites already sandbox the directory alongside
+     the file. A suite that set only the directory would have passed this rule
+     while writing into the real config. */
+  const SETS_THE_FILE = /AGENT_WORKFORCE_CLAUDE_CONFIG(?!_)/;
+
+  /* ⚠️ TWO WAYS TO MAKE AN AGENT, and the second one has no `createAgent(` in
+     it: `POST /api/agents`. A rule keyed on the function name alone lets an
+     HTTP-driven suite through, and `server.test.js` hides that today by
+     containing both. */
+  const MAKES_AN_AGENT = /\bcreateAgent\(|['"`]\/api\/agents['"`]|createAgent'/;
 
   const creators = [];
   const missing = [];
   for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');
-    if (!/\bcreateAgent\(/.test(src)) continue;
-    creators.push(path.relative(root, f));
-    if (!src.includes('AGENT_WORKFORCE_CLAUDE_CONFIG')) missing.push(path.relative(root, f));
+    const rel = path.relative(__dirname, f);
+    /* ⚠️ THIS FILE IS EXCLUDED FROM ITS OWN RULE. It matched on the docblock
+       above rather than on any call, which inflated the control below to 4 when
+       only 3 suites really create agents — and the docblock's own suggested
+       remedy ("re-word the comment") would then have dropped it to 3 and turned
+       the control red for no reason. A rule that counts itself is measuring its
+       own prose. */
+    if (rel === 'fixture-discipline.test.js') continue;
+    if (!MAKES_AN_AGENT.test(src)) continue;
+    creators.push(rel);
+    if (!SETS_THE_FILE.test(src)) missing.push(rel);
   }
 
-  /* ⚠️ THE POSITIVE CONTROL, and it is the half that stops this from being a
-     check that cannot fail. A rename of `createAgent`, a moved directory or a
-     bad glob would leave `creators` empty, `missing` empty, and this test
-     green while enforcing nothing at all. */
-  assert.ok(creators.length >= 4,
-    `only ${creators.length} suites look like they create agents, so this rule is aimed at nothing`);
+  /* ⚠️ THE POSITIVE CONTROL, NAMED RATHER THAN COUNTED. A count is the wrong
+     instrument here: it went stale the moment a suite was added, and its
+     previous value was met only because this file matched itself. These three
+     provably create agents today, so if the pattern stops finding them it has
+     stopped working — and that is a fact about the code, not about how many
+     files happen to exist. */
+  for (const known of ['engine/create.test.js', 'engine/remove.test.js', 'server.test.js']) {
+    assert.ok(creators.includes(known),
+      `${known} creates agents and this rule no longer sees it, so it is aimed at nothing`);
+  }
 
   assert.deepEqual(missing, [],
     'these suites create agents without sandboxing ~/.claude.json, so running them writes into the operator’s real Claude config');
