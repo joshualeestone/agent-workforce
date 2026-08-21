@@ -1615,7 +1615,7 @@ test('a machine with tmux and no sessions shows an EMPTY board, not an unreadabl
  * Drive one agent through `snapshot()` and hand back its context reading.
  * The pane fixture is the same shape the created-agent test above uses.
  */
-function contextFor(name, seed) {
+function contextFor(name, seed, running = true) {
   const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
   const regDir = nodePath.join(root, 'agent-registry');
   fs.mkdirSync(regDir, { recursive: true });
@@ -1628,7 +1628,11 @@ function contextFor(name, seed) {
     session_name: name, session_id: `sess-${name}`, cwd: '/somewhere',
   }), 'utf8') });
 
-  setPaneSource(() => `${name}\t0.0\t2.1.227\t0\t${name}\t✳ Claude Code`);
+  /* ⚠️ COLUMN THREE IS THE COMMAND, and the first version of this varied the
+     TITLE instead — so both fixtures were running Claude and the not-running
+     half of every split below was never exercised. PANE_COLUMNS in order:
+     session, pane, command, inMode, claim, title. */
+  setPaneSource(() => `${name}\t0.0\t${running ? '2.1.227' : 'zsh'}\t0\t${name}\t✳ Claude Code`);
   setPaneCapture(() => 'Worked for 1m\n> \n');
   try {
     const card = snapshot().agents.find((a) => a.sessionName === name);
@@ -1640,7 +1644,7 @@ function contextFor(name, seed) {
   }
 }
 
-test('an agent that has not started a session yet is NOT reported as unreadable', () => {
+test('a RUNNING agent with no registry entry is not told it has never started', () => {
   /**
    * ⚠️ THE STATE JOSH SCREENSHOTTED. He made an agent, and its card said
    * "Unknown" with a ring whose label read "Memory could not be read" — a
@@ -1653,9 +1657,23 @@ test('an agent that has not started a session yet is NOT reported as unreadable'
    * cannot be told apart WITHOUT A THRESHOLD goes to the admission — and the
    * threshold we specifically refused is the agent's age.
    */
+  /**
+   * 🛑 THE BLOCKER THIS REPLACES WAS A FALSE CLAIM ON A WORKING AGENT. "No
+   * registry entry" reads like a clean absence and is not one: the key is
+   * `<session>_<window>.<pane>` and we only ever build `_0.0`, so an agent in
+   * pane 0.1 has an entry we never look for; a config root with no
+   * `agent-registry` directory has none to find; entries get rotated away.
+   * In every one of those the agent is UP and may be at 95%, and the card said
+   * "nothing has been recorded, that is normal for a new agent".
+   *
+   * ⚠️ THE MOTIVATING CASE IS NOT THIS BRANCH. A genuinely new agent has a
+   * registry entry and a transcript within moments; what it does not have yet
+   * is a usage row, which is the branch below. So sending this one to the
+   * admission costs the feature nothing.
+   */
   const ctx = contextFor('brandnew', () => { /* no registry entry at all */ });
   assert.equal(ctx.percent, null, 'the fixture produced a reading, so this tests nothing');
-  assert.equal(ctx.notYet, true, 'a never-started agent is reported as one we failed to read');
+  assert.equal(ctx.notYet, false, 'a running agent was reported as one that has never started');
 });
 
 test('a registry entry whose transcript is GONE is unknown, not "not yet"', () => {
@@ -1670,7 +1688,7 @@ test('a registry entry whose transcript is GONE is unknown, not "not yet"', () =
   assert.equal(ctx.notYet, false, 'a transcript that disappeared was reported as one never written');
 });
 
-test('an EMPTY transcript is "not yet", which `if (!text)` could not say', () => {
+test('an EMPTY transcript on a running agent is UNKNOWN, because compacting looks the same', () => {
   /**
    * ⚠️ THE WORSE OF THE TWO COLLAPSES. `tailBytes` returns '' for a file that
    * is there and empty, and null when the read threw; the caller tested
@@ -1678,12 +1696,30 @@ test('an EMPTY transcript is "not yet", which `if (!text)` could not say', () =>
    * the state Claude Code leaves one in the instant it opens the file — so the
    * NEWEST agent on the machine was the one reported as unreadable.
    */
+  /**
+   * ⚠️ THE COLLAPSE IS STILL THE FINDING: `tailBytes` returns '' for an empty
+   * file and null for a failed read, and `if (!text)` put both in one arm.
+   * But the arm it belongs in depends on whether the agent is RUNNING —
+   * Claude Code opens a FRESH transcript when it compacts, so an agent that
+   * just filled its context is indistinguishable from one that never ran.
+   * Separating those needs the agent's age, which is the threshold this change
+   * refused, so a running one goes to the admission.
+   */
   const ctx = contextFor('justopened', ({ transcript, write }) => {
     write();
     fs.writeFileSync(transcript, '', 'utf8');
   });
   assert.equal(ctx.percent, null);
-  assert.equal(ctx.notYet, true, 'an empty transcript is still being read as a failed read');
+  assert.equal(ctx.notYet, false, 'an agent that just compacted was told nothing had ever been recorded');
+  assert.match(ctx.because, /compacts/);
+
+  // ⚠️ AND THE OTHER HALF, so the split above is a split and not a blanket
+  // refusal: with nothing running, an empty transcript really is a beginning.
+  const idle = contextFor('justopened-idle', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript, '', 'utf8');
+  }, false);
+  assert.equal(idle.notYet, true, 'an empty transcript with nothing running lost its honest wording');
 });
 
 test('a transcript with no usage rows yet is "not yet"', () => {
@@ -1801,12 +1837,12 @@ test('an entry with no session id in it is a look we could not finish', () => {
   assert.equal(ctx.notYet, false);
 });
 
-test('THE CONTROL: with no entry at all it really is "not yet"', () => {
+test('THE CONTROL: with no entry at all AND nothing running, it really is "not yet"', () => {
   /**
    * ⚠️ Without this, answering `notYet: false` for every empty list would pass
    * all three tests above and silently undo the change.
    */
-  const ctx = contextFor('truly-absent', () => { /* nothing written anywhere */ });
+  const ctx = contextFor('truly-absent', () => { /* nothing written anywhere */ }, false);
   assert.equal(ctx.percent, null);
   assert.equal(ctx.notYet, true, 'a genuinely new agent lost its honest wording');
 });

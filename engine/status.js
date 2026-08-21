@@ -1188,11 +1188,19 @@ function registrySafe(value) {
 }
 
 /**
- * ⚠️ AN EMPTY LIST HAS FIVE CAUSES AND THEY ARE NOT THE SAME ANSWER. No entry
- * anywhere is a genuine absence: nothing has ever been registered, so nothing
- * has ever existed to read. But a corrupt entry, an entry with no session id,
+ * ⚠️ AN EMPTY LIST HAS SIX CAUSES AND THEY ARE NOT THE SAME ANSWER. A corrupt
+ * entry, an entry with no session id,
  * a name we refuse to build a path from, and an entry belonging to a DIFFERENT
  * agent are all cases where we looked and could not or would not answer.
+ *
+ * ⚠️ AND THE SIXTH — NO ENTRY ANYWHERE — IS NOT THE CLEAN ABSENCE IT READS AS.
+ * The key is `<session>_<window>.<pane>` and this only ever builds `_0.0`, so
+ * an agent in pane 0.1 has an entry we never look for; a config root with no
+ * `agent-registry` directory has none to find; entries get rotated away. An
+ * earlier version of this comment asserted "nothing has ever been registered,
+ * so nothing has ever existed to read", and that premise is what let a RUNNING
+ * agent be reported as one that had never started. The caller decides, with
+ * the fact it holds and this function does not: is the pane running Claude.
  *
  * 🔑 It matters because `readContext` turns an empty list into the words on a
  * card. "It has not started a session yet" is a CLAIM about an agent's life,
@@ -1344,7 +1352,7 @@ function tailBytes(file, bytes = 262144) {
  * the agent's age. Age would have been a threshold wearing a dimension's
  * clothes: it looks principled, and the number is somebody's guess.
  */
-function readContext(agentName, model, exactSession) {
+function readContext(agentName, model, exactSession, running) {
   const file = transcriptFor(agentName, exactSession);
   if (!file) {
     // ⚠️ TWO STATES COLLAPSED INTO ONE `null` HERE. No registry entry means
@@ -1356,9 +1364,20 @@ function readContext(agentName, model, exactSession) {
     // ⚠️ AND A LOOK WE COULD NOT COMPLETE IS NOT AN ABSENCE. Read straight after
     // the call that sets it, before anything else can touch a registry.
     const blind = REFUSED_TO_LOOK;
-    return (registered || blind)
+    // 🛑 AND A PANE THAT IS RUNNING CLAUDE HAS STARTED A SESSION, whatever the
+    // registry says. "No entry" is not the absence it looks like: the registry
+    // key is <session>_<window>.<pane> and we only ever build `_0.0`, so an
+    // agent in pane 0.1 has one we never find; a config root with no
+    // agent-registry directory has none at all; an entry can be rotated away.
+    // In every one of those the agent is UP, and "it has not started a session
+    // yet" is a false claim about a working agent — the truncation case with
+    // the sign flipped, and the exact failure this whole change exists to stop.
+    // ⚠️ THE SEPARATOR IS NOT A THRESHOLD: whether the pane is running Claude is
+    // a fact the caller already holds.
+    return (registered || blind || running === true)
       ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
-          because: registered ? 'its transcript is not where the registry says' : 'we could not read its registry entry' }
+          because: registered ? 'its transcript is not where the registry says'
+            : (blind ? 'we could not read its registry entry' : 'it is running, but we cannot find its transcript') }
       : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not started a session yet' };
   }
   const { text, whole } = tailBytes(file);
@@ -1371,7 +1390,16 @@ function readContext(agentName, model, exactSession) {
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'could not read the transcript' };
   }
   if (text === '') {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'its transcript is still empty' };
+    // ⚠️ AND ON A RUNNING AGENT THIS IS AS LIKELY A COMPACTION AS A BIRTH.
+    // Claude Code opens a FRESH transcript when it compacts, so an agent that
+    // just filled its context looks identical to one that has never run — and
+    // telling somebody whose agent just compacted that "nothing has been
+    // recorded, that is normal for a new agent" is the inversion again.
+    // Separating the two needs to know how old the agent is, which is the
+    // threshold this change refused, so it goes to the admission.
+    return running === true
+      ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'its transcript is empty, which happens right after it compacts as well as at the start' }
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'its transcript is still empty' };
   }
 
   const usages = [...text.matchAll(/"usage":\{([^}]*)\}/g)];
@@ -1769,7 +1797,7 @@ function snapshot() {
     const tied = isNamedOurs(pane);
     const { model } = tied ? readModel(pane.name, pane.session) : { model: null };
     const context = tied
-      ? readContext(pane.name, model, pane.session)
+      ? readContext(pane.name, model, pane.session, isUnambiguousClaude(pane.command))
       // ⚠️ Unknown, and not because it is ambiguous: this one is a REFUSAL. We
       // can see there is something to read and are declining to read it, so
       // 'not yet' would be false about us as well as about the agent.
