@@ -3013,17 +3013,22 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     // separate assertion about the BADGE could pass with the badge deleted.
     // The two strings are now deliberately disjoint, so an assertion has to
     // name the one it means.
-    // ⚠️ AND NOW ON THE SHAPE OF THE LABEL RATHER THAN ONE SENTENCE OF IT. There
-    // are two honest unknown labels since the engine learned to tell "nothing
-    // has been recorded yet" from "we could not read it", and this fixture is
-    // the FIRST kind — an agent with no registry entry at all. Pinning the
-    // could-not sentence made this control fail on a correct render and, worse,
-    // would have passed only for whichever half of the split the fixture
-    // happened to land in. What "degraded to the unknown ring" means is that
-    // the ring carries an unknown label and no percentage survived, so that is
-    // what is asserted.
+    // ⚠️ THERE ARE NOW TWO HONEST UNKNOWN LABELS, since the engine learned to
+    // tell "nothing has been recorded yet" from "we could not read it", and
+    // this control has been aimed at the wrong one TWICE. First it kept the
+    // could-not sentence and failed on a correct render; then it was widened to
+    // an alternation of both, which passes whichever half the fixture lands in
+    // and would not notice a classification regression at all.
+    // ⚠️ THIS FIXTURE IS A RUNNING CLAUDE PANE with no registry entry, which is
+    // deliberately the ADMISSION: no entry does not mean no session, because
+    // the registry key is <session>_<window>.<pane> and an agent in 0.1 has one
+    // we never look for. So the sentence is pinned, AND the branch that
+    // produces it is asserted separately, so a flip is a failure rather than a
+    // silently different pass.
     const spoiled = api.card(spoofed);
-    assert.match(spoiled, /aria-label="[^"]*Nothing has been recorded/,
+    assert.equal(spoofed.context.notYet, false,
+      'this fixture changed branch, so the sentence pinned below is no longer the one it produces');
+    assert.match(spoiled, /aria-label="[^"]*Memory could not be read/,
       'CONTROL: the spoofed percent did not degrade to the unknown ring, so the raw assertion proves nothing');
 
     // ⚠️ ANCHORED ON THE ELEMENT, NOT THE WORDS. The line above matches the
