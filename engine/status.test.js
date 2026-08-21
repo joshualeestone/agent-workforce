@@ -2089,3 +2089,50 @@ test('an agent Kosmos launched but that has never spoken says so, and one we did
     setPaneCapture(null);
   }
 });
+
+test('the wording Claude Code actually uses for a spent limit reads as paused, not idle', () => {
+  /**
+   * 🛑 VERBATIM FROM JOSH'S SCREENSHOT, 2026-08-21, of an agent that could not
+   * answer him. This exact text was on screen while her card said **Idle**:
+   *
+   *   You've reached your Fable 5 limit. Run /usage-credits to continue or
+   *   switch models with /model.
+   *
+   * The four patterns in place were `rate limit`, `usage limit`, `429` and
+   * `try again later`. None of them appears in that sentence — it says
+   * usage-CREDITS — so the agent classified as idle while it was blocked.
+   *
+   * 🔑 AND THE COST WAS NOT THE WRONG WORD ON A BADGE. Blocked meant she never
+   * completed a turn, so no transcript was ever written, so her memory read as
+   * unreadable, so a memory fix that worked looked broken for Fable. One
+   * unmatched string, four symptoms.
+   *
+   * ⚠️ PINNED AS THE WHOLE SENTENCE rather than as a pattern. A test that
+   * asserted the regex would be a copy of the thing under test; what has to hold
+   * is that THIS text, which a person really saw, is classified correctly.
+   */
+  const REAL = '> [message from your operator · to answer, run: kosmos reply] hello\n'
+    + "  └ You've reached your Fable 5 limit. Run /usage-credits to continue or\n"
+    + '    switch models with /model.\n\n* Churned for 0s\n';
+
+  setPaneSource(() => 'spent\t0.0\t2.1.239\t0\tspent\t✳ Claude Code');
+  setPaneCapture(() => REAL);
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === 'spent');
+    assert.ok(card, 'the fixture did not produce a card at all');
+    assert.equal(card.state, 'rate_limited',
+      'an agent that cannot work because its limit is spent still reads as idle');
+    assert.equal(card.stateConfidence, 'scraped',
+      'the state is read off a screen and must keep saying so');
+
+    /* 🔑 THE CONTROL: an ordinary working pane must not trip it, or the fix is
+       just a board that calls everything paused. */
+    setPaneCapture(() => 'Worked for 1m\n> ready\n');
+    const fine = snapshot().agents.find((a) => a.sessionName === 'spent');
+    assert.notEqual(fine.state, 'rate_limited',
+      'a healthy pane is being reported as blocked');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});

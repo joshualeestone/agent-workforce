@@ -949,11 +949,39 @@ const NEEDS_YOU_MARKERS = Object.freeze([
   /❯\s*1\.\s*Yes/,
 ]);
 
+/**
+ * 🛑 THE FIRST FOUR WERE GUESSES AT WORDING AND CLAUDE CODE SAYS SOMETHING ELSE.
+ *
+ * Josh, 2026-08-21, from the raw window of an agent that could not answer him:
+ *
+ *   You've reached your Fable 5 limit. Run /usage-credits to continue or
+ *   switch models with /model.
+ *
+ * None of `rate limit`, `usage limit`, `429` or `try again later` appears in
+ * that sentence — it says usage-CREDITS, not usage limit — so the agent
+ * classified as IDLE. Her card read Idle while she was blocked and could not
+ * work, which is the board reporting health it has not verified, the one thing
+ * `classify` exists to prevent.
+ *
+ * ⚠️ THE LAST TWO ARE OBSERVED AND THE FIRST FOUR ARE NOT. Nobody has produced
+ * a pane containing "rate limit" or "429"; they are plausible strings somebody
+ * wrote down. These two came off a screenshot of the real thing. Add to the
+ * observed half by observing — the guesses are 0 for 1 against reality.
+ *
+ * 📌 Broad on the model name (`reached your … limit`) because the vendor puts
+ * the model in the middle of it, and narrow on `/usage-credits`, a literal
+ * command string that cannot appear by accident. Neither widens the false
+ * positives: a pane merely DISCUSSING rate limits already matched `/rate limit/`
+ * before this change, which is why 0.2.20 made the card say what it SAW
+ * ("its screen mentions a usage limit") rather than what it concluded.
+ */
 const RATE_LIMIT_MARKERS = [
   /rate limit/i,
   /usage limit/i,
   /\b429\b/,
   /try again (later|at)/i,
+  /reached your .{0,40}limit/i,   // observed 2026-08-21
+  /\/usage-credits\b/,            // observed 2026-08-21
 ];
 
 /**
