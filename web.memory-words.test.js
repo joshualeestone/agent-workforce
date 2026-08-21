@@ -99,14 +99,10 @@ test('every one of the five surfaces goes through the shared derivation', () => 
   // one definition + five call sites
   assert.equal(calls, 6, `expected five callers of memUnknown and found ${calls - 1}`);
 
-  for (const [surface, near] of [
-    ['card badge', 'membadge unk'],
-    ['list row', 'bar unknown'],
-    ['detail header', 'dbadge.textContent'],
-  ]) {
-    const at = PAGE.indexOf(near);
-    assert.notEqual(at, -1, `${surface}: anchor "${near}" is gone, so this check is aimed at nothing`);
-  }
+  /* ⚠️ THE OLD VERSION OF THIS BLOCK CHECKED THAT THREE STRINGS EXIST IN THE
+     PAGE and never related any of them to `memUnknown`. It would have passed
+     with all five surfaces hardcoding literals. The count above is what holds
+     that line, so the anchors are gone rather than left looking like coverage. */
 });
 
 test('no surface still hardcodes the old word, ANYWHERE EXCEPT the one place that owns it', () => {
@@ -121,18 +117,83 @@ test('no surface still hardcodes the old word, ANYWHERE EXCEPT the one place tha
    * test would pass forever. What is pinned is the RENDERED literals, in the
    * page MINUS the derivation that owns them.
    */
+  /* ⚠️ THE FUNCTION'S BODY, matched by braces, not "everything up to the next
+     function". The first version sliced from `memUnknown` to `pctOf` — so any
+     function somebody inserted between the two would have been silently exempt
+     from this check, while the control below still passed because the
+     derivation was still inside the slice. There is a brace matcher in this
+     file already; it is used. */
   const at = PAGE.indexOf('function memUnknown(');
-  const end = PAGE.indexOf('\nfunction pctOf(', at);
-  assert.ok(at !== -1 && end > at, 'the derivation is not where this check expects it');
+  assert.notEqual(at, -1, 'the derivation is not where this check expects it');
+  let depth = 0;
+  let i = PAGE.indexOf('{', at);
+  for (; i < PAGE.length; i++) {
+    if (PAGE[i] === '{') depth++;
+    else if (PAGE[i] === '}') { depth--; if (depth === 0) break; }
+  }
+  const end = i + 1;
   const elsewhere = PAGE.slice(0, at) + PAGE.slice(end);
 
+  /* ⚠️ BLOCK COMMENTS REMOVED FIRST, and this is the third shape this check has
+     taken. Counting the raw page failed on comments that legitimately QUOTE the
+     word ("the visible word \"Unknown\"", "reports 62px for \"Unknown\""), which
+     is prose, not a rendered literal. An earlier attempt filtered comment LINES
+     by prefix and did not work: block comments here have unmarked continuation
+     lines. Removing whole block-comment spans does work, because that is the shape
+     the comments actually have.
+     ⚠️ Only block comments. Stripping `//` would eat the `https://` in real
+     code, and over-stripping buys a FALSE PASS, which is the direction a check
+     must never fail in. */
+  const codeOnly = elsewhere.replace(/\/\*[\s\S]*?\*\//g, ' ');
   for (const literal of ['>Unknown<', "'Unknown'", '"Unknown"']) {
-    const hits = elsewhere.split(literal).length - 1;
+    const hits = codeOnly.split(literal).length - 1;
     assert.equal(hits, 0, `${literal} is still rendered somewhere instead of memUnknown().word`);
   }
+
+  /* ⚠️ AND THE STRIPPER ITSELF NEEDS A CONTROL, or a regex that matched the
+     whole file would make every literal above unfindable and this test green
+     forever. */
+  assert.ok(codeOnly.includes('function pctOf('), 'the comment stripper removed code');
+  assert.ok(codeOnly.length > PAGE.length / 3, 'the comment stripper removed most of the page');
 
   // ⚠️ THE CONTROL: the same search INSIDE the derivation must find it, or the
   // slice above is cutting out more than it should and the zero means nothing.
   const owned = PAGE.slice(at, end);
   assert.equal(owned.split("'Unknown'").length - 1, 1, 'the derivation no longer holds the word, so the exclusion above is hiding it');
+});
+
+test('the Memory box sentence reads as English after the name it follows', () => {
+  /**
+   * 🛑 THE BUG THIS CATCHES SHIPPED PAST SIX TESTS AND A BLIND REVIEW OF THE
+   * ENGINE, because every one of them checked `word` and `aria` and nothing
+   * ever composed `lead`. The Memory box writes "<name>'s " + lead, and the
+   * new branch read: "Dan's has not written anything to read yet."
+   *
+   * ⚠️ So this asserts the SENTENCE, built the way the page builds it, rather
+   * than the fragment. A test on the fragment cannot see a grammar bug.
+   */
+  for (const notYet of [true, false]) {
+    const u = memUnknown({ notYet });
+    const sentence = 'Dan\u2019s ' + u.lead;
+    assert.match(sentence, /^Dan\u2019s (memory|[a-z]+ )/, `reads wrong after a possessive: "${sentence}"`);
+    assert.doesNotMatch(sentence, /\u2019s (has|is|does|will|can)\b/, `a verb directly after the possessive: "${sentence}"`);
+    assert.match(u.lead, /\.$/, 'the lead is a sentence and must end like one');
+    assert.match(u.note, /\.$/);
+  }
+});
+
+test('the note never claims how OLD an agent is, because the engine refused to know', () => {
+  /**
+   * ⚠️ `notYet` is decided on what the code already distinguishes, never on the
+   * agent's age — that was the threshold this whole change refused. The copy
+   * then said "That is normal for an agent this new. There is nothing wrong
+   * with it and nothing to do", which asserts both an age and a diagnosis, and
+   * is reachable for agents that are neither new nor fine.
+   *
+   * The normality belongs to the CLASS ("normal for a new agent"), which is
+   * true, not to this one, which we cannot see.
+   */
+  const u = memUnknown({ notYet: true });
+  assert.doesNotMatch(u.note, /this new|nothing wrong|nothing to do/,
+    'the note makes a claim about this agent that the engine deliberately does not support');
 });

@@ -1726,3 +1726,40 @@ test('a real reading is neither, and the control proves the fixtures above are n
   assert.ok(ctx.percent !== null, 'the harness cannot produce a reading at all, so the nulls above prove nothing');
   assert.equal(ctx.notYet, false);
 });
+
+test('a huge transcript whose tail holds no usage row is UNKNOWN, never "not yet"', () => {
+  /**
+   * 🛑 THE SAME BUG WITH THE SIGN FLIPPED, and it was in the fix. The reading
+   * comes from the LAST 256KB of a transcript that can reach 8MB, so "no usage
+   * rows here" is a statement about a window, not a file. One oversized tool
+   * result at the end pushes every usage row out of view — and the card would
+   * then say "Not yet read" with the note "that is normal for an agent this
+   * new. There is nothing wrong with it" for an agent that may be at 95%.
+   *
+   * ⚠️ Separable WITHOUT A THRESHOLD, which is the only reason it is separated:
+   * whether the read covered the whole file is a fact the read already has.
+   */
+  const ctx = contextFor('bigtail', ({ transcript, write }) => {
+    write();
+    // A real usage row, then far more than the window of padding after it.
+    const usage = JSON.stringify({ message: { model: 'claude-opus-5', usage: { input_tokens: 90000 } } }) + '\n';
+    const pad = JSON.stringify({ type: 'tool_result', content: 'x'.repeat(400000) }) + '\n';
+    fs.writeFileSync(transcript, usage + pad, 'utf8');
+  });
+  assert.equal(ctx.percent, null, 'the usage row was inside the window, so this tests nothing');
+  assert.equal(ctx.notYet, false, 'an agent with a huge transcript was reported as one that has never run');
+});
+
+test('a SMALL transcript with no usage row really is "not yet"', () => {
+  /**
+   * ⚠️ THE CONTROL ON THE FIX ABOVE. Without it, answering `notYet: false` for
+   * every missing-usage case would pass the truncation test and quietly undo
+   * the thing this whole change is for.
+   */
+  const ctx = contextFor('smalltail', ({ transcript, write }) => {
+    write();
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'summary', message: {} }) + '\n', 'utf8');
+  });
+  assert.equal(ctx.percent, null);
+  assert.equal(ctx.notYet, true, 'a genuinely new agent lost its honest wording');
+});

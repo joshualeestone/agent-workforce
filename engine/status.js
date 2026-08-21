@@ -1266,7 +1266,16 @@ function transcriptFor(agentName, exactSession) {
   return null;
 }
 
-/** Read the tail of a file without loading all of it. Transcripts reach 8MB+. */
+/**
+ * Read the tail of a file without loading all of it. Transcripts reach 8MB+.
+ *
+ * ⚠️ IT ALSO REPORTS WHETHER IT SAW THE WHOLE FILE, and that is not a detail.
+ * A caller that concludes "there is no usage data here" from a 256KB WINDOW is
+ * making a claim about a file it did not read: one oversized tool result at the
+ * end of an 8MB transcript pushes every usage row out of view, and a heavily
+ * used agent then reports as one that has never used any memory. Truncation is
+ * knowable — `size > bytes` — so it is answered rather than assumed.
+ */
 function tailBytes(file, bytes = 262144) {
   let fd;
   try {
@@ -1275,9 +1284,13 @@ function tailBytes(file, bytes = 262144) {
     const start = Math.max(0, size - bytes);
     const buf = Buffer.alloc(Math.min(bytes, size));
     fs.readSync(fd, buf, 0, buf.length, start);
-    return buf.toString('utf8');
+    // ⚠️ RETURNED, not stashed in a module variable. The first version of this
+    // set a shared flag that the caller read on the next line, which works and
+    // is one interleaved call away from a verdict computed about a different
+    // file. The fact belongs to the read.
+    return { text: buf.toString('utf8'), whole: size <= bytes };
   } catch {
-    return null;
+    return { text: null, whole: false };
   } finally {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* ignore */ }
   }
@@ -1318,7 +1331,7 @@ function readContext(agentName, model, exactSession) {
       ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'its transcript is not where the registry says' }
       : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not started a session yet' };
   }
-  const text = tailBytes(file);
+  const { text, whole } = tailBytes(file);
   // ⚠️ `text === null` AND `text === ''` ARE NOT THE SAME ANSWER, and `if
   // (!text)` treated them as one. tailBytes returns null when the read threw
   // and '' when the file is there and empty — which is exactly the state a
@@ -1333,7 +1346,17 @@ function readContext(agentName, model, exactSession) {
 
   const usages = [...text.matchAll(/"usage":\{([^}]*)\}/g)];
   if (!usages.length) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not used any memory yet' };
+    // 🛑 AND ONLY IF WE READ THE WHOLE FILE. `tailBytes` returns the last 256KB
+    // of a transcript that can reach 8MB, so "no usage rows" from a truncated
+    // window means "none in the part we looked at" — one oversized tool result
+    // at the end is enough. Claiming "not yet" there would put "nothing has
+    // been recorded, that is normal for a new agent" on the card of an agent
+    // sitting at 95%, which is this whole change's bug with the sign flipped.
+    // ⚠️ It is separable WITHOUT A THRESHOLD, which is why it is separated:
+    // whether the read covered the file is a fact the read already has.
+    return whole
+      ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true, because: 'it has not used any memory yet' }
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'we could not find a memory reading in the part of the transcript we read' };
   }
 
   const num = (blob, key) => {
@@ -1426,7 +1449,7 @@ function modelDisplayName(id) {
 function readModel(agentName, exactSession) {
   const file = transcriptFor(agentName, exactSession);
   if (!file) return { model: null, confidence: CONFIDENCE.NONE };
-  const text = tailBytes(file, 65536);
+  const { text } = tailBytes(file, 65536);
   if (!text) return { model: null, confidence: CONFIDENCE.NONE };
   const matches = [...text.matchAll(/"model":"([^"]+)"/g)];
   if (!matches.length) return { model: null, confidence: CONFIDENCE.NONE };

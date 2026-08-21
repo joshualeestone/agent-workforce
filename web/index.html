@@ -826,8 +826,12 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    ⚠️ It reserves no space, by the pack's reasoning: `.membadge` is absolute, so
    it takes no layout and cannot make one card taller than its neighbour. */
 .membadge.unk {
-  /* ⚠️ `-15px`, not `-7px`. MEASURED: the caption is 105px wide on an 82px
-     gauge, so it always crosses the presence dot's x-range, and at -7px its 2px
+  /* ⚠️ `-15px`, not `-7px`. MEASURED — and REMEASURED, because the number here
+     was wrong: `docs/browser-checks/render-memory-words.js` reports 62px for
+     "Unknown" and 78px for "Not yet read", not the 105px this comment claimed.
+     The reasoning survives the correction: even at 78px the caption is wider
+     than the gap either side of an 82px gauge's dot, so it still crosses the
+     presence dot's x-range, and at -7px its 2px
      ring painted over the bottom 4px of the dot — a distinct signal (online /
      not running / could not check) partly obscured on every unknown-memory
      card. Horizontal separation is not available; vertical is. */
@@ -851,6 +855,16 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    The badge is 17px tall and hangs 15px below the gauge, so it needs about
    12px more than the resting rhythm to clear the name. */
 .agauge:has(.membadge.unk) { margin-bottom: 26px; }
+/* ⚠️ AND THE DETAIL HEADER NEEDS THE SAME RESERVATION, which it never had. The
+   rule above is scoped to `.agauge`, so the identical caption on the agent page
+   hung 15px BELOW its header with nothing making room for it — measured by
+   `docs/browser-checks/render-memory-words.js`, which is the only instrument
+   here that can see it. This PREDATES the two-word split: it is the caption's
+   -15px offset, not its width, so it was live for "Unknown" too and no test
+   could have caught it, because the suite reads text.
+   ⚠️ Scoped with `:has` for the same reason as the card's rule — only the
+   headers that actually carry a caption pay the space. */
+.dav-wrap:has(.membadge.unk) { margin-bottom: 26px; }
 .membadge { position: absolute; top: 2px; right: -6px;
             font: 700 .6875rem var(--k-mono);
             font-variant-numeric: tabular-nums;
@@ -4315,11 +4329,22 @@ function memBand(pct) {
 function memUnknown(ctx) {
   const notYet = !!(ctx && ctx.notYet);
   return notYet
+    /* ⚠️ `lead` IS SPOKEN AFTER A POSSESSIVE — the Memory box composes
+       "<name>'s " + lead — and the first version of this branch read
+       "Dan's has not written anything to read yet." The unknown lead was
+       written to fit that template and this one was not, and nothing rendered
+       it: the tests exercised `word` and `aria` and never `lead`.
+       ⚠️ AND THE NOTE NO LONGER CLAIMS AN AGE. `notYet` is decided on what the
+       code distinguishes, never on how old an agent is (see status.js), so
+       "that is normal for an agent this new" asserted something the engine
+       deliberately refused to know — and it is reachable for cases that are not
+       new at all. The normality is attributed to the class, which is true,
+       rather than to this agent, which we cannot see. */
     ? { notYet: true,
         word: 'Not yet read',
         aria: 'Nothing has been recorded for it so far.',
-        lead: 'has not written anything to read yet.',
-        note: 'That is normal for an agent this new. There is nothing wrong with it and nothing to do.' }
+        lead: 'memory has nothing recorded yet.',
+        note: 'That is normal for a new agent. Nothing here can tell you how much room is left.' }
     : { notYet: false,
         word: 'Unknown',
         aria: 'Memory could not be read.',
@@ -4454,7 +4479,7 @@ function ring(a) {
   /* ⚠️ The pack gauge: gt/gf/gu classes, base stroke-width 4 as an
      ATTRIBUTE so the .warn/.high CSS (5/6) can thicken it -- weight is the
      third cue after arc length and colour. The unknown-memory fact is carried
-     three ways: this ring's aria-label ("Memory could not be read."), the dashed
+     three ways: this ring's aria-label (whichever `memUnknown` sentence applies), the dashed
      shape the pack pairs with the unknown card, and -- since the caption was
      restored as `.membadge unk` -- the visible word from `memUnknown` in the same
      .agauge container. ⚠️ The two strings are deliberately disjoint, so an
@@ -4545,10 +4570,14 @@ function card(a) {
      ordering it this way means the severity badge cannot be reached by an
      unknown, whatever pctOf later returns. */
   const badge = pct === null
-    /* ⚠️ `aria-hidden`: the ring's aria-label already says "Memory could not be
-       read." — the authoritative statement, and the one that says what HAPPENED
-       rather than naming a state. Without this a screen reader says the fact
-       twice per card.
+    /* ⚠️ `aria-hidden`: the ring's aria-label already carries the authoritative
+       sentence — the one that says what HAPPENED rather than naming a state.
+       Without this a screen reader says the fact twice per card.
+       ⚠️ It used to QUOTE that sentence as "Memory could not be read.", which
+       stopped being true for half the cards when the engine learned to tell
+       "nothing recorded yet" from "we could not read it". A comment that is the
+       whole justification for hiding something must not quote a string the
+       thing it hides may not have.
        The gap this badge closes was always the SIGHTED half. (Mona Lisa,
        2026-08-19; the pack uses this pattern 160 times on .haz/.qmark/.rest.) */
     ? `<span class="membadge unk" aria-hidden="true">${memUnknown(a.context).word}</span>`
@@ -4598,8 +4627,15 @@ function lrow(a) {
      the card's -- dashed bar for shape, word for identity. The pack does not
      draw this row at all, which is why nobody checked it: it depicts this state
      only on a card. */
+  /* ⚠️ ONE CALL, read twice, and the spoken half is the SENTENCE rather than
+     the word with a noun stuck on the end. The suffix pattern was written for
+     "Unknown memory" and announced the other branch as "Not yet read memory".
+     Both must come from the same derivation of the same context, or the visible
+     cell and what a screen reader hears could disagree about which unknown
+     this is. */
+  const memu = memUnknown(a.context);
   const mem = pct === null
-    ? `<span class="bar unknown"></span><span class="pct">${memUnknown(a.context).word}<span class="vh"> memory</span></span>`
+    ? `<span class="bar unknown"></span><span class="pct">${memu.word}<span class="vh"> memory: ${memu.aria}</span></span>`
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
