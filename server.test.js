@@ -1957,7 +1957,15 @@ test('the roles route carries the copy the creation actually uses', async () => 
 function pageFnSource(name) {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
-  let start = script.indexOf('function ' + name);
+  /* ⚠️ THE BOUNDARY IS THE POINT. This matched `'function ' + name` with
+     nothing after it, so a NEW SIBLING whose name merely STARTS with the wanted
+     one silently captured the pin: adding `paintRoomBusy` (#176) handed
+     `pageFnSource('paintRoom')` the wrong function, and the failure read
+     "paintRoom no longer filters" — a true-sounding claim about code that had
+     not changed. Fixed in the helper rather than the caller, because every
+     extractor in the suite locates this way and the next collision is a
+     different test. */
+  let start = script.indexOf('function ' + name + '(');
   assert.ok(start > -1, name + ' vanished from the page');
   // An `async function` must keep its keyword: sliced off, the body's awaits
   // are a SyntaxError inside new Function and the extraction dies confusingly.
@@ -2721,7 +2729,7 @@ test('the settings screen renders the engine\'s three answers, and offers only w
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
   const slice = (name) => {
-    let start = script.indexOf('function ' + name);
+    let start = script.indexOf('function ' + name + '(');
     assert.ok(start > -1, name + ' vanished from the page');
     let depth = 0; let end = -1;
     for (let k = script.indexOf('{', start); k < script.length; k += 1) {
@@ -5623,7 +5631,7 @@ test('the limit card shows each caution only when it matters (her always-on-scre
   // toggle's state rather than hardcoding On.
   const saves = [];
   const handlerSrc = (name) => {
-    const at2 = sc.indexOf('function ' + name);
+    const at2 = sc.indexOf('function ' + name + '(');
     let d = 0; let e = -1;
     for (let k = sc.indexOf('{', at2); k < sc.length; k += 1) {
       if (sc[k] === '{') d += 1;
@@ -6551,8 +6559,14 @@ test('the check route asks fresh, carries reachability, and rides the cross-site
   }
 });
 
-test("the update card's states are mutually exclusive and the line is never blank", () => {
-  const paint = pageFunction('paintUpdateCard', 'let UPD_CHECKING = false;\n');
+test("the update card's states are mutually exclusive, and the line is blank only when nobody asked", () => {
+  /* ⚠️ THE TITLE USED TO SAY "never blank", and that was the rule until Josh
+     ruled otherwise (2026-08-21): at rest the footer is the version and the
+     control, and "Up to date." is the ANSWER TO A QUESTION that appears once
+     the button has been pressed. Every OTHER arm still refuses to be blank —
+     an offer, an unreadable answer and an unreachable host are news a person
+     needs without asking, and this pins that the exemption is the one arm. */
+  const paint = pageFunction('paintUpdateCard', 'let UPD_CHECKING = false;\nlet UPD_ASKED = true;\n');
   const mk = () => {
     const els = {
       'upd-line': { textContent: '' },
@@ -6571,7 +6585,7 @@ test("the update card's states are mutually exclusive and the line is never blan
     els = mk();
     paint('0.1.9', null, { reached: true, readable: true });
     assert.equal(els['upd-line'].textContent, 'Up to date.');
-    assert.equal(els['upd-btn'].textContent, 'Check now');
+    assert.equal(els['upd-btn'].textContent, 'Check for Update');
     // Reached but unreadable (the captive-portal shape): NEVER up-to-date.
     els = mk();
     paint('0.1.9', null, { reached: true, readable: false, looked: true });
@@ -8445,4 +8459,46 @@ test('a room row on an agent’s page names the project the way a person named i
   } finally {
     fleet.restore();
   }
+});
+
+test('the footer answers only a question that was asked, and never sits on news', () => {
+  /**
+   * 🔑 THE EXEMPTION, PINNED FROM BOTH SIDES. Josh, 2026-08-21: *"Instead of
+   * just saying 'Up to date. [Check Now]' lets say 'Beta Version 0.X.XX [Check
+   * for Update]'"*. So at rest the footer is the version and the control, and
+   * "Up to date." appears once somebody presses the button.
+   *
+   * ⚠️ WITHOUT THIS THE BLANK IS ONLY ALLOWED, not required: the sibling test
+   * above runs with UPD_ASKED true, so a change that made the resting state
+   * speak again would go green there.
+   *
+   * ⚠️ AND THE SECOND HALF KEEPS THE EXEMPTION NARROW. An available update is
+   * news a person needs WITHOUT asking; suppressing that would be hiding news
+   * rather than removing noise, which is the opposite of what was ruled.
+   */
+  const unasked = pageFunction('paintUpdateCard', 'let UPD_CHECKING = false;\nlet UPD_ASKED = false;\n');
+  const mk = () => {
+    const els = {
+      'upd-line': { textContent: '' },
+      'upd-btn': { textContent: '', hidden: true, disabled: false, dataset: {} },
+    };
+    global.document = { getElementById: (id) => els[id] || null };
+    return els;
+  };
+
+  const quiet = mk();
+  unasked('0.1.9', null, { reached: true, readable: true, looked: true });
+  assert.equal(quiet['upd-line'].textContent, '', 'the footer answered a question nobody asked');
+  assert.equal(quiet['upd-btn'].textContent, 'Check for Update');
+  assert.equal(quiet['upd-btn'].hidden, false, 'the control went away with its sentence');
+
+  const news = mk();
+  unasked('0.1.8', { version: '0.1.9' }, { reached: true, readable: true, looked: true });
+  assert.equal(news['upd-line'].textContent, 'Version 0.1.9 is ready.',
+    'an available update stayed silent until it was asked for');
+
+  const broken = mk();
+  unasked('0.1.9', null, { reached: false, looked: true });
+  assert.equal(broken['upd-line'].textContent, 'Could not reach the update server.',
+    'a failure stayed silent until it was asked for');
 });
