@@ -1858,12 +1858,19 @@ test('an agent that will not start takes its trust entry back off the machine wi
   create.setRunner(null);
 });
 
-test('the trust entry a rollback takes back is OURS, never a decision they made', () => {
+test('a rollback leaves a trust decision THEY already made for that same path', () => {
   /**
-   * 🛑 THE CONTROL ON THE UNDO, and it is the half that could do harm. The
-   * rollback removes an entry it created seconds earlier. If it removed one it
-   * found, a failed creation would silently delete somebody's own answer about
-   * a folder Kosmos never made.
+   * 🛑 THE CONTROL ON THE UNDO, and the first version of it could not fail. It
+   * seeded somebody's entry at a DIFFERENT path — which `forgetFolder` would
+   * never touch whatever the guard said, so the test passed with the guard
+   * inverted to `true` and proved nothing.
+   *
+   * The case that actually exercises it: a person trusted this exact folder
+   * once, the folder was later removed, the config entry stayed (Claude Code
+   * never prunes them — 93 dead entries were measured on this machine), and now
+   * the name is created again. `trustFolder` finds it already true and writes
+   * NOTHING, so a rollback that deleted "the entry for our folder" would be
+   * deleting THEIR answer, not ours.
    */
   create.setRunner((file, args) => {
     if (args && args[0] === 'bootstrap') return { ok: false, stderr: 'nope' };
@@ -1871,15 +1878,18 @@ test('the trust entry a rollback takes back is OURS, never a decision they made'
   });
   create.setDryRun(false);
 
-  const theirs = fs.realpathSync(SANDBOX) + '/somewhere-of-their-own';
-  writeCfg({ projects: { [theirs]: { hasTrustDialogAccepted: true, allowedTools: ['Bash(ls:*)'] } } });
+  // Their standing decision about the very path this creation will use.
+  const samePath = nodePath.join(fs.realpathSync(SANDBOX), 'workers', 'trustfix-rollback-two');
+  writeCfg({ projects: { [samePath]: { hasTrustDialogAccepted: true, allowedTools: ['Bash(ls:*)'] } } });
 
   const r = create.createAgent({ ...BINS, name: 'trustfix-rollback-two', role: 'pm' });
-  assert.equal(r.outcome, create.OUTCOME.PARTIAL);
+  assert.equal(r.outcome, create.OUTCOME.PARTIAL, 'the start did not fail, so no rollback ran');
 
   const after = readCfg();
-  assert.deepEqual(Object.keys(after.projects), [theirs], 'the rollback took somebody else’s entry');
-  assert.deepEqual(after.projects[theirs].allowedTools, ['Bash(ls:*)']);
+  assert.deepEqual(Object.keys(after.projects), [samePath],
+    'the rollback deleted a trust decision the person had already made for that folder');
+  assert.equal(after.projects[samePath].hasTrustDialogAccepted, true);
+  assert.deepEqual(after.projects[samePath].allowedTools, ['Bash(ls:*)'], 'and took their other settings with it');
   create.setRunner(null);
 });
 
