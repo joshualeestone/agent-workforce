@@ -1261,6 +1261,13 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    symptom above the fold and not this. */
 .dm.mine .dm-w { text-align: right; }
 .dmnone { font-size: .875rem; color: var(--k-ink-2); margin: 0; }
+/* ⚠️ THE SAME DOTS THE CARD USES, not a second animation: `.act` is the
+   board's working glyph, and a different one here would be two renderings of
+   one fact. It borrows the sibling hint's size and colour so the line reads as
+   a note about the conversation rather than as a message in it. */
+.dmbusy { display: flex; align-items: center; gap: 8px;
+          font-size: .875rem; color: var(--k-ink-2); margin: 10px 0 0; }
+.dmbusy .msg-av { width: 22px; height: 22px; font-size: .625rem; flex: 0 0 auto; }
 .dmoff { margin-top: 12px; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2);
   border-left: 3px solid var(--k-rule); padding-left: 12px; }
 /* ⚠️ The question box is NOT red. It is a thing to answer, not a thing that has
@@ -2660,6 +2667,22 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       </div>
     </div>
     <div class="dmthread" id="d-dmthread"></div>
+    <!-- 🔑 "WORKING", NEVER "TYPING". We can see that Claude is producing
+         output or is mid-task. We CANNOT see WHAT it is working on, and
+         "<name> is typing" claims it is composing a reply to YOU — the same row
+         of chat.js's claim table as "the agent received it", which is marked
+         never. "Working" survives being wrong about the subject; "replying"
+         does not. (Mona Lisa, 2026-08-21.)
+         ⚠️ AND IT IS AN INSTRUMENT HERE, NOT AN AFFORDANCE, which is why the
+         under-claim matters more rather than less. On this box nothing else
+         comes back at all (#175), so a person is reading it as EVIDENCE:
+         working + an empty box is #175 happening in front of them; never
+         working means the message never landed. It separates two failures that
+         look identical, which is what Josh lacked for a day.
+         ⚠️ UNKNOWN SHOWS NOTHING — not working, not idle. An agent we cannot
+         read must not be rendered as either. Same rule as the stale badge and
+         the memory caption. -->
+    <p class="dmbusy" id="d-busy" hidden></p>
     <p class="dhint" id="d-talk-older" style="margin:10px 0 0;" hidden></p>
     <div class="dmoff" id="d-dmoff" hidden></div>
     <div class="frow dmbar">
@@ -2674,6 +2697,24 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <button class="btn" id="d-send" type="button">Send</button>
     </div>
     <p class="fmsg" id="d-say-msg" role="alert" aria-live="assertive"></p>
+    <!-- 🛑 WHERE A REPLY COMES BACK, said because it does not come back HERE.
+         An agent cannot write into this thread: the record has no field for a
+         sender, so every entry in it is the person's message to the agent
+         (#175). The box's own heading says "Just between you and <name>", which
+         describes a two-way place — so somebody says hello, sees the answer in
+         the agent's terminal and nothing here, and waits. That is exactly what
+         happened to Josh on 2026-08-21.
+         ⚠️ THIS FIXES NOTHING. It stops the screen implying a conversation the
+         product cannot hold, and it tells the person where the answer actually
+         is, which is the difference between an admission and a useful one.
+         ⚠️ IT SITS BY THE COMPOSER, NOT AT THE FOOT (Mona Lisa): by the time
+         somebody reaches the bottom of a box they have already decided what it
+         does. The restart note below has been there all along and he never
+         mentioned it.
+         ⚠️ "FOR NOW" IS THE HOUSE FORM, checked rather than invented — Settings
+         already says "One account for now. Connecting another is not built
+         yet." It says the limit is known, not that they are holding it wrong. -->
+    <p class="dhint" id="d-reply-where" style="margin:8px 0 0;"></p>
     <!-- ⚠️ THE THREAD PERSISTS, THE AGENT'S RECOLLECTION DOES NOT, and a chat
          window normally conflates the two. The pack's sentence, verbatim. -->
     <p class="dhint" id="d-persist" style="margin:12px 0 0;"></p>
@@ -3979,7 +4020,24 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <h3 class="dlab">Engineering mode</h3>
       <div class="setrow" id="eng-row">
         <div><b>Show the window each agent is running in</b>
-          <p class="dhint" style="margin:2px 0 0;">Off by default. Your chat shows what an agent says to you. Turn this on to watch the session underneath it.</p></div>
+          <!-- 🛑 "Your chat shows what an agent says to you" WAS HERE AND IT IS
+               FALSE OF THE DIRECT BOX. An agent cannot write into that thread
+               at all (#175), so a person read this row, believed the chat would
+               carry the answer, and waited.
+               ⚠️ IT SURVIVED BECAUSE IT IS HALF TRUE: agents really do post
+               into a project ROOM, and this screen is global — it cannot know
+               which surface you mean, so it generalised from the case that
+               works. Same shape as the day's other findings: a claim that holds
+               where it was written and is wrong one object over.
+               🔑 DROPPED RATHER THAN CORRECTED (Mona Lisa, 2026-08-21). The
+               sentence was doing a reassurance job — "you do not need this" —
+               by asserting something false, and the honest version of that
+               reassurance would have to describe the direct box's limitation
+               here, far from where it bites. The composer line already does
+               that work at the point of use, and a limitation stated far from
+               where it applies is decoration. So the row goes back to its own
+               job: what the toggle does, and why it is off. -->
+          <p class="dhint" style="margin:2px 0 0;">Off by default. It shows the raw session an agent is running in, which most people never need to see.</p></div>
         <button class="toggle" id="eng-toggle" role="switch" aria-checked="false" aria-label="Show the window each agent is running in"><i></i></button>
       </div>
       <p class="dhint" id="eng-msg" role="status" style="margin:8px 0 0;"></p>
@@ -5154,6 +5212,10 @@ async function tick() {
           && !document.getElementById('panel-detail').hidden) {
         paintTalk(CURRENT.sessionName, CURRENT.name);
       }
+      /* ⚠️ OFF THE SAME `fresh` LOOKUP the box above rides, deliberately: a
+         second find() for the same card is the one-fact-two-derivations habit
+         this file keeps paying for. */
+      paintBusy(fresh, CURRENT.name);
       /* The same tab gate as the poll above, for the same reason: this is a
          capture-pane every five seconds. Engineering mode is off by default so
          the exposure is narrower, but the rule the comment above states does
@@ -6103,6 +6165,36 @@ function memoryBox(a) {
    card()/lrow() so the grammar is drivable without a server. The engine's
    because sentences ship VERBATIM -- they were written for a person, and
    paraphrasing an engine sentence is how two surfaces drift. */
+/**
+ * "<name> is working…", or nothing.
+ *
+ * ⚠️ NOTHING IS THE DEFAULT, and it is the honest one: an agent we could not
+ * read, an agent that is gone, and a poll that has not landed yet all render
+ * empty rather than guessing. Only a card that positively says `working`
+ * produces the line.
+ */
+function paintBusy(fresh, name) {
+  const el = document.getElementById('d-busy');
+  if (!el) return;
+  const busy = !!(fresh && fresh.state === 'working');
+  el.hidden = !busy;
+  if (!busy) { el.innerHTML = ''; return; }
+  /* ⚠️ THE SAME AVATAR THE CARD DRAWS, off the same route, with the same
+     initials fallback — Josh asked for the face and a second way of drawing one
+     would drift from the board's. `aria-hidden` because the sentence beside it
+     already names the agent, and a screen reader should not hear the name
+     twice. */
+  const who = name || (fresh && fresh.name) || 'This agent';
+  const face = (fresh && fresh.hasAvatar)
+    ? '<div class="msg-av" aria-hidden="true"><img src="/api/agent/'
+      + encodeURIComponent(fresh.sessionName) + '/avatar" alt=""></div>'
+    : '<div class="msg-av" aria-hidden="true" style="background:' + discTint(who)
+      + ';color:' + discInk(who) + '">' + esc(initials(who)) + '</div>';
+  el.innerHTML = face
+    + '<span class="act" aria-hidden="true"><i></i><i></i><i></i></span>'
+    + '<span>' + esc(who) + ' is working…</span>';
+}
+
 function convoRow(r, agentName) {
   if (r.kind === 'valve') {
     // The ROOM's closing first: its `to` is the project id, not an agent,
@@ -6553,6 +6645,18 @@ async function paintTalk(sessionName, agentName) {
   document.getElementById('d-talk-label').textContent = 'Talk to ' + name;
   document.getElementById('d-talk-hint').textContent =
     'Just between you and ' + name + '. Nothing here belongs to a project.';
+  /* ⚠️ WRITTEN WITH THE LABEL, not on the fetch's success path, for the reason
+     the comment below gives: whether a line names the right agent does not
+     depend on the fetch, and one set on the success path carries the PREVIOUS
+     agent's name on a borrowed-name pane, which returns early.
+     ⚠️ THAT COMMENT STATES A TWO-PART RULE — "THE TEXT HERE, THE VISIBILITY ON
+     THE SUCCESS PATH" — and this line now obeys both: the text is written here,
+     and whether it may be SHOWN is decided after the answer arrives, beside the
+     persistence line's own decision. An earlier version did the text half and
+     cited the whole rule. */
+  document.getElementById('d-reply-where').textContent =
+    name + ' will see this in their own window. Replies come back there rather '
+    + 'than here, for now.';
   /* ⚠️ THE TEXT HERE, THE VISIBILITY ON THE SUCCESS PATH, and the first
      version of this fix got that backwards. Whether the line says the right
      agent's name does not depend on the fetch, so it is written with the other
@@ -6637,6 +6741,13 @@ async function paintTalk(sessionName, agentName) {
        four that name the agent) precisely because it does not depend on the
        answer -- but "there is a box that keeps things" does. */
     document.getElementById('d-persist').hidden = true;
+    /* ⚠️ AND THE REPLY-LOCATION LINE, WHICH IS THE SAME CONTRADICTION AGAIN,
+       reintroduced two elements above the comment that records fixing it. "Dan
+       will see this in their own window" is a promise about an agent, printed
+       under a sentence saying we cannot resolve that agent at all. Written
+       before the fetch for the reason above; HIDDEN here for the reason the
+       persistence line is. */
+    document.getElementById('d-reply-where').hidden = true;
     document.getElementById('d-say').disabled = true;
     document.getElementById('d-send').disabled = true;
     /* The section itself, never the composer this arm just closed: the
@@ -6829,6 +6940,10 @@ async function paintTalk(sessionName, agentName) {
      talk-9-unfilable shows it happening. The thread arm already splits on this
      fact; the promise splits with it. */
   document.getElementById('d-persist').hidden = body.historyUnfilable === true;
+  /* ⚠️ AND THE SAME RESET FOR THE REPLY-LOCATION LINE, for the reason above:
+     the 404 arm hides it, the element is reused, and without this a borrowed
+     name once opened would silence the line for every agent after it. */
+  document.getElementById('d-reply-where').hidden = false;
   /**
    * ⚠️ THE BUTTONS DIE WITH THE COMPOSER (Mona Lisa, state 6). A live option
    * above a closed box promises a route that is shut, which is the same lie as
@@ -7028,10 +7143,28 @@ async function paintTalk(sessionName, agentName) {
     off.textContent = 'We could not check whether ' + name + ' is running. '
       + 'You can still send this, and we will tell you if it did not land.';
     off.hidden = false;
+    /* ⚠️ UNSURE KEEPS THE LINE. This arm says we could not CHECK, and then says
+       "you can still send this" — so the composer is live and where an answer
+       would come back is exactly what a person needs. The off arm above is
+       different in kind: there the window itself is the thing we cannot reach. */
   } else {
     off.textContent = '';
     off.hidden = true;
   }
+  /* 🛑 ONE PLACE DECIDES WHETHER THE REPLY-LOCATION LINE SHOWS, and it is here
+     rather than in each arm. Hiding it in a branch without a matching un-hide
+     is how a line disappears for the REST OF THE SESSION: the element is reused
+     across agents, so a refusal on one leaves it hidden on the next, and
+     "absent" is indistinguishable from "we decided not to say it".
+     ⚠️ THE CONDITION IS `presence === 'off'` because every reason that arm
+     prints is about the WINDOW — "its window is scrolled back", "there is no
+     Claude running in its window", "we cannot reach its window" — and this line
+     says the answer arrives in that window. The screen would otherwise state
+     the window is unreachable and that the reply comes back through it, at the
+     same time.
+     ⚠️ An earlier version also hid it inside that arm, which was two
+     derivations of one decision — the habit this file pays for most. */
+  document.getElementById('d-reply-where').hidden = body.presence === 'off';
   /**
    * ⚠️ THE BOX STAYS TYPEABLE WHILE A SEND IS IN FLIGHT, and only the button
    * goes dead — the room's split, for the room's reason: a flight can honestly
@@ -7302,6 +7435,11 @@ function openDetail(sessionName) {
   if (!a) return;
   CURRENT = a;
   document.getElementById('d-name').textContent = a.name;
+  /* ⚠️ ON OPEN AS WELL AS ON THE POLL. Painted only by the poll, the line is
+     absent for up to five seconds after somebody opens the page — which is
+     exactly the moment they are looking, and an empty box with no indicator
+     reads as "nothing is happening" rather than "we have not checked yet". */
+  paintBusy(a, a.name);
   /* ⚠️ The machine-name disclosure moved HERE from the card (Mona Lisa's
      catch on the stage-3 pair, 2026-08-17): the pack records Josh's
      audience ruling against machine-name talk on the card, and the pack's
