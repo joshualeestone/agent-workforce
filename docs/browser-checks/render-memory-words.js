@@ -52,9 +52,19 @@ const agent = (name, context) => ({
   context, instructions: { staleness: 'current' },
 });
 
+/* 🛑 ALL THREE BRANCHES, and the version with two reported a pass for a caption
+   that broke its own rules. `memUnknown` grew a third arm for a reading we took
+   but cannot scale; the check had no fixture for it, so the longest caption in
+   the product was the one never drawn. Measured when it finally was: 90px on an
+   82px gauge, 90px inside an 88px avatar, and the list bar squeezed to 18px
+   against this file's own 24px threshold.
+   ⚠️ A CHECK IS ONLY AS WIDE AS ITS FIXTURES, which is obvious and was still
+   missed, because the branch was added to the page and not to the list here. */
 const FIXTURES = [
   agent('brandnew', { tokens: null, percent: null, notYet: true, because: 'it has not started a session yet' }),
   agent('unreadable', { tokens: null, percent: null, notYet: false, because: 'could not read the transcript' }),
+  agent('nolimit', { tokens: 42000, percent: null, noCeiling: true, notYet: false,
+    because: 'measured, but we do not know how much this model can hold' }),
   // ⚠️ THE POSITIVE CONTROL, and it is not decoration: every assertion below is
   // about a caption that IS drawn. A page that stopped drawing cards would
   // satisfy "nothing overflows" perfectly.
@@ -170,7 +180,7 @@ const FIXTURES = [
 
   const problems = [];
   const captions = out.cards.filter((r) => r.caption !== null);
-  if (captions.length !== 2) problems.push(`expected two card captions and drew ${captions.length}`);
+  if (captions.length !== 3) problems.push(`expected three card captions and drew ${captions.length}`);
   if (out.cards.some((r) => r.who === 'measured' && r.caption !== null)) {
     problems.push('a measured agent drew an unknown caption, so the fixtures distinguish nothing');
   }
@@ -184,7 +194,7 @@ const FIXTURES = [
   }
 
   const worded = out.rows.filter((r) => r.caption && !/%$/.test(r.caption));
-  if (worded.length !== 2) problems.push(`expected two worded list rows and drew ${worded.length}`);
+  if (worded.length !== 3) problems.push(`expected three worded list rows and drew ${worded.length}`);
   for (const r of worded) {
     if (!r.visible) problems.push(`list row "${r.caption}" is not visible`);
     if (r.rowOverflow > 0) problems.push(`list row "${r.caption}" runs past the end of its row by ${r.rowOverflow}px`);
@@ -192,13 +202,19 @@ const FIXTURES = [
     // cell grows and the flex bar beside it shrinks.
     if (r.barW < 24) problems.push(`list row "${r.caption}" squeezed the bar to ${r.barW}px`);
     if (!/[a-z]/.test(r.vh)) problems.push(`list row "${r.caption}" has no spoken sentence in its .vh span`);
-    /* ⚠️ AIMED AT THE COMPOSED STRING. A guard on the suffix alone missed both
-       versions of this defect: " memory" announced as "Not yet read memory",
-       and " memory: Nothing has been recorded…" announced as that plus a
-       sentence restating the fact. The symptom is in what gets SAID. */
-    const words = r.spoken.toLowerCase().split(/[^a-z]+/).filter(Boolean);
-    if (new Set(words).size !== words.length) {
-      problems.push(`list row speaks as "${r.spoken}", which repeats itself`);
+    /* ⚠️ AIMED AT THE COMPOSED STRING, and the version before this caught
+       NEITHER of the two defects its own comment named. It looked for a
+       repeated word: "Not yet read memory" has no repeat, and
+       "Not yet read memory: Nothing has been recorded for it so far." has none
+       either — twelve distinct words and a full stop. It passed both.
+       🔑 WHAT ACTUALLY WENT WRONG BOTH TIMES was the spoken cell saying MORE
+       than the visible word plus its noun: the first added a claim by
+       juxtaposition, the second appended a whole second sentence. So the rule
+       is a length one — the cell is the word and a short noun phrase, nothing
+       else — which is checkable and is what was violated. */
+    const extra = r.spoken.toLowerCase().replace(r.caption.toLowerCase(), '').trim();
+    if (extra.split(/\s+/).filter(Boolean).length > 3) {
+      problems.push(`list row speaks as "${r.spoken}", which says more than the word and a noun`);
     }
     if (!/[.!?]$/.test(r.spoken)) problems.push(`list row speaks as "${r.spoken}", which is not a sentence`);
   }
@@ -217,5 +233,5 @@ const FIXTURES = [
     for (const p of problems) console.error('  - ' + p);
     process.exit(1);
   }
-  console.log('render-memory-words: both captions fit and are visible on the card, the list row and the detail header.');
+  console.log('render-memory-words: all three captions fit and are visible on the card, the list row and the detail header.');
 })();

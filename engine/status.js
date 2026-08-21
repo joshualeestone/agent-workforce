@@ -1386,15 +1386,20 @@ function readContext(agentName, model, exactSession) {
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'could not read the transcript' };
   }
   if (text === '') {
-    // ⚠️ AN EMPTY TRANSCRIPT IS AS LIKELY A COMPACTION AS A BIRTH. Claude Code
-    // opens a FRESH file when it compacts, so an agent that just filled its
-    // context is indistinguishable from one that has never run. Separating them
-    // needs the agent's age, which is the threshold this change refused — so,
-    // by the same rule, the admission. Unconditionally: an earlier version made
-    // this depend on whether the pane looked like Claude, which just moved the
-    // guess somewhere harder to see.
+    // ⚠️ AN EMPTY FILE IS NOT EVIDENCE THE AGENT IS NEW. It is evidence about
+    // the FILE: a write that failed, a file truncated to zero, a path we
+    // resolved to the wrong place, or a session whose first line has not landed
+    // yet. Only the last of those is "nothing recorded yet", and nothing here
+    // separates them, so the admission.
+    //
+    // ⚠️ AN EARLIER VERSION OF THIS COMMENT SAID "Claude Code opens a FRESH file
+    // when it compacts", and that is FALSE on this machine — compact summaries
+    // are appended mid-file (measured: `isCompactSummary` rows at lines 3682 and
+    // 7579 of a 9575-line transcript). The verdict was right and the reason was
+    // invented, which is worse than a wrong verdict: it would have been believed
+    // and reused.
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
-             because: 'its transcript is empty, which happens right after it compacts as well as at the start' };
+             because: 'its transcript is empty, which tells us about the file rather than the agent' };
   }
 
   const usages = [...text.matchAll(/"usage":\{([^}]*)\}/g)];

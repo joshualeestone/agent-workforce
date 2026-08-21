@@ -1689,7 +1689,7 @@ test('a registry entry whose transcript is GONE is unknown, not "not yet"', () =
   assert.equal(ctx.notYet, false, 'a transcript that disappeared was reported as one never written');
 });
 
-test('an EMPTY transcript is UNKNOWN, running or not, because compacting looks the same', () => {
+test('an EMPTY transcript is UNKNOWN, because an empty file says nothing about the agent', () => {
   /**
    * ⚠️ THE WORSE OF THE TWO COLLAPSES. `tailBytes` returns '' for a file that
    * is there and empty, and null when the read threw; the caller tested
@@ -1711,13 +1711,15 @@ test('an EMPTY transcript is UNKNOWN, running or not, because compacting looks t
     fs.writeFileSync(transcript, '', 'utf8');
   });
   assert.equal(ctx.percent, null);
-  assert.equal(ctx.notYet, false, 'an agent that just compacted was told nothing had ever been recorded');
-  assert.match(ctx.because, /compacts/);
+  assert.equal(ctx.notYet, false, 'an empty file was read as evidence the agent is new');
+  /* ⚠️ THE ASSERTION USED TO PIN A FALSE EXPLANATION — /compacts/ — which made
+     a wrong premise a suite invariant: correcting the sentence would have
+     broken a green test. It pins the SHAPE of the answer instead. */
+  assert.match(ctx.because, /empty/);
 
   // ⚠️ AND WITH THE PANE AT A SHELL TOO. An earlier version made this arm
   // depend on whether the pane looked like Claude, which only moved the guess
-  // somewhere harder to see: an agent that compacted and then crashed is in the
-  // identical indistinguishable state.
+  // somewhere harder to see.
   const idle = contextFor('justopened-idle', ({ transcript, write }) => {
     write();
     fs.writeFileSync(transcript, '', 'utf8');

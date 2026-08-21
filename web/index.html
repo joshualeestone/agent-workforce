@@ -4345,8 +4345,18 @@ function memUnknown(ctx) {
      feeding a garbage percent with tokens intact. Two different states, one
      observable, which is the whole class this change is about. */
   if (ctx && ctx.noCeiling === true) {
+    /* ⚠️ THE SAME WORD AS THE ADMISSION, DELIBERATELY, AND THE FIRST VERSION OF
+       THIS BRANCH INVENTED A THIRD ONE. "No limit known" is 90px: it hangs off
+       an 82px gauge, escapes the detail header's 88px avatar, and squeezes the
+       list row's bar to 18px — past this file's own failure threshold. The
+       browser check did not catch it because it had no fixture for the branch,
+       so a caption that breaks its rules reported a pass.
+       🔑 AND THE WORD WAS NEVER THE FALSE PART. At a glance the fact is the
+       same in both branches: there is no percentage. "Unknown" says that and is
+       true here. What was false was the SENTENCE — "memory could not be read"
+       about a reading we took — and the sentence is what this branch changes. */
     return { notYet: false,
-             word: 'No limit known',
+             word: 'Unknown',
              aria: 'Memory was read; this model’s size is not known here.',
              lead: 'memory was read, but we do not know what this model can hold.',
              note: 'The reading is real. Turning it into a percentage needs the model’s size, which we do not have.' };
