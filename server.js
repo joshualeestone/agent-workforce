@@ -1765,7 +1765,10 @@ const server = http.createServer((req, res) => {
           // stopped defaults TRUE for rows that predate the field: every
           // valve row logged before the person's control existed was a
           // refusal, and rendering one as told-only would rewrite history.
+          /* Same split as the post row above: the id for the machine, the name
+             for the sentence. This row reads "The conversation on <project>". */
           rows.push({ kind: 'valve', from: m.from, to: m.to, project: m.project || null,
+            projectName: (m.project && PROJECT_NAMES.get(m.project)) || null,
             stopped: m.stopped !== false, at: m.at });
         } else if (m.kind === 'refused') {
           rows.push({ kind: 'refused', from: m.from, to: m.to, because: m.because || null, at: m.at });

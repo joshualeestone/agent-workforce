@@ -8405,6 +8405,13 @@ test('a room row on an agent’s page names the project the way a person named i
   assert.doesNotMatch(named, /aug21404pm/,
     'the slug reached the sentence beside the name');
 
+  /* The valve row is the same sentence class on the same screen. */
+  const valve = convoRow({ kind: 'valve', from: 'heather', to: 'aug21404pm', project: 'aug21404pm',
+    projectName: 'Aug 21 4:04 PM', stopped: true, at: 'x' }, 'marilyn');
+  assert.match(valve, /The conversation on Aug 21 4:04 PM/,
+    'the valve row showed the project’s slug in a sentence');
+  assert.doesNotMatch(valve, /aug21404pm/, 'the slug reached the valve sentence');
+
   /* 📌 THE FALLBACK IS THE ID, never a hole: a post whose project the agent has
      since left carries no name, and an empty "to everyone on" would be worse
      than an ugly one. */

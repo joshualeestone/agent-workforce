@@ -6275,7 +6275,11 @@ function convoRow(r, agentName) {
     const told = r.stopped === false;
     if (r.project) {
       return '<div class="cvrow valve peer"><span class="cv-who">Kosmos</span><p>'
-        + 'The conversation on ' + esc(r.project)
+        /* The name, falling back to the id — same rule as the room row below.
+           ⚠️ The neighbouring operator row does NOT need this: its route sends
+           `project: pr.name` already, and "fixing" it would have been a change
+           made against a defect that was not there. */
+        + 'The conversation on ' + esc(r.projectName || r.project)
         + (told
           ? ' has gone back and forth for a while without landing. Kosmos did not step in, because you have the limit turned off.'
           : ' went back and forth for a while without landing, so Kosmos stopped it and asked everyone to bring you in.')
