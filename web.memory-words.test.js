@@ -145,7 +145,11 @@ test('no surface still hardcodes the old word, ANYWHERE EXCEPT the one place tha
      code, and over-stripping buys a FALSE PASS, which is the direction a check
      must never fail in. */
   const codeOnly = elsewhere.replace(/\/\*[\s\S]*?\*\//g, ' ');
-  for (const literal of ['>Unknown<', "'Unknown'", '"Unknown"']) {
+  /* ⚠️ BOTH WORDS, not just the old one. Pinning only "Unknown" left the new
+     word free to be hardcoded on a surface, which is the same drift with a
+     different string. */
+  for (const literal of ['>Unknown<', "'Unknown'", '"Unknown"',
+                         '>Not yet read<', "'Not yet read'", '"Not yet read"']) {
     const hits = codeOnly.split(literal).length - 1;
     assert.equal(hits, 0, `${literal} is still rendered somewhere instead of memUnknown().word`);
   }
@@ -159,7 +163,10 @@ test('no surface still hardcodes the old word, ANYWHERE EXCEPT the one place tha
   // ⚠️ THE CONTROL: the same search INSIDE the derivation must find it, or the
   // slice above is cutting out more than it should and the zero means nothing.
   const owned = PAGE.slice(at, end);
+  /* ⚠️ AND THE CONTROL COVERS BOTH LITERALS, so a zero count for either one is
+     provably findable rather than provably absent from a badly-cut slice. */
   assert.equal(owned.split("'Unknown'").length - 1, 1, 'the derivation no longer holds the word, so the exclusion above is hiding it');
+  assert.equal(owned.split("'Not yet read'").length - 1, 1, 'the derivation no longer holds the new word either');
 });
 
 test('the Memory box sentence reads as English after the name it follows', () => {
@@ -175,8 +182,13 @@ test('the Memory box sentence reads as English after the name it follows', () =>
   for (const notYet of [true, false]) {
     const u = memUnknown({ notYet });
     const sentence = 'Dan\u2019s ' + u.lead;
-    assert.match(sentence, /^Dan\u2019s (memory|[a-z]+ )/, `reads wrong after a possessive: "${sentence}"`);
-    assert.doesNotMatch(sentence, /\u2019s (has|is|does|will|can)\b/, `a verb directly after the possessive: "${sentence}"`);
+    /* ⚠️ THE NOUN, NOT "a lowercase word". The first version read
+       `/^Dan\u2019s (memory|[a-z]+ )/`, and `[a-z]+ ` matches "has " — so the
+       exact string in the docblock above, the bug this test was written for,
+       PASSED it. All the work was being done by a five-verb denylist, which
+       "Dan's shows nothing yet" walks straight past. A possessive needs a noun
+       after it, and the noun here is always the same one. */
+    assert.match(sentence, /^Dan\u2019s memory\b/, `reads wrong after a possessive: "${sentence}"`);
     assert.match(u.lead, /\.$/, 'the lead is a sentence and must end like one');
     assert.match(u.note, /\.$/);
   }
