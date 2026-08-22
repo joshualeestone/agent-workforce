@@ -524,7 +524,12 @@ select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
    appearance PRINTED that 307px width and I read past it, because the check was
    asserting the property being fixed and was blind to the property being
    broken. */
-#create-model, #pj-one-add, #pj-thread-who { flex: 1; min-width: 220px; }
+/* ⚠️ `#create-account` JOINS THIS LIST RATHER THAN GETTING ITS OWN RULE. Left
+   out, it sized to its longest option and sat visibly narrower than the Model
+   select directly above it -- two adjacent controls doing the same job at two
+   different widths, which reads as one of them being broken. The list is the
+   rule; a new member joins it. */
+#create-model, #create-account, #pj-one-add, #pj-thread-who { flex: 1; min-width: 220px; }
 .btn { font: var(--text-body) var(--font-ui); padding: var(--space-4) var(--space-5);
        border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
        background: var(--bg); color: var(--label); cursor: pointer; }
@@ -3637,9 +3642,16 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          who has none to make, and it lands in the middle of the one flow a
          first-time person walks. It appears the moment a second account is
          signed in.
-         🔑 AND IT IS THE LAST FIELD BEFORE MODEL FOR THE PACK'S REASON: the
-         form's order is a sentence, who is this agent, what does it do, where
-         does it work, and only then the technical choices. -->
+         🔑 IT SITS WITH MODEL, AFTER IT, and that is deliberate rather than
+         where it landed. An earlier version of this comment claimed it was the
+         last field BEFORE model, and it was not: measuring the rendered page
+         put it 85px below. The measurement is the better arrangement, so the
+         comment moved rather than the field. The pack's rule is that the form
+         reads as a sentence ending in the technical choices, and which account
+         an agent runs on IS one of those -- the agent's own page groups model
+         and account in a single "Runs on" box for the same reason. Two screens
+         that group the same pair the same way cannot teach a person two
+         different mental models. -->
     <div class="field" id="create-account-wrap" hidden>
       <label class="flabel" for="create-account">Claude account</label>
       <div class="frow">
