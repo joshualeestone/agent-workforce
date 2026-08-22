@@ -4636,9 +4636,25 @@ function memUnknown(ctx) {
        require knowing an age is simply not offered. */
     ? { notYet: true,
         word: 'Not yet read',
-        aria: 'Nothing has been recorded for it so far.',
+        aria: 'Nothing has been recorded for it so far. It fills once the agent has done something.',
         lead: 'memory has nothing recorded yet.',
-        note: 'Nothing here can tell you how much room is left.' }
+        /**
+         * 🔑 IT SAYS WHAT FILLS IT. Josh, 2026-08-22, having just watched a
+         * correct sentence leave him nowhere: *"she came up after i had to
+         * directly message her… there's got to be something to kick it off;
+         * otherwise it just looks like it's still broken and busted."*
+         *
+         * ⚠️ THE PREVIOUS NOTE WAS TRUE AND USELESS, which is a rung this
+         * codebase has a name for: does it lie, does it admit the gap, can the
+         * person ACT on it. "Nothing here can tell you how much room is left"
+         * clears the second and stops. A restarted agent hits this every time,
+         * and restart shipped today, so this is the common path now.
+         *
+         * 📌 IT DOES NOT PROMISE A NUMBER. "It fills once it has done
+         * something" is true whatever the agent does next; "send a message and
+         * the ring appears" would be a claim about a reading we have not taken.
+         */
+        note: 'It fills once they have done something. Nothing here can tell you how much room is left until then.' }
     : { notYet: false,
         word: 'Unknown',
         /**
@@ -9564,6 +9580,24 @@ document.getElementById('d-model-go').addEventListener('click', async () => {
     msg.textContent = out.because || 'Changed.';
     sel.value = '';
     await tick();
+    /**
+     * 🔑 THE CURSOR GOES WHERE THE NEXT ACTION IS. A restarted agent has done
+     * nothing, so every reading on this page is empty until somebody speaks to
+     * it — which Josh read as the change having failed. The sentence above says
+     * so; this puts the caret in the box that fixes it.
+     *
+     * ⚠️ FOCUS, NOT A SENT MESSAGE. Kosmos could wake the agent itself and the
+     * ring would fill without anybody asking — and it would be Kosmos putting
+     * words in a person's mouth, on their quota, to an agent that would act on
+     * them. The nudge stops at the caret.
+     *
+     * 📌 Guarded: the box only exists for an agent whose page is open, and a
+     * failed focus must never take down the verdict that has just been shown.
+     */
+    try {
+      const say = document.getElementById('d-say');
+      if (say && !say.disabled) say.focus();
+    } catch { /* the sentence stands on its own */ }
   } catch (err) {
     msg.textContent = err.message;
   } finally {

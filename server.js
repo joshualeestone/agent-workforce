@@ -1204,7 +1204,11 @@ const server = http.createServer((req, res) => {
           outcome: ok ? 'changed' : 'partial',
           model: wrote.model,
           because: ok
-            ? `${wrote.model.label} it is. It is starting again now.`
+            /* 🔑 IT NAMES THE NEXT ACTION. A restarted agent has done nothing,
+               so every reading on its page reads as empty until somebody speaks
+               to it — and Josh read that as the change having failed, twice.
+               Saying so here is cheaper than a person discovering it. */
+            ? `${wrote.model.label} it is. It is starting again now, and it will look idle until you say something to it.`
             /* ⚠️ The file is already written, so this says what is TRUE: the
                choice is saved and the agent has not picked it up yet. */
             : `We saved ${wrote.model.label}, but could not start it again: ${back.because} `
