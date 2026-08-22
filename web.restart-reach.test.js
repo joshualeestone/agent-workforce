@@ -96,18 +96,31 @@ test('the message goes where the button says, not where one of the two layouts p
   assert.match(src, /instr-restart-note/, 'the stale notice lost its message element');
 });
 
-test('the panel control gives a receipt, because nothing else on it changes', () => {
-  /* ⚠️ THE NOTICE DELIBERATELY HAS NO SUCCESS SENTENCE: its receipt is that it
-     disappears, which is truer than a line claiming it worked. The panel
-     control does not disappear, so without a sentence its success and its
-     silent failure are the same picture. Same rule, opposite conclusion. */
-  const src = SCRIPT.slice(SCRIPT.indexOf("closest('[data-restart-agent]')"));
+test('a refusal stays in the dialog and a success reports on the control that opened it', () => {
+  /* ⚠️ TWO SURFACES, TWO DESTINATIONS, and both were once one. The engine
+     refuses a restart with a sentence naming the reason and the remedy
+     ("was not started by Kosmos, so we cannot start it again"). Closing the
+     dialog first would put that sentence on a surface the person has already
+     looked away from, so the refusal stays where they are looking.
+
+     The receipt goes the other way. The dialog closes on success, so a
+     sentence written into it would vanish with it; it lands on the control
+     that opened it, which is still there. The stale-instructions notice needs
+     no receipt at all because its receipt is DISAPPEARING, and the shared
+     lookup handles both. */
+  const src = SCRIPT.slice(SCRIPT.indexOf("getElementById('rst-go').addEventListener"));
   const body = src.slice(0, src.indexOf('\n});'));
+  assert.match(body, /getElementById\('rst-msg'\)\.textContent/,
+    'a refused restart says nothing in the dialog the person is looking at');
   assert.match(body, /Restarted\./, 'a successful restart says nothing anywhere');
-  assert.match(body, /noteFor\(btn\)/g, 'the receipt does not use the shared lookup');
-  assert.ok((body.match(/noteFor\(btn\)/g) || []).length >= 2,
-    'only one of the two outcomes reports through the shared lookup');
+  assert.match(body, /noteFor\(btn\)/, 'the receipt does not use the shared lookup');
+  assert.match(body, /closeRestartModal\(\)/, 'the dialog stays open after a successful restart');
+  /* The order matters: the receipt is written BEFORE the close, because the
+     close returns focus and a write after it would race that. */
+  assert.ok(body.indexOf('noteFor(btn)') < body.indexOf('closeRestartModal()'),
+    'the receipt is written after the dialog closes');
 });
+
 
 test('the consequence is named before the click, not after it', () => {
   /* Josh has twice read a restarted agent's empty memory as the product being
