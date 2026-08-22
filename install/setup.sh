@@ -1948,16 +1948,40 @@ if [ "$_board_ok" = yes ]; then
   # every login from a tree the harness deleted.
   if [ -z "${AGENT_WORKFORCE_LAUNCH:-}" ]; then
     _uid="$(/usr/bin/id -u)"
-    # enable BEFORE bootout, the order the uninstall path above documents: a
-    # `launchctl disable` from any earlier life writes a per-user override
-    # keyed on the label that outlives the plist, and bootstrapping into a
-    # standing disable succeeds and starts nothing.
-    /bin/launchctl enable "gui/$_uid/$_board_label" 2>/dev/null || true
-    /bin/launchctl bootout "gui/$_uid/$_board_label" 2>/dev/null || true
-    # RunAtLoad means this bootstrap also runs `kosmos start`, which finds the
-    # board this installer started a moment ago and says so. Idempotent by
-    # construction rather than by being careful about ordering.
-    /bin/launchctl bootstrap "gui/$_uid" "$_board_plist" 2>/dev/null || true
+    # 🛑 AN ALREADY-LOADED JOB IS LEFT ALONE, AND THE FIRST VERSION OF THIS
+    # BOOTED IT OUT FIRST. That is a real hazard rather than churn, and it is in
+    # code that shipped an hour before this comment.
+    #
+    # An update is run BY THE BOARD: `engine/update.js` spawns the installer as
+    # a detached child of the running server. Once the board is a launchd job,
+    # `bootout` terminates that job — the board, and every process launchd
+    # associates with it — while this script is a descendant of it. The child is
+    # `setsid`-ed, so it very likely survives; "very likely" is not a property
+    # to rest an update path on, and the failure mode is the worst kind: the
+    # bootout lands, the shell dies before `bootstrap` runs, and the machine is
+    # left with the job booted out and no board at all until the next login.
+    #
+    # 🔑 AND NOTHING IS LOST BY SKIPPING IT. The plist on disk is already
+    # rewritten above; a loaded job keeps its old definition only until the next
+    # login, and this file's content does not change between versions. Reloading
+    # it buys a definition refresh nobody needs, at the cost of killing the
+    # board that is running the update.
+    #
+    # ⚠️ `print` IS THE PROBE, not `list`: it is the one `engine/create.js`
+    # already uses to ask whether a label is loaded, and it fails for every free
+    # name by design.
+    if /bin/launchctl print "gui/$_uid/$_board_label" >/dev/null 2>&1; then
+      : # already registered; the rewritten file is picked up at the next login
+    else
+      # enable BEFORE bootstrap, the order the uninstall path above documents: a
+      # `launchctl disable` from any earlier life writes a per-user override
+      # keyed on the label that outlives the plist, and bootstrapping into a
+      # standing disable succeeds and starts nothing.
+      /bin/launchctl enable "gui/$_uid/$_board_label" 2>/dev/null || true
+      # RunAtLoad means this bootstrap also runs `kosmos start`, which finds the
+      # board this installer started a moment ago and says so.
+      /bin/launchctl bootstrap "gui/$_uid" "$_board_plist" 2>/dev/null || true
+    fi
   fi
   info "Kosmos will start itself when you log in"
   ok

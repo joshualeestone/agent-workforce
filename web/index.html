@@ -11293,9 +11293,14 @@ async function paintSurvival() {
   wrap.hidden = false;
   wrap.innerHTML = '<div class="pj-empty boardfail">'
     + '<p><b>' + esc(survivalSay(body.missing.length)) + '</b><br>'
-    + 'Nothing on this computer starts them when you log in, so they last only '
-    + 'as long as the session they are running in. Their folders and everything '
-    + 'they remember are untouched either way.</p>'
+    /* ⚠️ NOT "the session they are running in" (Mona Lisa). A session is a
+       component whose existence is our design decision: a person cannot see
+       one, count one, or act on one. They can act on "when this computer
+       stops", which is the same fact in a noun they already own. Same finding
+       as the word for our terminal manager reaching a refusal an hour before. */
+    + 'Nothing on this computer starts them when you log in, so they stop when '
+    + 'it does. Their folders and everything they remember are untouched '
+    + 'either way.</p>'
     + '<p class="dhint">' + names + '</p>'
     + '<button class="btn" type="button" data-survival-fix>Set them to start at login</button>'
     + '</div>';
