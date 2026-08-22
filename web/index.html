@@ -3632,6 +3632,22 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       </div>
     </div>
 
+    <!-- ⚠️ HIDDEN WHEN THERE IS ONLY ONE ACCOUNT, which is most machines. A
+         field whose menu has a single entry is a decision presented to somebody
+         who has none to make, and it lands in the middle of the one flow a
+         first-time person walks. It appears the moment a second account is
+         signed in.
+         🔑 AND IT IS THE LAST FIELD BEFORE MODEL FOR THE PACK'S REASON: the
+         form's order is a sentence, who is this agent, what does it do, where
+         does it work, and only then the technical choices. -->
+    <div class="field" id="create-account-wrap" hidden>
+      <label class="flabel" for="create-account">Claude account</label>
+      <div class="frow">
+        <select id="create-account"></select>
+      </div>
+      <div class="fhint">Everything this agent does is kept with the rest of your agents' history, whichever account it runs on.</div>
+    </div>
+
     <!-- ⚠️ NO BACK BUTTON (Josh, 2026-08-19), and the pack has none here either:
          the step's own heading names the role.
 
@@ -10873,6 +10889,29 @@ async function loadCreateExtras() {
   const models = CREATE_MODELS;
   sel.innerHTML = models.map((m) =>
     `<option value="${esc(m.key)}"${m.default ? ' selected' : ''}>${esc(m.label)}</option>`).join('');
+
+  /* The Claude accounts, from the engine rather than a guess, and ONLY the ones
+     an agent's history would follow. An account with its own separate tree is
+     refused by the engine with a sentence saying so; offering it here would be
+     an option that always fails, which is worse than an option that is not
+     there. */
+  const awrap = document.getElementById('create-account-wrap');
+  const asel = document.getElementById('create-account');
+  (async () => {
+    let list = [];
+    try {
+      const r = await fetch('/api/accounts', { cache: 'no-store' });
+      if (r.ok) list = ((await r.json()) || {}).accounts || [];
+    } catch { /* the field stays hidden, which is the one-account shape */ }
+    if (gen !== EXTRAS_GEN) return;
+    const movable = list.filter((x) => x.memoryShared);
+    /* ⚠️ Hidden at one, not disabled at one: a greyed field still asks somebody
+       to read it and decide it does not apply to them. */
+    awrap.hidden = movable.length < 2;
+    if (awrap.hidden) { asel.innerHTML = ''; return; }
+    asel.innerHTML = movable.map((x) =>
+      `<option value="${esc(x.dir)}"${x.isDefault ? ' selected' : ''}>${esc(x.email || x.label || x.dir)}${x.isDefault ? ' (your first account)' : ''}</option>`).join('');
+  })();
   // Projects: absent entirely when there are none.
   const wrap = document.getElementById('create-projects-wrap');
   const box = document.getElementById('create-projects');
@@ -10970,6 +11009,12 @@ document.getElementById('create-go').addEventListener('click', async () => {
         if (INSTR_DIRTY && instr.trim() && instr !== instrTemplate()) b.instructions = instr;
         const model = document.getElementById('create-model').value;
         if (model) b.model = model;
+        /* Only when the field is showing: on a one-account machine it is hidden
+           and empty, and sending an empty account would be the caller asserting
+           a choice nobody was offered. */
+        const awrap2 = document.getElementById('create-account-wrap');
+        const acct = document.getElementById('create-account').value;
+        if (!awrap2.hidden && acct) b.account = acct;
         if (CREATE_PROJECTS.length) b.projects = CREATE_PROJECTS;
         return b;
       })()),

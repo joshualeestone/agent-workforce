@@ -2243,3 +2243,48 @@ test('an account we do not know, and an agent Kosmos did not start, are both ref
   assert.equal(nobody.outcome, create.OUTCOME.REFUSED);
   assert.match(nobody.because, /could not read how neverexisted is started/);
 });
+
+test('a new agent can be created on another account, and its history is still shared', () => {
+  const { home } = seedAccounts();
+  const name = 'bornelsewhere';
+  recorder();
+  create.setDryRun(false);
+  const made = create.createAgent({
+    ...BINS, name, role: 'pm', model: 'opus', account: nodePath.join(home, '.claude-work'),
+  });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), nodePath.join(home, '.claude-work'));
+  assert.equal(create.plannedModelArg(name), 'claude-opus-5', 'the model and the account both landed');
+});
+
+test('creating on an account that keeps its own history is refused before anything is made', () => {
+  const { home } = seedAccounts();
+  const name = 'wouldbeorphan';
+  recorder();
+  create.setDryRun(false);
+  const out = create.createAgent({
+    ...BINS, name, role: 'pm', account: nodePath.join(home, '.claude-solo'),
+  });
+  assert.equal(out.outcome, create.OUTCOME.REFUSED);
+  /* 🔑 THE REASON IS DIFFERENT FROM THE MOVE'S, and stronger. Moving an agent
+     there costs it the past it has; being BORN there costs nothing today and
+     costs everything the first time somebody moves it back, because its whole
+     life would sit in a tree nothing else reads. Kosmos would have quietly
+     built a second history for one agent. */
+  assert.match(out.because, /would live somewhere nothing else reads/);
+  /* 🛑 AND NOTHING WAS MADE. A refusal that has already written the folder and
+     the launch file is not a refusal; the name would then be permanently taken
+     by a half-agent and the person could not even retry. */
+  assert.equal(fs.existsSync(create.plistPath(name)), false, 'the refusal left a launchd job behind');
+  assert.equal(fs.existsSync(create.workerDir(name)), false, 'the refusal left a worker folder behind');
+});
+
+test('the default account writes no key, exactly as every existing agent has', () => {
+  const { home } = seedAccounts();
+  const name = 'plainborn';
+  recorder();
+  create.setDryRun(false);
+  create.createAgent({ ...BINS, name, role: 'pm', account: nodePath.join(home, '.claude') });
+  assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), null,
+    'choosing the default account stamped a path where absence has always been the answer');
+});

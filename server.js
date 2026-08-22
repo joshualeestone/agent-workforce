@@ -1051,6 +1051,9 @@ const server = http.createServer((req, res) => {
         const result = create.createAgent({
           name: body.name, role: body.role,
           label: body.label, instructions: body.instructions, model: body.model,
+          // Which Claude account it runs on. Absent is the default account,
+          // which is what every agent already made on this machine has.
+          account: body.account,
         });
         // REFUSED is the caller's fault (a bad name, a duplicate); PARTIAL is
         // ours, and it is a 200 because the thing half-happened and the caller

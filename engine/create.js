@@ -737,6 +737,7 @@ function createAgent(opts) {
   const shown = cleanName(opts && opts.name);
   const name = slugFor(opts && opts.name);
   const roleKey = String((opts && opts.role) || '').trim();
+  const wantAccountDir = opts && opts.account;
   const { claudeBin, tmuxBin } = binPaths(opts);
 
   const steps = [];
@@ -827,6 +828,39 @@ function createAgent(opts) {
     const m = MODELS.find((x) => x.key === String(wantModelKey));
     if (!m) return { outcome: OUTCOME.REFUSED, because: 'pick a model from the list', steps };
     modelArg = m.arg;
+  }
+
+  /**
+   * Which Claude account the new agent runs on.
+   *
+   * 🔑 THE SAME THREE REFUSALS AS `setAccount`, AND FOR ONE OF THEM A BETTER
+   * REASON. Moving an EXISTING agent to an account with its own history costs
+   * it everything it has done; creating a NEW one there costs nothing today and
+   * costs everything the first time somebody moves it back, because its life so
+   * far would be in a tree nothing else reads. Kosmos would have quietly built
+   * a second history for one agent. Refusing here keeps every agent's past in
+   * one place from the first minute rather than from whenever somebody
+   * notices.
+   *
+   * ⚠️ `undefined` is the default account and writes NO key, which is what
+   * every agent on every machine already has. Absent has to keep meaning what
+   * it already means.
+   */
+  let configDir = null;
+  if (wantAccountDir !== undefined && wantAccountDir !== null && String(wantAccountDir) !== '') {
+    const accountsMod = require('./accounts');
+    const acct = accountsMod.list().find((a) => a.dir === String(wantAccountDir));
+    if (!acct) return { outcome: OUTCOME.REFUSED, because: 'we do not know that account on this computer', steps };
+    if (!acct.memoryShared) {
+      return {
+        outcome: OUTCOME.REFUSED,
+        steps,
+        because: `${acct.email || 'that account'} keeps its own separate history, so `
+          + `everything ${shown} does would live somewhere nothing else reads. `
+          + 'Point that account at your agents\' history first.',
+      };
+    }
+    configDir = acct.isDefault ? null : acct.dir;
   }
 
   const removedList = require('./remove');
@@ -1201,7 +1235,7 @@ function createAgent(opts) {
   const wroteJob = (wroteInstructions && installedSupervisor) && step('set it up to keep running', () => {
     if (DRY_RUN) return true;
     fs.mkdirSync(AGENTS_DIR, { recursive: true });
-    fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin, modelArg), 'utf8');
+    fs.writeFileSync(plistPath(name), plistFor(name, claudeBin, tmuxBin, modelArg, configDir), 'utf8');
   });
 
   /**
