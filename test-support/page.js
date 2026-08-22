@@ -40,6 +40,12 @@ const assert = require('node:assert/strict');
  * reported `RUNTIME FAIL, SyntaxError` rather than reporting that it could not
  * look, which is the worse of the two ways for a checker to be wrong.
  *
+ * 📌 MEASURED ON THIS PAGE, 2026-08-22, rather than argued: give the app's tag
+ * an attribute and the bare-tag pattern returns ZERO characters, so every lift
+ * fails with "vanished from the page", which is loud but names the wrong thing.
+ * And a greedy pattern on the page as it stands returns 710,788 characters
+ * containing `</div>`, which is HTML being handed to a JavaScript parser.
+ *
  * 🔑 Joining every block removes the choice. A function is liftable wherever it
  * lives, nothing is skipped, and there is no heuristic about which block is the
  * "real" one to be wrong about later.
