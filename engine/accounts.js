@@ -119,4 +119,56 @@ function list() {
   return out;
 }
 
-module.exports = { list, identityOf, HOME_FOR_TEST: HOME };
+/**
+ * Make a directory a Kosmos account can be signed in to.
+ *
+ * 🔑 THE RULE THIS ENCODES IS JOSH'S, 2026-08-22, and it is a principle rather
+ * than a setting: **an agent's memory belongs to the agent.** His words: *"her
+ * memory should follow her everywhere she goes"* — across models, across
+ * accounts, and across providers the day there is a second one.
+ *
+ * 📌 WHICH FALLS OUT ALMOST FREE, because of what the store is already keyed by.
+ * Claude Code files transcripts under the DIRECTORY A SESSION WAS LAUNCHED IN,
+ * and Kosmos launches every agent in its own folder. So the tree is already
+ * per-agent; it just happens to live inside whichever config directory is in
+ * use. Pointing every account at ONE tree therefore does not move memory to a
+ * new home — it stops a second home from existing.
+ *
+ * 🛑 AND WITHOUT THIS, A SECOND ACCOUNT IS A QUIET AMNESIA. The fleet's own
+ * write-up of this failure: *"An agent restarted onto a fresh account comes up
+ * with no memory, and nothing on screen says so. It looks like a working agent
+ * and behaves like a blank one."* That is the outcome this function exists to
+ * make impossible rather than to warn about.
+ *
+ * ⚠️ THE NAME IS LOAD-BEARING TWICE OVER. `~/.claude-<label>` is what
+ * `status.configRoots()` scans, so a directory named anything else is invisible
+ * to the memory reading even with the tree shared.
+ */
+function prepare(label) {
+  const clean = String(label == null ? '' : label).trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!clean) return { ok: false, because: 'that is not a name we can use for an account' };
+  const dir = path.join(HOME, `.claude-${clean}`);
+  const shared = path.join(HOME, '.claude', 'projects');
+
+  try { fs.mkdirSync(dir, { recursive: true }); }
+  catch { return { ok: false, because: 'we could not make a place for that account on this computer' }; }
+
+  const projects = path.join(dir, 'projects');
+  let memoryShared = false;
+  try {
+    const st = fs.lstatSync(projects);
+    /* Already pointed somewhere. A real directory here is somebody's existing
+       history and is NOT ours to replace — that is the amnesia this guards
+       against, arriving from the other direction. */
+    memoryShared = st.isSymbolicLink() && fs.realpathSync(projects) === fs.realpathSync(shared);
+  } catch {
+    try {
+      fs.mkdirSync(shared, { recursive: true });
+      fs.symlinkSync(shared, projects);
+      memoryShared = true;
+    } catch { memoryShared = false; }
+  }
+  return { ok: true, dir, label: clean, memoryShared };
+}
+
+module.exports = { list, identityOf, prepare, HOME_FOR_TEST: HOME };
