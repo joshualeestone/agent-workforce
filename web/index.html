@@ -3543,23 +3543,24 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
              and declined; do not re-add it without his word. -->
         <p>They're powered by an AI provider, so your requests are sent to
            that provider to be answered.</p>
-        <!-- 🛑 THE GUARDIAN ABOVE FIRED, EXACTLY AS IT SAYS IT WOULD. It warns
-             that this paragraph "does not go wrong by being rewritten, it goes
-             wrong when a FEATURE changes what is true" -- and on 2026-08-22 a
-             feature did: #238 sends one message to us when an agent is made,
-             which is a SECOND outbound destination on a screen that named one.
-             That made this screen incomplete the hour it shipped, and nothing
-             else on it would ever have said so.
-             ⚠️ THE WORD IP IS ABSENT AND DOES NOT NEED SOFTENING FOR IT. Josh
-             ruled the word off every screen; separately, the address is not
-             stored in any form -- the country is derived when the ping lands
-             and the address is discarded. So "roughly where from" is the exact
-             truth rather than a gentler version of it. If that ever changes,
-             this line is wrong again and the payload test is what will say so.
-             📌 It ends with the out, because the box that controls it lives on
-             a screen this reader has not reached yet. -->
-        <p>When you create an agent, we're told that it happened and roughly
-           where from. Nothing about the agent, and you can turn it off.</p>
+        <!-- 🛑 A LINE ABOUT THE AGENT-CREATED PING WAS HERE FOR ONE RELEASE
+             (0.2.50) AND JOSH TOOK IT OUT, 2026-08-22 00:22: "I don't care and
+             don't want any nit picky in the weeds lawyer speak. They don't have
+             to notify us or use our service or pay. It's all optional and we
+             are not bringing it up."
+             📌 RECORDED RATHER THAN SILENTLY REVERTED, because the guardian
+             above says this paragraph goes wrong when a FEATURE changes what is
+             true, and a future reader who notices the ping and not this comment
+             would add the line back believing it an oversight. It is a ruling.
+             🔑 THE DISCLOSURE LIVES AT THE POINT OF THE ACT INSTEAD: the box on
+             the create-agent screen, ticked, with the words on it. His argument
+             is that a choice explained where it is made needs no preamble on a
+             screen three steps earlier, and that is a real position rather than
+             an omission.
+             ⚠️ WHAT IS THEREFORE TRUE OF THIS SCREEN, so nobody has to re-derive
+             it: it names the AI provider as the destination for an agent's work,
+             and does not name the one message Kosmos sends when an agent is
+             created. That message carries no content of the agent's. -->
         <p>No account setup. No email needed.</p>
       </div>
 
@@ -16039,7 +16040,24 @@ document.getElementById('pjs-members').addEventListener('click', async (e) => {
     if (body.told && body.told.state === 'could_not') {
       // The engine's clause becomes its own sentence via pjSentence rather
       // than being spliced mid-sentence with hand punctuation (round 24).
-      target.textContent = who + ' is off this project and still on your computer. We could not update its instructions, so it may still mention this project when it next starts. '
+      /* 🛑 THE FRAME USED TO ASSERT TWO THINGS ITS REASONS CAN DENY, and one
+         of them flatly contradicts three of the nine:
+
+           "Splinter is off this project AND STILL ON YOUR COMPUTER. We could
+            not update its INSTRUCTIONS, because we could not find an agent
+            with exactly this name ON THIS COMPUTER."
+
+         ⚠️ AND FOUR MORE REASONS SAY "instructions" THEMSELVES ("it keeps its
+         instructions somewhere we cannot safely change", "it has no
+         instructions file yet", "its instructions are already at the size
+         limit"), so the noun arrived twice in one sentence.
+         🔑 THE RULE, which §11 already applied to the other frames: a frame
+         must not name the noun its reasons carry, and must not assert facts a
+         reason can deny. The success arm below KEEPS "and still on your
+         computer" because nothing there can contradict it -- it has no reason
+         clause at all, and the reassurance is the point of that sentence.
+         (Mona Lisa's ruling, #130.) */
+      target.textContent = who + ' is off this project. We could not update them, so this project may still be named in what they were told. '
         + pjSentence(body.told.because);
     } else {
       target.textContent = who + ' is off this project and still on your computer.';

@@ -7010,9 +7010,25 @@ test("the removal announcement is her sentence, on both verdict arms", () => {
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const handlerSrc = raw.slice(raw.indexOf("document.getElementById('pjs-members').addEventListener"));
   const handler = handlerSrc.slice(0, handlerSrc.indexOf('\n});') + 4);
-  // Success speaks her sentence; could_not opens with it then warns.
-  assert.ok(handler.split("is off this project and still on your computer.").length >= 3,
-    "an arm of the handler lost her ruled sentence");
+  /* 🔄 THE RULING CHANGED, 2026-08-22, and this assertion changed with it
+     rather than being deleted. Both arms used to open with "is off this
+     project and still on your computer." -- and on the COULD_NOT arm that
+     clause is contradicted by three of the nine reasons it composes with
+     ("we could not find an agent with exactly this name on this computer"),
+     while four more carry the word "instructions" the frame also used. #130.
+     ✅ SO THE TWO ARMS NOW DIFFER ON PURPOSE. Success keeps the reassurance,
+     because nothing there can contradict it and telling somebody their agent
+     still exists is the point of that sentence. The could-not arm drops the
+     clause its reasons deny and stops naming their noun. */
+  const successArm = handler.slice(handler.indexOf('} else {'));
+  assert.ok(successArm.includes('is off this project and still on your computer.'),
+    'the success arm lost the reassurance, which nothing there contradicts');
+  const couldNot = handler.slice(handler.indexOf("state === 'could_not'"), handler.indexOf('} else {'));
+  const said = couldNot.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(said.includes('is off this project.'),
+    'the could-not arm stopped saying the one thing it is for');
+  assert.ok(!said.includes('still on your computer'),
+    'the could-not frame asserts what three of its reasons deny');
   assert.ok(!handler.includes('Taken off'),
     'the struck phrase returned to the announcement');
   // The name is captured BEFORE the awaits (the success repaint removes

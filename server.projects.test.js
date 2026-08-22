@@ -2281,3 +2281,47 @@ test('words on a button are not kept when nothing is being asked', async () => {
     assert.equal(row.wire, null, 'and claims no mechanism that did not happen');
   });
 });
+
+test('the removal frame does not assert what its own reasons deny (#130)', () => {
+  /**
+   * 🛑 THE DEFECT, IN ONE RENDERED SENTENCE:
+   *
+   *   "Splinter is off this project AND STILL ON YOUR COMPUTER. We could not
+   *    update its INSTRUCTIONS, because we could not find an agent with exactly
+   *    this name ON THIS COMPUTER."
+   *
+   * The frame asserts the agent is on the computer; the reason explains that we
+   * could not find it there. Three of the nine reasons contradict that clause,
+   * and four more carry the word "instructions" themselves, so the noun arrived
+   * twice in one sentence.
+   *
+   * 🔑 THE RULE §11 ALREADY APPLIED ELSEWHERE: a frame must not name the noun
+   * its reasons carry, and must not assert facts a reason can deny.
+   */
+  const page = fs.readFileSync(path.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = page.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const at = script.indexOf("if (body.told && body.told.state === 'could_not')");
+  assert.ok(at > -1, 'the could-not arm moved; this test is aimed at nothing');
+  /* The arm's own text only: the SUCCESS arm below it legitimately keeps the
+     clause, because it carries no reason that could contradict it. */
+  const arm = script.slice(at, script.indexOf('} else {', at));
+  const said = arm.replace(/\/\*[\s\S]*?\*\//g, '');   // its comment quotes the old sentence
+
+  assert.ok(!/still on your computer/.test(said),
+    'the could-not frame still claims the agent is on this computer, which three of its reasons deny');
+  assert.ok(!/its instructions/.test(said),
+    'the frame still names the noun four of its reasons carry, so it arrives twice in one sentence');
+
+  /* Presence before absence: the arm must still SAY the two things it is for --
+     that the agent came off the project, and that what it was told may be
+     stale. An arm that said nothing would pass both assertions above. */
+  assert.match(said, /is off this project/);
+  assert.match(said, /may still be named in what they were told/);
+
+  /* ⚠️ And the success arm is deliberately untouched. It has no reason clause,
+     so nothing can contradict it, and the reassurance is the whole point of
+     that sentence: removing an agent from a project does not remove the agent. */
+  const rest = script.slice(script.indexOf('} else {', at));
+  assert.match(rest.slice(0, 400), /still on your computer/,
+    'the success sentence lost its reassurance, which nothing there contradicts');
+});

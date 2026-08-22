@@ -140,36 +140,46 @@ test('a test run never reaches the real network', () => {
   }
 });
 
-test('the welcome screen names this as an outbound destination, and agrees with the payload', () => {
+test('the disclosure lives at the point of the act, and agrees with the payload', () => {
   /**
-   * 🛑 MONA LISA'S RULE 3, AND THE ONLY MECHANISM LEFT THAT CAN ENFORCE IT.
-   * Josh ruled the word IP off every screen, so a reader can no longer check
-   * what is sent against what is written. The welcome screen's own guardian
-   * comment says that paragraph "goes wrong when a FEATURE changes what is
-   * true" -- this feature is that, and this test is what notices next time.
+   * 🛑 THIS TEST USED TO ASSERT THE WELCOME SCREEN AND NOW ASSERTS THE
+   * CHECKBOX, and the move is a RULING rather than a drift. Josh, 2026-08-22
+   * 00:22: "I don't care and don't want any nit picky in the weeds lawyer
+   * speak. They don't have to notify us or use our service or pay. It's all
+   * optional and we are not bringing it up." The line came off the welcome
+   * screen; the disclosure did not disappear, it stayed where the decision is
+   * made.
    *
-   * ⚠️ IT ASSERTS A RELATIONSHIP, NOT A SENTENCE. Pinning the wording would
-   * turn every copy edit into a failing test and teach people to update the
-   * test rather than re-read the screen. What it pins is that the screen SAYS
-   * something leaves, and that the payload has not grown a field the screen
-   * does not cover.
+   * 🔑 WHICH MAKES THE CHECKBOX COPY LOAD-BEARING ON ITS OWN. It is now the
+   * only place in the product that says anything leaves the machine when an
+   * agent is created, so it is the only place left for this test to anchor to.
+   *
+   * ⚠️ IT ASSERTS A RELATIONSHIP, NOT A SENTENCE. Pinning wording would turn
+   * every copy edit into a failing test and teach people to update the test
+   * rather than re-read the screen. What it pins is that somewhere on the
+   * create screen a person is offered this choice, that Settings explains it,
+   * and that the payload has not grown a field the words do not cover.
    */
   const fs2 = require('node:fs');
   const page = fs2.readFileSync(nodePath.join(__dirname, '..', 'web', 'index.html'), 'utf8');
+  const words = page.replace(/<!--[\s\S]*?-->/g, '');
+
+  assert.match(words, /Let Kosmos know you created an agent/,
+    'the create screen no longer offers the choice at all');
+  /* Settings carries the fuller explanation and the standing switch. */
+  assert.match(words, /so we know how many people are using Kosmos/,
+    'Settings no longer says what the sending is for');
+  assert.match(words, /Nothing about the agent, and nothing it does/,
+    'Settings no longer says what is NOT sent, which is the half that reassures');
+
+  /* 🛑 AND THE WELCOME SCREEN MUST STAY OUT OF IT, by ruling. A future reader
+     who meets the ping and not the comment would add a line back believing its
+     absence an oversight. */
   const pane = page.slice(page.indexOf('id="fr-pane-2"'), page.indexOf('<!-- 4. The machine checks'));
-  const words = pane.replace(/<!--[\s\S]*?-->/g, '');
+  assert.ok(!/we're told that it happened/.test(pane.replace(/<!--[\s\S]*?-->/g, '')),
+    'the ping line is back on the welcome screen, which Josh ruled out');
 
-  assert.match(words, /we're told that it happened/,
-    'the welcome screen no longer says anything leaves when an agent is made');
-  assert.match(words, /you can turn it off/,
-    'it names the sending without naming the way out');
-
-  /* The payload's shape, restated as a relationship: every key it carries is
-     either the event itself, the install identity, or something the screen's
-     "roughly where from" and version-neutral wording already covers. A NEW
-     kind of field -- anything about the agent or the person -- has no cover
-     and this list is where somebody has to come and say so. */
   const covered = ['event', 'installId', 'at', 'version', 'os'];
   assert.deepEqual(Object.keys(ping.payload()).sort(), covered.slice().sort(),
-    'the payload grew a field the welcome screen does not cover; change the screen or drop the field');
+    'the payload grew a field the words do not cover; change the words or drop the field');
 });
