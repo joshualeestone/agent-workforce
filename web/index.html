@@ -9198,7 +9198,7 @@ async function paintTalk(sessionName, agentName) {
      *     oldest, so the count holds at 200 and a new arrival does not bring
      *     itself into view.
      */
-    setThread(thread, rows.map((m) => dmRow(m, name)).join(''), rows.length);
+    setThread(thread, rows.map((m) => dmRow(m, name)).join('') + dmOwesLine(body.owes, rows), rows.length);
   }
   /**
    * ⚠️ NOTHING WAS ANSWERED, SO NOTHING MAY LOOK ANSWERED (drawing, state 4).
@@ -14967,6 +14967,44 @@ function pjSilentSince(m, allRows, idx) {
    rather than in one that is always noise, and one that DISAPPEARS on the next
    paint the moment the agent speaks. */
 const PJ_SILENCE_AFTER_MS = 2 * 60 * 1000;
+/**
+ * "Nothing back yet", under the last thing you said (#5).
+ *
+ * 🔑 THE ROOM ALREADY HAS THIS AND THIS BOX DID NOT. `pjSilentSince` is gated
+ * on a project having two or more members, so a one-to-one thread had no signal
+ * at all that an agent had gone quiet on you. This is the missing half, and it
+ * is deliberately shaped like the thing it completes.
+ *
+ * ⚠️ THE SAME GRACE PERIOD, FROM THE SAME CONSTANT. Two surfaces disagreeing
+ * about how long silence is normal would show a person two claims about one
+ * silence, so `PJ_SILENCE_AFTER_MS` is shared rather than copied and can be
+ * tuned once (Mona Lisa).
+ *
+ * 📌 "yet" is here and not in the room's wording, and that is not an oversight.
+ * In a room some members may never answer; one to one, the likeliest truth is
+ * that it is working on it.
+ *
+ * 🛑 THREE STATES, because `owes` can be `unknown`: the engine could not read
+ * the record. Saying nothing there would render "we could not look" as "it has
+ * answered", which is the confident all-clear this product refuses everywhere
+ * else.
+ */
+function dmOwesLine(owes, rows) {
+  if (!owes || typeof owes !== 'object') return '';
+  if (owes.state === 'unknown') {
+    return '<p class="dmnone">We could not read the message record, so we cannot tell whether it has answered.</p>';
+  }
+  if (owes.state !== 'owes') return '';
+  /* ⚠️ THE GRACE IS MEASURED ON THE MESSAGE, NOT ON THE STATE. `owes` is true
+     the instant something lands, so without this every thread accuses an agent
+     for the first two minutes of every exchange. `pjOldEnoughToJudge` is the
+     room's own test and refuses an unparseable timestamp rather than treating
+     it as long ago. */
+  const last = owes.lastHeardAt || (rows.length ? rows[rows.length - 1].at : null);
+  if (!pjOldEnoughToJudge(last)) return '';
+  return '<p class="dmnone">Nothing back yet.</p>';
+}
+
 function pjOldEnoughToJudge(at) {
   const when = Date.parse(at);
   if (!Number.isFinite(when)) return false;   // no timestamp is not "long ago"
