@@ -806,7 +806,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 @media (max-width: 40rem) { .themepick { display: none; } }
 .headleft { display: flex; align-items: center; gap: var(--space-5); }
 /* An empty slot is a flex item and would spend one trailing gap. */
-#utoast-slot:empty, #unote-slot:empty { display: none; }
+#utoast-slot:empty, #unote-slot:empty, #uoffline-slot:empty { display: none; }
 .klink { border: 0; background: none; padding: 0; cursor: pointer; display: block; line-height: 0; }
 /* 🔑 8px BECAUSE THE ELEMENT ALREADY CHOSE 8px, not because somebody picked a
    number: `.klink:focus-visible` below sets that radius, and an outline follows
@@ -3132,6 +3132,13 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          published; role=status per the pack. -->
     <div id="utoast-slot"></div>
     <div id="unote-slot"></div>
+    <!-- ⚠️ ITS OWN SLOT RATHER THAN SHARING `#unote-slot`, and the reason is a
+         state that really happens: a person updates and then loses the server.
+         Both notes are true at once and they belong in that order, because the
+         first explains the second. Sharing would make this overwrite the
+         post-update note and hide the likeliest cause of the failure at exactly
+         the moment it mattered (Mona Lisa, #269). -->
+    <div id="uoffline-slot"></div>
   </div>
   <!-- The pack's centre column: the nav lives IN the header grid, centred,
        and collapses behind the burger under 56rem. THREE tabs, the pack's,
@@ -6870,6 +6877,81 @@ function freshWords(seconds) {
   return 'Refreshed ' + days + (days === 1 ? ' day ago' : ' days ago');
 }
 
+/**
+ * The one thing worth saying when nothing is answering at all.
+ *
+ * 🛑 THE OPEN HALF OF #269. Baking the version fixed the FACT; it did not fix
+ * what Josh actually hit, which was five panels all correctly refusing and no
+ * way to tell whether the app was broken, the machine had been asleep, or he
+ * should wait. A person who can now read a version on a screen where nothing
+ * works still has nowhere to go.
+ *
+ * 🔑 IT REPORTS THE TWO THINGS IT HOLDS AND STOPS. A stopped server, a changed
+ * port, a firewall and a machine that has just woken all produce an identical
+ * failed fetch, so the page cannot tell them apart and must not imply it can.
+ * The rule is falsifiable and there is a test for it: the text names no cause.
+ * No "server", no "crashed", no "stopped", no "try restarting". If one of those
+ * ever appears it is because somebody decided the page can tell, and that
+ * decision should be visible rather than arriving inside a copy tweak.
+ *
+ * ⚠️ "ON THIS COMPUTER" IS DOING REAL WORK, and rules out the reading a
+ * non-technical person reaches for first: that Kosmos the product is down, or
+ * that their internet is broken. Kosmos runs locally and almost nobody knows
+ * that yet. And "is not answering" rather than "is not running": not running is
+ * a cause, and we do not know it. Not answering is what we observed.
+ *
+ * ⚠️ A PLAIN PRIMARY SENTENCE WITH A DETAIL LINE, which is the split the engine
+ * already settled on for tmux errors. Josh wrote this note as "nothing is
+ * answering on port 16180", which is right for him at a terminal and wrong for
+ * somebody who has never heard the word: they read a port as the app blaming
+ * them for something they did not configure. Both readers get their own line.
+ *
+ * 📌 No action, no dismiss, no timer. The board already carries Try again and
+ * says when it is looking, so a second retry here is two controls doing one
+ * job; a dismiss on a live condition is a note that lies on the next glance;
+ * and a countdown would imply the page knows something about the recovery.
+ */
+function paintOfflineNote(down) {
+  const slot = document.getElementById('uoffline-slot');
+  if (!slot) return;
+  if (!down) {
+    /* ⚠️ CLEARED IN THE SAME PAINT AS THE SUCCESS. A stale failure notice over
+       a working board is the inversion of the thing this note is for: the
+       board says everything is fine and the chrome says nothing is answering,
+       and a person believes the alarming half. */
+    if (slot.innerHTML) slot.innerHTML = '';
+    /* ⚠️ AND FORGET THAT IT WAS SHOWN. The flag below stops the note being
+       re-announced on every five-second poll while the condition holds;
+       leaving it set across a recovery turns it into a trap, so a SECOND
+       outage draws nothing at all. Same shape as the removed-list cache,
+       which shipped exactly that bug. */
+    delete slot.dataset.on;
+    return;
+  }
+  if (slot.dataset.on === '1') return;   // already saying it; do not re-announce
+  slot.dataset.on = '1';
+  /* Both details are knowable with nothing answering: the version is baked into
+     this page, and the host is what this page was loaded from. */
+  const v = bakedVersion();
+  /* ⚠️ DELIBERATELY NOT THE NAME THE SUMMARY BLOCK USES for its own parts.
+     `server.test.js` finds that block by searching for the FIRST declaration of
+     it in the page, so an identically named local here captured the anchor and
+     sliced a whole async function into its harness. A local name in a twenty
+     line function collided with a guard seven hundred lines away.
+     🛑 AND THE FIRST VERSION OF THIS COMMENT QUOTED THE NAME, which put the
+     anchor back in the file and broke the same test a second time. Describe it,
+     never quote it: that is now the seventh time today. */
+  const detail = [];
+  if (v) detail.push('Version ' + esc(v) + ' is loaded.');
+  try { if (location && location.host) detail.push('Nothing answered at ' + esc(location.host) + '.'); }
+  catch { /* a document with no location still gets the primary sentence */ }
+  slot.innerHTML = '<div class="utoast stale" role="status">'
+    + '<span class="udot" aria-hidden="true"></span>'
+    + '<div class="utxt"><b>Kosmos is not answering on this computer</b>'
+    + (detail.length ? '<small>' + detail.join(' ') + '</small>' : '')
+    + '</div></div>';
+}
+
 async function tick() {
   const checked = document.getElementById('checked');
   try {
@@ -7270,6 +7352,9 @@ async function tick() {
        the toast is painted from a different call. Setting it here rather than
        inside `paintBuildLine` keeps the two surfaces reading one value that one
        place assigns; a second assignment is how they start disagreeing. */
+    /* The board answered, so whatever this said is no longer true. Cleared on
+       the same paint that proves it. */
+    paintOfflineNote(false);
     SERVED_VERSION = data.version || null;
     paintBuildLine(data.version);
 
@@ -7314,6 +7399,13 @@ async function tick() {
     // the projects poll is suppressed while it is open — so a failure that only
     // reached `#grid` was invisible exactly where it mattered most.
     BOARD_LOOK_FAILED = err && err.message ? err.message : 'we could not read the agents';
+    /* 🔑 HERE, AND NOWHERE ELSE, WHICH IS THE WHOLE OF THE SECOND RULE. This
+       branch runs only once a poll has RETURNED a failure; while the first one
+       is merely in flight nothing has called it, so nothing is drawn. On a slow
+       machine the in-flight state and the failed state look identical to
+       whoever is writing the code, which is why the test that matters holds a
+       fetch open and asserts the note is ABSENT (Mona Lisa, #269). */
+    paintOfflineNote(true);
     const addViewOnFail = document.getElementById('pj-add-view');
     if (addViewOnFail && !addViewOnFail.hidden) paintAddAgents();
     checked.className = 'checked stamp stale';
