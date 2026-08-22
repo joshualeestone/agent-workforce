@@ -2288,3 +2288,46 @@ test('the default account writes no key, exactly as every existing agent has', (
   assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), null,
     'choosing the default account stamped a path where absence has always been the answer');
 });
+
+/* ---- who an agent reports to (#138, which unblocks the org view #137) ---- */
+
+test('an agent can be created reporting to somebody, and it is stored not guessed', () => {
+  const name = 'reporter';
+  recorder();
+  create.setDryRun(false);
+  const made = create.createAgent({ ...BINS, name, role: 'pm', reportsTo: 'thelead' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  const store = require('./store');
+  assert.equal(store.readProfile(name).reportsTo, 'thelead');
+});
+
+test('an agent with no answer has no reporting line at all', () => {
+  const name = 'unreported';
+  recorder();
+  create.setDryRun(false);
+  create.createAgent({ ...BINS, name, role: 'pm' });
+  const store = require('./store');
+  /**
+   * 🛑 EMPTY, NOT INFERRED, and this is the assertion the whole field exists
+   * for. `engine/chat.js` already answers "is this the manager" by regex on
+   * role text, and its own comment prices that looseness honestly: being wrong
+   * costs one click on a dropdown. That price is right there and WRONG here,
+   * because #137 draws this answer and a diagram does not look like a guess.
+   * "Team Lead" and "Lead Designer" both match \\blead\\b. An empty reporting
+   * line is honest; an inferred one is a claim.
+   */
+  assert.equal(store.readProfile(name).reportsTo, undefined,
+    'a reporting line appeared without anybody answering the question');
+});
+
+test('an agent cannot report to itself', () => {
+  const name = 'ouroboros';
+  recorder();
+  create.setDryRun(false);
+  const out = create.createAgent({ ...BINS, name, role: 'pm', reportsTo: name });
+  assert.equal(out.outcome, create.OUTCOME.REFUSED);
+  assert.match(out.because, /cannot report to itself/);
+  /* A cycle of one is the whole cycle problem in its smallest form, and it is
+     the only one a person can create by picking a name out of a list. */
+  assert.equal(fs.existsSync(create.plistPath(name)), false, 'the refusal made the agent anyway');
+});

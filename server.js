@@ -1054,6 +1054,7 @@ const server = http.createServer((req, res) => {
           // Which Claude account it runs on. Absent is the default account,
           // which is what every agent already made on this machine has.
           account: body.account,
+          reportsTo: body.reportsTo,
         });
         // REFUSED is the caller's fault (a bad name, a duplicate); PARTIAL is
         // ours, and it is a 200 because the thing half-happened and the caller
@@ -1620,6 +1621,30 @@ const server = http.createServer((req, res) => {
         // remains the fallback for agents with no record.
         if (typeof patch.displayName === 'string' && patch.displayName.trim()) {
           clean.displayName = patch.displayName.trim().slice(0, 80);
+        }
+        /**
+         * Who this agent reports to (#138, which unblocks the org view #137).
+         *
+         * 🛑 STORED, NEVER INFERRED. `engine/chat.js` already answers "is this
+         * the manager" by regex on role text, and its own comment prices that
+         * looseness honestly: being wrong costs a preselected dropdown entry
+         * somebody fixes in one click. That price is right for a dropdown and
+         * WRONG here, because #137 DRAWS this answer -- and a diagram does not
+         * look like a guess. "Team Lead" and "Lead Designer" both match. So an
+         * unanswered reporting line stays empty; empty is honest, inferred is
+         * a claim. (Mona Lisa's standing note on #138.)
+         *
+         * ⚠️ An empty string CLEARS it, and that is a real choice rather than
+         * a missing value: somebody removing a reporting line must be able to,
+         * and `null` in the record is what "nobody" means.
+         */
+        if (typeof patch.reportsTo === 'string') {
+          const to = patch.reportsTo.trim().slice(0, 80);
+          /* Refused rather than stored: a cycle of one is the whole cycle
+             problem in its smallest form, and it is the one a person can
+             actually create by picking their own name out of a list. */
+          if (to && to === name) { sendJson(res, 400, { error: 'an agent cannot report to itself' }); return; }
+          clean.reportsTo = to || null;
         }
         sendJson(res, 200, store.writeProfile(name, clean));
       })

@@ -529,7 +529,7 @@ select:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
    select directly above it -- two adjacent controls doing the same job at two
    different widths, which reads as one of them being broken. The list is the
    rule; a new member joins it. */
-#create-model, #create-account, #pj-one-add, #pj-thread-who { flex: 1; min-width: 220px; }
+#create-model, #create-account, #create-reports, #d-reports, #pj-one-add, #pj-thread-who { flex: 1; min-width: 220px; }
 .btn { font: var(--text-body) var(--font-ui); padding: var(--space-4) var(--space-5);
        border-radius: var(--radius-control); border: 0.5px solid var(--border-strong);
        background: var(--bg); color: var(--label); cursor: pointer; }
@@ -1295,9 +1295,21 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .tkclosenote { margin: 10px 0 18px; }
 /* One part of a task. A row rather than a card: the column already is the
    card, and a box inside a box is the shape that made Settings look busy. */
-.tkpart { display: flex; align-items: center; gap: 10px; padding: 9px 0;
-          border-bottom: 1px solid var(--k-rule); }
-.tkpart:last-of-type { border-bottom: 0; }
+/* 🛑 THE SEPARATOR LIVES BETWEEN SIBLINGS, and the version that shipped in
+   0.2.42 did not. It was `border-bottom` on every `.tkpart` plus a
+   `:last-of-type` cancel -- and `#tk-who` is filled with the parts followed by
+   the Add row, so the LAST DIV is the add row, `.tkpart:last-of-type` selected
+   ZERO elements, and every task with parts drew a stray rule above the input.
+   Josh's "weird line" class, in new markup, on the night he was demoing.
+   Found and MEASURED by Mona Lisa in a rendered reduction (3 `.tkpart`,
+   `:last-of-type` matching 0, last part still 1px) -- I had the screenshot in
+   front of me and read past it.
+   🔑 `+` RATHER THAN A NARROWER CANCEL: a rule that sits between two siblings
+   needs no cancelling, so no trailing element can ever break it again. A cancel
+   is only correct while nothing follows the list, which is a condition nobody
+   re-checks when they add a row underneath. */
+.tkpart { display: flex; align-items: center; gap: 10px; padding: 9px 0; }
+.tkpart + .tkpart { border-top: 1px solid var(--k-rule); }
 .tkpart .lav { flex: 0 0 34px; }
 .tkpart .lav.q { background: var(--k-sunk); color: var(--label-2); }
 .tkpart .tkwho-b { flex: 1; min-width: 0; }
@@ -3195,6 +3207,23 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <input type="text" id="d-role" placeholder="Executive Assistant, Bookkeeper, Researcher&hellip;">
     </div>
   </div>
+  <!-- ⚠️ HIDDEN WHEN THERE IS NOBODY ELSE, the same rule the projects picker
+       follows: a dropdown whose only entry is the agent you are looking at is
+       a decision presented to somebody who has none to make. It appears the
+       moment a second agent exists.
+       🛑 AND IT IS NEVER PREFILLED FROM A GUESS. There is already a function
+       in this product that works out "is this the manager" from role text, and
+       its own comment prices the looseness honestly: being wrong costs one
+       click on a dropdown. That price is right there and wrong here, because
+       the org view DRAWS this answer and a diagram does not look like a guess.
+       An empty reporting line is honest; an inferred one is a claim. -->
+  <div class="field" id="d-reports-wrap" hidden>
+    <label class="flabel" for="d-reports">Reports to</label>
+    <div class="fhint">Only used to draw your org chart. Leave it blank if it does not apply.</div>
+    <div class="frow">
+      <select id="d-reports"></select>
+    </div>
+  </div>
   <!-- ONE Save for the box, because it now writes two fields. A button sitting
        inside the role row while also saving the name would misdescribe itself. -->
   <div class="frow" style="margin-top:14px;">
@@ -3681,6 +3710,21 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
         <select id="create-account"></select>
       </div>
       <div class="fhint">Everything this agent does is kept with the rest of your agents' history, whichever account it runs on.</div>
+    </div>
+
+    <!-- ⚠️ ONE LINE AND ONE DROPDOWN, with no explanatory paragraph of its own,
+         because this is a screen Josh CUT DOWN on Wednesday (six deletions,
+         mostly explanations). A new optional field arriving with a paragraph
+         would undo the thing that edit was for.
+         🔑 ABSENT ON THE FIRST AGENT: there is nobody to name but the agent
+         being made, so the menu would carry no choice. Same rule as the
+         projects picker, and the same resolution as the removed-agents list at
+         zero. -->
+    <div class="field" id="create-reports-wrap" hidden>
+      <label class="flabel" for="create-reports">Reports to <span class="flabel-soft">(optional)</span></label>
+      <div class="frow">
+        <select id="create-reports"></select>
+      </div>
     </div>
 
     <!-- ⚠️ NO BACK BUTTON (Josh, 2026-08-19), and the pack has none here either:
@@ -8470,6 +8514,7 @@ function openDetail(sessionName) {
      page. Outside it, the same test keeps working and this keeps its real one. */
   paintModelPicker(a);
   paintAccountPicker(a);
+  paintReportsTo(a);
   /* The explanation's landing place after it left the card with the
      why-line (the pack split: the card carries signals, the panel carries
      explanation). `because` is the board's stated reason for its belief
@@ -9958,7 +10003,14 @@ document.getElementById('d-save').addEventListener('click', async () => {
     const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/profile',
       { method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ role: document.getElementById('d-role').value.trim(),
-                               displayName: renameTo }) });
+                               displayName: renameTo,
+                               /* Only when the field is showing. On a one-agent
+                                  board it is hidden and empty, and sending an
+                                  empty string CLEARS the record -- so an
+                                  unconditional send would erase a reporting
+                                  line every time somebody saved a role. */
+                               ...(document.getElementById('d-reports-wrap').hidden
+                                 ? {} : { reportsTo: document.getElementById('d-reports').value }) }) });
     if (!CURRENT || CURRENT.sessionName !== forAgent) return;
     if (!res.ok) throw new Error('that did not save');
     msg.textContent = 'Saved.';
@@ -10165,6 +10217,32 @@ async function paintModelPicker(a) {
    HAVE: the accounts are identified by DIRECTORY, and preselecting the current
    one would make the button's disabled state the only thing standing between a
    person and a no-op "move" that restarts their agent for nothing. */
+/* ---- who this agent reports to (#138, the org view's missing field) ----
+   ⚠️ THE OPTIONS ARE THE OTHER AGENTS ON THE BOARD, from the board we already
+   have (`LAST`, the most recent /api/status) rather than a fetch of its own:
+   a second request would be a second source for one fact, and the two would
+   disagree for a poll cycle every time an agent appeared or went. */
+function paintReportsTo(a) {
+  const wrap = document.getElementById('d-reports-wrap');
+  const sel = document.getElementById('d-reports');
+  if (!wrap || !sel) return;
+  const me = a && a.sessionName;
+  const others = (LAST || []).filter((x) => x && x.sessionName && x.sessionName !== me);
+  /* Mona Lisa's rule 1: no field on the first agent. There is nobody to name
+     but yourself, so the menu would carry one option and no choice. */
+  wrap.hidden = others.length === 0;
+  if (wrap.hidden) { sel.innerHTML = ''; return; }
+  const now = (a && a.profile && typeof a.profile.reportsTo === 'string') ? a.profile.reportsTo : '';
+  const html = ['<option value="">Nobody</option>'].concat(
+    others.map((x) => '<option value="' + esc(x.sessionName) + '"'
+      + (x.sessionName === now ? ' selected' : '') + '>' + esc(x.name || x.sessionName) + '</option>'),
+  ).join('');
+  /* ⚠️ Change-guarded, or the five-second poll would reset a menu somebody is
+     part way through choosing from. This is the one control on the panel whose
+     value is a stored preference rather than typed text, so it has no dirty
+     flag to protect it -- the guard IS the protection. */
+  if (sel.innerHTML !== html) sel.innerHTML = html;
+}
 let ACCOUNTS = [];
 async function paintAccountPicker(a) {
   const sel = document.getElementById('d-account');
@@ -10930,6 +11008,25 @@ async function loadCreateExtras() {
      refused by the engine with a sentence saying so; offering it here would be
      an option that always fails, which is worse than an option that is not
      there. */
+  /* Reports to: the agents already on the board. Hidden when there are none,
+     which is exactly the first-agent case. */
+  const rwrap = document.getElementById('create-reports-wrap');
+  const rsel = document.getElementById('create-reports');
+  const existing = (LAST || []).filter((x) => x && x.sessionName);
+  rwrap.hidden = existing.length === 0;
+  if (!rwrap.hidden) {
+    /* ⚠️ NOTHING PRESELECTED, and this is the one place it would be tempting:
+       a role catalogue exists, a manager role is in it, and a regex that
+       spots one is already written. Prefilling from it would put a guessed
+       reporting line into the diagram #137 draws, where it stops looking like
+       a guess. */
+    rsel.innerHTML = ['<option value="">Nobody</option>'].concat(
+      existing.map((x) => '<option value="' + esc(x.sessionName) + '">' + esc(x.name || x.sessionName) + '</option>'),
+    ).join('');
+  } else {
+    rsel.innerHTML = '';
+  }
+
   const awrap = document.getElementById('create-account-wrap');
   const asel = document.getElementById('create-account');
   (async () => {
@@ -11050,6 +11147,9 @@ document.getElementById('create-go').addEventListener('click', async () => {
         const awrap2 = document.getElementById('create-account-wrap');
         const acct = document.getElementById('create-account').value;
         if (!awrap2.hidden && acct) b.account = acct;
+        const rwrap2 = document.getElementById('create-reports-wrap');
+        const to = document.getElementById('create-reports').value;
+        if (!rwrap2.hidden && to) b.reportsTo = to;
         if (CREATE_PROJECTS.length) b.projects = CREATE_PROJECTS;
         return b;
       })()),

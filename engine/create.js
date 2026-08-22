@@ -738,6 +738,12 @@ function createAgent(opts) {
   const name = slugFor(opts && opts.name);
   const roleKey = String((opts && opts.role) || '').trim();
   const wantAccountDir = opts && opts.account;
+  /* Trimmed and self-refused at the door, the same posture as `who` on a task:
+     a value that cannot be right is refused rather than quietly dropped, and
+     an agent reporting to itself is the smallest possible cycle and the one a
+     person can actually create by picking their own name from a list. */
+  const wantReportsTo = (opts && typeof opts.reportsTo === 'string' && opts.reportsTo.trim())
+    ? opts.reportsTo.trim().slice(0, 80) : null;
   const { claudeBin, tmuxBin } = binPaths(opts);
 
   const steps = [];
@@ -846,6 +852,10 @@ function createAgent(opts) {
    * every agent on every machine already has. Absent has to keep meaning what
    * it already means.
    */
+  if (wantReportsTo && wantReportsTo === name) {
+    return { outcome: OUTCOME.REFUSED, because: 'an agent cannot report to itself', steps };
+  }
+
   let configDir = null;
   if (wantAccountDir !== undefined && wantAccountDir !== null && String(wantAccountDir) !== '') {
     const accountsMod = require('./accounts');
@@ -1387,6 +1397,13 @@ function createAgent(opts) {
     const profile = {};
     if (shown && shown !== name) profile.displayName = shown;
     if (wantLabel !== undefined) profile.role = wantLabel.trim();
+    /* Who this agent reports to (#138). Rides the same merged write as the
+       other two, for the reason stated above: one read-merge-write on this
+       file rather than a second cycle with its own half-landed window.
+       ⚠️ NEVER INFERRED, here least of all. The org view draws this, and a
+       diagram does not look like a guess: an unanswered reporting line stays
+       empty. Kosmos asks; it does not work it out from a role name. */
+    if (wantReportsTo) profile.reportsTo = wantReportsTo;
     if (Object.keys(profile).length) {
       try { store.writeProfile(name, profile); }
       catch { /* a card that reads `casey` with the role template's words is a working agent, not a failure */ }

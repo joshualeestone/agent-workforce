@@ -8657,3 +8657,63 @@ test('the model route writes the choice AND restarts, because either alone is a 
     statusEngine.setPaneSource(null);
   }
 });
+
+test('the profile route stores a reporting line, clears it, and refuses a self-loop', async () => {
+  /**
+   * #138. The field the org view (#137) has been waiting on.
+   *
+   * ⚠️ `angel` is the agent every other profile test in this file uses, which
+   * means it is one this board really has -- the route 404s an unknown name,
+   * so an invented one would test the guard rather than the field.
+   */
+  const store = require('./engine/store');
+  /* ⚠️ THE PROFILE STORE IS SANDBOXED (AGENT_WORKFORCE_DATA, top of this file),
+     so nothing here touches a real agent's record. `angel` is used because the
+     route 404s a name no pane holds -- an invented name would test the guard
+     rather than the field. An earlier draft of this test carried a save-and-
+     restore for the real profile, which was theatre: it implied this suite
+     writes to the operator's board, and a comment claiming an unsafe root is
+     safe-to-ignore is the exact shape the header above spent a paragraph on. */
+  {
+    const set = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reportsTo: 'someone-else' }),
+    });
+    assert.equal(set.status, 200);
+    assert.equal(store.readProfile('angel').reportsTo, 'someone-else');
+
+    /* An empty string CLEARS it, and that is a real choice rather than a
+       missing value: somebody removing a reporting line must be able to. */
+    const clear = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reportsTo: '' }),
+    });
+    assert.equal(clear.status, 200);
+    assert.equal(store.readProfile('angel').reportsTo, null);
+
+    /* 🛑 And a cycle of one is refused rather than stored: it is the smallest
+       possible cycle and the only one a person can make by picking their own
+       name out of a list. */
+    const loop = await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reportsTo: 'angel' }),
+    });
+    assert.equal(loop.status, 400);
+    assert.match(JSON.parse(loop.body).error, /cannot report to itself/);
+    assert.equal(store.readProfile('angel').reportsTo, null, 'the refused loop was stored anyway');
+
+    /* ⚠️ AND A SAVE THAT DOES NOT MENTION IT MUST NOT ERASE IT. The screen
+       sends role and displayName on every Save; if an absent key were read as
+       "clear", editing a role would silently drop somebody's reporting line. */
+    await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reportsTo: 'someone-else' }),
+    });
+    await req('/api/agent/angel/profile', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'unrelated edit' }),
+    });
+    assert.equal(store.readProfile('angel').reportsTo, 'someone-else',
+      'a role edit erased the reporting line');
+  }
+});

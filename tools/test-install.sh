@@ -47,8 +47,29 @@ SB="$(mktemp -d)"
 trap 'for _p in "$SB"/home*/board.pid; do if [ -f "$_p" ]; then _k="$(cat "$_p" 2>/dev/null)"; [ "$_k" = "$$" ] || kill "$_k" 2>/dev/null || true; fi; done; chflags -R nouchg "$SB" 2>/dev/null || true; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
 mkdir -p "$SB/data" "$SB/launch"
 
+# ⚠️ THE PRODUCT'S DEFAULT PORT, RECORDED BEFORE ANYTHING RUNS, and checked
+# again at the end. Found by Splinter, 2026-08-21: a test run left a board
+# answering on the default port from a deleted worktree, and the installer's
+# own fresh-path probe then met it and explained it as "another account on this
+# Mac" -- a confident wrong cause about our own litter.
+# 🔑 A LEAK ON ANY OTHER PORT IS UNTIDY; A LEAK ON THIS ONE ANSWERS AS KOSMOS
+# to the next person who installs. That asymmetry is why this one port gets a
+# check of its own rather than a general no-leaks sweep, which would need to
+# know which of a dev machine's boards were already there.
+# 🛑 READ FROM THE INSTALLER, NEVER TYPED HERE. A literal 16180 in this file is
+# a copy of a value that has already moved once tonight (4317 -> 16180), and a
+# guard keyed on a superseded value passes while watching the wrong thing --
+# which is the same defect class this check exists to catch. Derived, it cannot
+# drift; if the extraction ever fails, that is loud rather than silently green.
+KOSMOS_DEFAULT_PORT="$(sed -n 's/^PORT="\${KOSMOS_PORT:-\([0-9][0-9]*\)}"/\1/p' "$HERE/install/setup.sh" | head -1)"
+[ -n "$KOSMOS_DEFAULT_PORT" ] || { echo "FAIL: could not read the default port out of install/setup.sh" >&2; exit 1; }
+DEFAULT_PORT_BEFORE=free
+curl -s -m 1 -o /dev/null "http://127.0.0.1:$KOSMOS_DEFAULT_PORT/" 2>/dev/null && DEFAULT_PORT_BEFORE=busy
+
 # A free port, probed rather than assumed: several agents and a real board
 # share dev machines.
+# ⚠️ 4460-4499 IS DELIBERATELY NOWHERE NEAR THE DEFAULT. Anything this suite
+# leaks must be litter rather than something a real install would find.
 PORT=4460
 while curl -s -m 1 -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; do
   PORT=$((PORT + 1))
@@ -893,6 +914,13 @@ LSDUMP="$SB/lsdump.txt"
 chk "the LaunchServices dump is non-empty (the control can see)" "[ -s \"$LSDUMP\" ]"
 chk "no sandbox path registered with LaunchServices" "! grep -qF \"$SB\" \"$LSDUMP\""
 chk "sysnever still untouched at the end" "[ \"\$(stat -f %Fm \"$SB/sysnever\")\" = \"$SYSNEVER_MTIME\" ] && [ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
+
+echo "== nothing was left answering on the product's default port =="
+DEFAULT_PORT_AFTER=free
+curl -s -m 1 -o /dev/null "http://127.0.0.1:$KOSMOS_DEFAULT_PORT/" 2>/dev/null && DEFAULT_PORT_AFTER=busy
+# Same shape as the real-folders checks below: it reports the BEFORE state too,
+# because a machine that already had a board there is not this run's doing.
+chk "port $KOSMOS_DEFAULT_PORT is as we found it (was: $DEFAULT_PORT_BEFORE)" "[ \"$DEFAULT_PORT_AFTER\" = \"$DEFAULT_PORT_BEFORE\" ]"
 
 echo "== the operator's real folders were never touched (top-level entries) =="
 chk "real home Applications unchanged (a FAIL here can also mean something else changed it DURING the run; check before blaming the installer)" "[ \"\$(real_apps_fingerprint \"$HOME/Applications\")\" = \"$REAL_HOME_APPS_BEFORE\" ]"
