@@ -108,7 +108,13 @@ function chk(ok, label, extra) {
        and the rule reads `outline-style: none`. That looked exactly like a
        missing focus ring and it was the measurement that was wrong: the
        property under test is defined by how focus ARRIVED, so nothing but a
-       real Tab can observe it. */
+       real Tab can observe it.
+
+       📌 AND IT ASSERTS OUR RING, NOT MERELY A RING, which is worth saying so
+       nobody reads a pass here as a bare AA result. With the rule deleted the
+       measurement is `auto` at 1px: Chromium draws its own default, so a check
+       asking only "is there an outline" would pass with our styling gone. The
+       2px floor is what makes the removal visible. */
     const ring = await pg.evaluate(() => { document.getElementById('create-model').focus(); });
     void ring;
     await pg.keyboard.press('Tab');
@@ -119,7 +125,7 @@ function chk(ok, label, extra) {
       return { w: st.outlineWidth, style: st.outlineStyle, focused: document.activeElement === el };
     });
     chk(ringNow.focused && ringNow.style !== 'none' && parseFloat(ringNow.w) >= 2,
-      theme + ': the summary shows a focus ring when tabbed to', JSON.stringify(ringNow));
+      theme + ': the summary shows our 2px focus ring when tabbed to', JSON.stringify(ringNow));
 
     chk(errs.length === 0, theme + ': no console errors', errs.slice(0, 2).join(' | '));
     await pg.screenshot({ path: 'docs/browser-checks/shots/model-more-' + theme + '.png' });
