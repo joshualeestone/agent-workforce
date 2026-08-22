@@ -3736,11 +3736,6 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
         <span class="p2n" id="pick-pm-name"></span>
         <span class="p2d" id="pick-pm-desc"></span>
       </button>
-      <button class="pick2" type="button" role="radio" aria-checked="false" data-rmode="list" hidden id="pick-list">
-        <span class="pickmark" aria-hidden="true">&#10003;</span>
-        <span class="p2n">Pick another role</span>
-        <span class="p2d" id="pick-list-desc"></span>
-      </button>
       <!-- ⚠️ Three equivalent options, same border as the other two (the
            pack rejected a dashed 'provisional' look: describing the job
            yourself is not a lesser choice). Its editor prefill is the
@@ -3751,6 +3746,28 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
         <span class="p2n">Describe it yourself</span>
         <span class="p2d">Write the job in your own words</span>
         <span class="p2full">We will start you off with an example you can change, rather than an empty page.</span>
+      </button>
+      <!-- 🔑 "Pick another role" IS LAST SO THE MENU SITS DIRECTLY UNDER IT
+           (#178). The menu is a sibling AFTER the radiogroup, deliberately -- a
+           radiogroup that owns a select announces "1 of 2" and hands assistive
+           tech a child that is neither -- so the only way to put the menu
+           beneath its own radio without breaking that is to move the RADIO
+           rather than the menu. Nothing crosses the group boundary: it still
+           wraps exactly the three radios.
+           ⚠️ THE OBVIOUS OBJECTION IS ALREADY ANSWERED BY THIS SCREEN. A
+           freeform option conventionally goes last -- and the note below
+           records the pack rejecting that framing outright: "describing the job
+           yourself is not a lesser choice". If the three are EQUIVALENT, their
+           order carries no meaning to trade away. That ruling was made for a
+           different reason and happens to make this free.
+           📌 Mona Lisa's route, and better than the three I proposed: mine all
+           moved the menu or the group, and one of them needed `display:
+           contents`, which has a real history of dropping elements out of the
+           accessibility tree. This needs no such measurement. -->
+      <button class="pick2" type="button" role="radio" aria-checked="false" data-rmode="list" hidden id="pick-list">
+        <span class="pickmark" aria-hidden="true">&#10003;</span>
+        <span class="p2n">Pick another role</span>
+        <span class="p2d" id="pick-list-desc"></span>
       </button>
       </div>
       <!-- The list only exists once its radio is chosen, so the screen
