@@ -4002,11 +4002,24 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          can be read as telling the local app, which it obviously already
          knows. Mona Lisa and I raised that separately and it is Josh's to rule;
          until he does, his exact words ship and the change is one edit. -->
+    <!-- ⚠️ NOT `checked` IN THE MARKUP, WHICH IT WAS UNTIL 2026-08-22 (#258).
+         Sending is TWO gates: this box for one agent, and the standing answer
+         in Settings. A box hard-coded to checked showed a person consenting to
+         something the second gate was about to refuse, so the screen offered an
+         action that would silently not happen. That is the state this form
+         already refuses three fields up, where Reports to disappears rather
+         than offering a choice nobody can make.
+         🔑 The difference is that reports-to is a choice that is IMPOSSIBLE and
+         this one is already ANSWERED, so the row stays and says so rather than
+         vanishing: a row that disappears teaches nothing, and somebody who
+         turned this off in Settings is exactly the person who benefits from
+         seeing that it took. (Mona Lisa's lean, and mine.) -->
     <div class="field" id="create-tell-wrap">
       <label class="tellrow" for="create-tell">
-        <input type="checkbox" id="create-tell" checked>
+        <input type="checkbox" id="create-tell">
         <span>Let Kosmos know you created an agent</span>
       </label>
+      <div class="fhint" id="create-tell-note"></div>
     </div>
 
     <div class="field" id="create-reports-wrap" hidden>
@@ -7128,6 +7141,42 @@ function tellPaint(r) {
     ? 'We could not read this setting just now.'
     : (r.ok === false ? 'We could not read this setting, so nothing is sent.' : '');
 }
+/**
+ * The create page's copy of the standing answer (#258).
+ *
+ * ⚠️ THREE STATES, AND THE THIRD IS NOT "ON". `tellPaint` beside this already
+ * says why: `null` means we have not read it, which is not off, and the
+ * setting's own message for that case is that nothing is sent. So an
+ * unreadable preference disables the box here too, because the engine will
+ * refuse on `!pref.on` either way and a checked box would be describing a send
+ * that cannot happen.
+ *
+ * 🔑 IT NEVER WRITES THE SETTING. Unchecking here is about this one agent;
+ * the standing answer is changed in Settings and nowhere else.
+ */
+function createTellPaint(r) {
+  const box = document.getElementById('create-tell');
+  const note = document.getElementById('create-tell-note');
+  const unread = !r;
+  const on = !unread && r.on === true;
+  box.disabled = !on;
+  box.checked = on;
+  note.textContent = on ? ''
+    : (unread
+      ? 'We could not read this setting, so nothing is sent.'
+      : 'Turned off in Settings.');
+}
+
+async function refreshCreateTell() {
+  /* Painted as unreadable FIRST, then upgraded. The old markup was checked
+     before any read had happened, which is the same defect one moment
+     earlier: a claim about a setting nobody had looked at. */
+  createTellPaint(null);
+  try {
+    createTellPaint(await (await fetch('/api/ping-setting')).json());
+  } catch { createTellPaint(null); }
+}
+
 async function refreshTell() {
   const mine = ++TELL_EPOCH;
   try {
@@ -11677,6 +11726,9 @@ function openCreate() {
   cstep('role');
   showTab('create');
   loadRoles();
+  /* Read on every open, not once on boot: the standing answer can be changed
+     in Settings between two visits to this form. */
+  refreshCreateTell();
 }
 
 document.getElementById('new-agent').addEventListener('click', openCreate);
