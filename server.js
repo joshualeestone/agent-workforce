@@ -4138,7 +4138,48 @@ function start(port = PORT) {
 // Only boot when run directly. Requiring this module -- which the routing tests
 // do, so they can drive the real server -- must not bind a port as a side
 // effect of the import. Same guard as engine/status.js.
+/**
+ * Put the current startup script where every agent's job points, at boot.
+ *
+ * 🛑 A FIX TO IT REACHED NOBODY UNTIL SOMEBODY MADE A NEW AGENT. `bin/agent-supervisor.sh`
+ * is shared by every agent on the machine, and its own header says a change
+ * there "reaches every agent the next time it starts". That sentence was true
+ * of the FILE and false of the MACHINE: the only two callers of
+ * `installSupervisor` are agent creation and the login-job repair, so on an
+ * install where nobody happens to create an agent, an update ships a new
+ * supervisor into the app bundle and the jobs go on running the old copy under
+ * the data directory. Forever, silently, and the header explaining the update
+ * model is what a reader finds instead of the gap.
+ *
+ * 🔑 THE BOARD RESTARTING IS THE UPDATE. Every update stops and starts this
+ * process, and so does every login, so this is the one place that runs exactly
+ * when a new supervisor arrives and never in between.
+ *
+ * ⚠️ THE WRITE IS RENAME-INTO-PLACE, which is what makes it safe to do under
+ * running agents: every live supervisor is a `bash` process reading that exact
+ * file by offset, so a new inode leaves them reading the one they started with
+ * and they pick this up at their next start. `installSupervisor` already works
+ * that way for the same reason; this is a new caller, not a new mechanism.
+ *
+ * ⚠️ NOT FATAL, and it must never be. A board that refuses to start because it
+ * could not refresh a script is strictly worse than a board running with the
+ * previous one, which is the state every install is in today.
+ *
+ * ⚠️ AND NOT AT IMPORT. The routing tests require this module; writing files as
+ * a side effect of an import is the same class as binding a port, which the
+ * guard below already exists to prevent.
+ */
 if (require.main === module) {
+  try {
+    const put = create.installSupervisor();
+    if (!put.ok) {
+      process.stderr.write(put.missing
+        ? 'Kosmos could not find the script it starts agents with, so agents made from here would not start.\n'
+        : 'Kosmos could not refresh the script it starts agents with; your agents keep the one they have.\n');
+    }
+  } catch (err) {
+    process.stderr.write(`Kosmos could not refresh the script it starts agents with: ${String(err && err.message)}\n`);
+  }
   start().then(() => {
     // Report the port actually bound, not the one requested, or a `PORT=0` run
     // would announce itself on port 0.
