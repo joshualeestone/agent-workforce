@@ -60,14 +60,15 @@ function clean(value, { multiline } = {}) {
   // Every sibling's marker pair, not only ours: a pair smuggled through a
   // typed answer would end a block early, ambiguate a real sibling block
   // (silently disabling its heal), or hand the colleagues heal a span to
-  // replace inside somebody's own words. The colleagues pair joined this
-  // list when tellAgent became that block's healer (same lesson, fourth
-  // writer). Lazy require: you.js must not gain a cycle.
-  const mm = require('./messages');
-  for (const m of [START, END, projects.BLOCK_START, projects.BLOCK_END, mm.START, mm.END]) {
-    s = s.split(m).join('(kosmos marker)');
-  }
-  return s.trim();
+  // replace inside somebody's own words.
+  //
+  // ⚠️ FROM THE REGISTRY, NOT FROM A LIST WRITTEN HERE. This was a hand-kept
+  // array, and the comment it replaced ended "same lesson, fourth writer" --
+  // four separate places had each had to remember the same thing, and the one
+  // that forgot would not fail, it would become the injection path. The
+  // registry is in projects.js beside the pairs themselves, so a fifth block
+  // is covered by existing, never by being remembered.
+  return projects.neutralise(s).trim();
 }
 
 /** The refusal, or null. Same whole-or-not-at-all shape as tasks. */

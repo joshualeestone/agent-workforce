@@ -446,14 +446,14 @@ async function look(page, name) {
           }));
           await page.click('#fr-reveal');
           await page.waitForFunction(
-            () => /could not look just now/.test((document.getElementById('fr-return-dock') || {}).textContent || ''),
+            () => /could not look just now/.test((document.getElementById('fr-return-msg') || {}).textContent || ''),
             { timeout: 4000 },
           ).catch(() => problems.push(`${shot.name} [${scheme}]: a refused reveal said nothing in the dock`));
           await page.unroute('**/api/reveal-app');
           await page.route('**/api/reveal-app', (r) => r.fulfill({ json: { ok: true } }));
           await page.click('#fr-reveal');
           await page.waitForFunction(
-            () => !/could not look just now/.test((document.getElementById('fr-return-dock') || {}).textContent || ''),
+            () => !/could not look just now/.test((document.getElementById('fr-return-msg') || {}).textContent || ''),
             { timeout: 4000 },
           ).catch(() => problems.push(`${shot.name} [${scheme}]: the failure sentence outlived a reveal that worked`));
           await page.unroute('**/api/reveal-app');

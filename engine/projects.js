@@ -171,6 +171,46 @@ const BLOCK_END = '<!-- kosmos:projects:end -->';
 const YOU_START = '<!-- kosmos:you:start -->';
 const YOU_END = '<!-- kosmos:you:end -->';
 
+/**
+ * Every managed-block marker in the product, in one list.
+ *
+ * 🛑 THIS EXISTS BECAUSE EACH NEW BLOCK HAD TO REMEMBER TO JOIN TWO SEPARATE
+ * ENUMERATIONS, and the comments record it going wrong. `oneLine` here and
+ * `clean` in you.js each carry a hand-written list of pairs to neutralise, and
+ * the notes beside them read "same lesson, third sibling" and "same lesson,
+ * fourth writer". A rule that has to be remembered four times is not a rule,
+ * it is a habit, and the failure it guards against is the quietest one there
+ * is: a marker smuggled through a typed project name fabricates a tight pair,
+ * which either ends a block early, ambiguates a sibling into silently
+ * disabling its own heal, or hands a writer a span to replace INSIDE somebody
+ * else's words.
+ *
+ * 🔑 So a fifth pair joins by being DEFINED, not by being remembered. Both
+ * neutralisers derive from this list, and `marker-registry.test.js` reads the
+ * engine's source for anything shaped like one of these comments and fails if
+ * the registry does not know it.
+ *
+ * ⚠️ The colleagues pair is loaded lazily and cannot be a literal here:
+ * messages.js requires projects.js, so naming it at module scope is a cycle.
+ * `ALL_MARKERS()` is a function for that reason alone.
+ */
+function ALL_MARKERS() {
+  const mm = require('./messages');
+  return [BLOCK_START, BLOCK_END, YOU_START, YOU_END, mm.START, mm.END];
+}
+
+/**
+ * Neutralise every managed-block marker in a value somebody typed.
+ *
+ * Neutralised rather than stripped, so a name that contained one is still
+ * recognisable to the person who typed it instead of silently changing.
+ */
+function neutralise(value) {
+  let out = String(value == null ? '' : value);
+  for (const m of ALL_MARKERS()) out = out.split(m).join('(kosmos marker)');
+  return out;
+}
+
 function file() {
   return path.join(store.ROOT, FILE);
 }
@@ -1613,26 +1653,16 @@ function removeBlock(text, startMark = BLOCK_START, endMark = BLOCK_END) {
  * macOS path, so the path is untrusted for exactly the same reason the name is.
  */
 function oneLine(value) {
-  return String(value == null ? '' : value)
+  const collapsed = String(value == null ? '' : value)
     // Any run of whitespace, newlines included, becomes one space.
     .replace(/\s+/g, ' ')
-    // Neutralised rather than stripped, so a name that contained one is still
-    // recognisable to the person who typed it instead of silently changing.
-    .split(BLOCK_START).join('(kosmos marker)')
-    .split(BLOCK_END).join('(kosmos marker)')
-    // The sibling block's pair too -- the older writer must know the newer
-    // sibling's markers or it becomes the injection path into them.
-    .split(YOU_START).join('(kosmos marker)')
-    .split(YOU_END).join('(kosmos marker)')
-    // And the colleagues pair, the moment tellAgent became that block's
-    // healer: an inline pair smuggled through a project name would either
-    // ambiguate the real block (silently disabling the heal) or make the
-    // heal splice a colleagues body INTO the projects block of a file
-    // that never had one -- the exact growth the heal's marker gate
-    // refuses. Same lesson, third sibling.
-    .split(messagesBlock().START).join('(kosmos marker)')
-    .split(messagesBlock().END).join('(kosmos marker)')
     .trim();
+  // ⚠️ EVERY pair, from the registry rather than from a list written here.
+  // This used to be three hand-written pairs, added one at a time as each new
+  // block discovered it had to be here, and the third one's comment says
+  // "same lesson, third sibling". A fourth block that forgot would become the
+  // injection path into itself and every sibling, with nothing failing.
+  return neutralise(collapsed);
 }
 
 function blockBody(projects, sessionName) {
@@ -1859,7 +1889,7 @@ function syncAgent(sessionName, roster) {
 }
 
 module.exports = {
-  FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END, YOU_START, YOU_END,
+  FILE, FOLDER, TOLD, BLOCK_START, BLOCK_END, YOU_START, YOU_END, ALL_MARKERS, neutralise,
   file, readAll, writeAll, idFor, folderState, describe,
   list, get, projectsFor, create, edit, rename, setDescription, setArchived, addAgent, removeAgent, remove, mutate,
   findBlock, spliceBlock, removeBlock, blockBody, tellAgent, syncAgent, groupBecause, healColleagues,
