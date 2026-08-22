@@ -117,3 +117,25 @@ test('it posts to the Kosmos endpoint, as JSON', () => {
   /* A hung host must not hold a socket open forever on somebody's machine. */
   assert.ok(seen.init.signal, 'the request has no timeout');
 });
+
+test('a test run never reaches the real network', () => {
+  /**
+   * 🛑 THE DEFECT THIS PINS ALREADY HAPPENED. `server.test.js` creates agents
+   * through the real route, so the moment this feature was wired the suite
+   * began POSTing to installkosmos.com on every run -- putting fake installs
+   * into the number Josh reads off the homepage. Caught because the live
+   * counter said 2 after one deliberate ping.
+   */
+  fresh();
+  assert.equal(ping.underTest(), true, 'the runner signal is gone, so this test proves nothing');
+  ping.setSender(null);
+  let reached = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = () => { reached += 1; return Promise.resolve(); };
+  try {
+    ping.agentCreated({ wanted: true });
+    assert.equal(reached, 0, 'a test run reached the network');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

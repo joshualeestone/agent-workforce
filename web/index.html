@@ -1387,7 +1387,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .tmeta > span { color: var(--label-2); }
 .tmeta > b { font-weight: 600; text-align: right; min-width: 0; }
 .tkstate { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
-.tkclosenote { margin: 10px 0 18px; }
+/* The pack has `10px 0 0` and this had `10px 0 18px`. Mona Lisa: either is
+   defensible, pick one. Picked the pack's: the note is about the button
+   directly above it, and 18px of air below pushes it toward the columns
+   underneath, which it has nothing to do with. */
+.tkclosenote { margin: 10px 0 0; }
 /* One part of a task. A row rather than a card: the column already is the
    card, and a box inside a box is the shape that made Settings look busy. */
 /* 🛑 THE SEPARATOR LIVES BETWEEN SIBLINGS, and the version that shipped in
@@ -1682,7 +1686,15 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    band is a plain block, so nothing does and the sentence ran straight into
    it ("…bring you in.2 minutes ago"). Pack value, measured (FROZEN-2026-08-18c). */
 .msg-valve .msg-t { margin-left: .5em; }
-.composer { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+/* ⚠️ A FILLED, PADDED TRAY rather than a bare flex row (Mona Lisa's triage,
+   the one of thirty-two items that was a real gap). The pack gives the
+   composer a ground of its own, and the difference it makes is not decoration:
+   an input sitting loose on the page reads as a control that happens to be
+   there, and the same input inside a tray reads as a place to write.
+   📌 `--k-bg` rather than the pack's literal #faf9f7, which is the same value
+   in light and is the reason the pack's own version is invisible in dark. */
+.composer { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;
+            background: var(--k-bg); padding: 14px 22px; border-radius: 10px; }
 .composer input { flex: 1; min-width: 10rem; }
 /* ⚠️ THE PACK'S COMPOSER (FROZEN-2026-08-19:494-556), ported onto this file's
    tokens. The shape is the point: the controls live INSIDE a bordered box with

@@ -135,8 +135,34 @@ function payload() {
  * cannot await what it is not given, so no future edit can make a creation wait
  * on a network.
  */
+/**
+ * 🛑 A TEST RUN MUST NEVER PHONE HOME, AND ONE ALREADY DID. `server.test.js`
+ * creates agents through the real route, so the moment this feature was wired
+ * the suite began POSTing to installkosmos.com on every `yarn test` -- putting
+ * fake installs into the number Josh is going to read off the homepage. Caught
+ * by the counter reading 2 after a single deliberate ping.
+ *
+ * ⚠️ THE SIGNAL HAS TO FAIL IN THE RIGHT DIRECTION, which ruled out the
+ * obvious ones. Keying on `AGENT_WORKFORCE_DATA` would work today and would
+ * silently disable telemetry for anybody who moves their data folder, since
+ * `install/setup.sh` honours that same variable. Requiring an opt-in env var
+ * in production inverts it: forget to set it once and nothing is ever sent,
+ * with no symptom. `NODE_TEST_CONTEXT` is set by node's own test runner in
+ * every test process and by nothing else, so it cannot be true for a real
+ * install and cannot be false for a test.
+ */
+function underTest() {
+  return Boolean(process.env.NODE_TEST_CONTEXT);
+}
+
 function agentCreated({ wanted } = {}) {
   try {
+    /* ⚠️ ONLY WHEN NOTHING HAS BEEN INJECTED. The guard is about the real
+       network, and a test that has supplied its own sender touches no network
+       at all -- so applying it there would make the send path itself
+       untestable, which is how a guard against sending becomes a guard against
+       knowing whether sending works. */
+    if (!sender && underTest()) return;
     /* Two gates, and BOTH must be true. `wanted` is the box on the create page
        for this one agent; the stored preference is the standing answer. An
        unchecked box does not change the setting, and a setting turned off is
@@ -161,4 +187,4 @@ function agentCreated({ wanted } = {}) {
 /* Test hooks. Production never calls these. */
 function setSender(f) { sender = f; }
 
-module.exports = { FILE, read, setOn, installId, payload, agentCreated, setSender, DEFAULT_ENDPOINT };
+module.exports = { FILE, read, setOn, installId, payload, agentCreated, setSender, underTest, DEFAULT_ENDPOINT };
