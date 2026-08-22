@@ -14995,17 +14995,36 @@ function dmOwesLine(owes, rows) {
     return '<p class="dmnone">We could not read the message record, so we cannot tell whether it has answered.</p>';
   }
   if (owes.state !== 'owes') return '';
-  /* ⚠️ THE GRACE IS MEASURED ON THE MESSAGE, NOT ON THE STATE. `owes` is true
-     the instant something lands, so without this every thread accuses an agent
-     for the first two minutes of every exchange. `pjOldEnoughToJudge` is the
-     room's own test and refuses an unparseable timestamp rather than treating
-     it as long ago. */
-  const last = owes.lastHeardAt || (rows.length ? rows[rows.length - 1].at : null);
-  if (!pjOldEnoughToJudge(last)) return '';
+  /* 🛑 ONLY WHEN SOMETHING ACTUALLY REACHED IT, which the first version of this
+     did not check and a screenshot caught. A message that could not be
+     delivered still makes `owes` true, because the record says something was
+     addressed to the agent; saying "nothing back yet" over a row already
+     reading "Could not deliver" blames it for silence about a message it never
+     received. Two sentences, one moment, contradicting each other.
+     🔑 THE ROOM ALREADY DOES THIS: `pjSilentSince` filters its recipients to
+     `state === 'placed'` before deciding anybody has gone quiet. Same rule,
+     and finding it there rather than inventing one is why the two surfaces
+     agree. */
+  const landed = rows.filter((m) => m && m.delivery && m.delivery.state === 'placed');
+  if (!landed.length) return '';
+  /* ⚠️ THE GRACE IS MEASURED ON THE MESSAGE THAT LANDED, not on the state and
+     not on the newest row. `owes` is true the instant something is recorded, so
+     without this every thread accuses an agent for the first two minutes of
+     every exchange, and timing from an undelivered row would start the clock on
+     something that never arrived. `pjOldEnoughToJudge` is the room's own test
+     and refuses an unparseable timestamp rather than treating it as long ago. */
+  if (!pjOldEnoughToJudge(landed[landed.length - 1].at)) return '';
   return '<p class="dmnone">Nothing back yet.</p>';
 }
 
 function pjOldEnoughToJudge(at) {
+  /* ⚠️ A STRING THAT PARSES, not merely something `Date.parse` accepts. It
+     COERCES: `Date.parse(0)` is the year 2000, so a bare number rides through
+     as "long ago" and this returns true about a row with no real timestamp.
+     `rowShaped` in engine/messages.js already guards exactly this and records
+     the reason ("a bare number 2026 would ride through"); the rule belongs in
+     both places or the one without it is where a bad row lands. */
+  if (typeof at !== 'string') return false;
   const when = Date.parse(at);
   if (!Number.isFinite(when)) return false;   // no timestamp is not "long ago"
   return (Date.now() - when) >= PJ_SILENCE_AFTER_MS;
