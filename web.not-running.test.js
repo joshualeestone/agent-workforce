@@ -131,9 +131,35 @@ for (const which of ['card', 'lrow']) {
        would be the could-not-look versus is-not-there inversion, on the surface
        that distinction was built for. */
     const html = render(which, offlineRow());
-    for (const gone of ['membadge', 'class="gu"', 'class="gf', 'amodel', 'atask', 'lmem', 'lbar', 'unk']) {
+    for (const gone of ['membadge', 'class="gu"', 'class="gf', 'amodel', 'unk', 'lbar']) {
       assert.ok(!html.includes(gone), `${which} still draws ${gone} for an agent that is not running`);
     }
+  });
+
+  test(`${which}: the cells it cannot answer are ${which === 'card' ? 'absent' : 'empty'}`, () => {
+    /* 🛑 THE TWO RENDERERS DIFFER HERE AND THE FIRST VERSION TREATED THEM THE
+       SAME, which shipped a real defect. A card is a stack of rows, so a row
+       it cannot fill is simply not drawn. A list row is a FIVE-COLUMN GRID,
+       so a row supplying four children shifts every cell one column right:
+       measured on a real board, `.lstate` at left=463 where its neighbours
+       have it at 313, with the agent's ROLE landing in the state column and
+       reading as a state (Mona Lisa).
+       🔑 So the list keeps the board's column rhythm and leaves the two cells
+       EMPTY. Empty, not a dash and not "no task": a stopped agent has no task
+       to not-show. */
+    const html = render(which, offlineRow());
+    if (which === 'card') {
+      for (const gone of ['atask', 'amodel']) {
+        assert.ok(!html.includes(gone), `the card still draws ${gone}`);
+      }
+      return;
+    }
+    for (const slot of ['lav', 'lname', 'lstate', 'ltask', 'lmem']) {
+      assert.ok(html.includes(`class="${slot}"`) || html.includes(`class="${slot} `),
+        `the list row is missing its ${slot} cell, so every cell after it moves one column`);
+    }
+    assert.match(html, /<div class="ltask"><\/div>/, 'the task cell is not empty');
+    assert.match(html, /<div class="lmem"><\/div>/, 'the memory cell is not empty');
   });
 
   test(`${which}: reading a field the route does not emit throws`, () => {
@@ -143,5 +169,23 @@ for (const which of ['card', 'lrow']) {
        assertion passed. The strict proxy is what turns that from `undefined`
        into a loud failure here. */
     assert.doesNotThrow(() => render(which, offlineRow()));
+  });
+}
+
+for (const which of ['card', 'lrow']) {
+  test(`${which}: the state pill uses a class the stylesheet actually dresses`, () => {
+    /* 🛑 IT DID NOT. The pill shipped as `st-off`, which has no CSS in this file
+       at all, so it fell back to the base `.astate`: in dark its border came out
+       at 1.27:1 against the card, which is no outline, and in light its text
+       rendered at full ink, making the pill on the card we deliberately
+       quietened the loudest thing on the board (Mona Lisa, measured).
+       🔑 THE ASSERTION IS NOT THE NAME. Pinning `st-stopped` would pass on any
+       future rename to another undressed class. What must hold is that whatever
+       class the pill wears is one the stylesheet has rules for. */
+    const html = render(which, offlineRow());
+    const cls = /class="(?:astate|lstate) (st-[a-z-]+)"/.exec(html);
+    assert.ok(cls, `${which} no longer puts a state class on its pill`);
+    const rules = PAGE.split(`.${cls[1]}`).length - 1;
+    assert.ok(rules > 0, `${which} uses .${cls[1]}, which has no rule anywhere in the stylesheet`);
   });
 }

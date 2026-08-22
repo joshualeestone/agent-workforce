@@ -21,12 +21,17 @@
  * ⚠️ HEADED by default. `HEADED=0` on a machine with no console session.
  */
 const { chromium } = require('playwright');
+
+/* ⚠️ The URL comes from the environment like every other check here. This was
+   saved from a one-off with the port written into it twice, so `KOSMOS_URL`
+   was accepted in the header and ignored in the code. */
+const URL = process.env.KOSMOS_URL || 'http://127.0.0.1:17421';
 (async () => {
   const b = await chromium.launch({ headless: process.env.HEADED === '0' });
   const fails = [];
   for (const theme of ['light', 'dark']) {
     const pg = await b.newPage({ viewport: { width: 1400, height: 700 }, colorScheme: theme });
-    await pg.goto('http://127.0.0.1:17421', { waitUntil: 'networkidle' });
+    await pg.goto(URL, { waitUntil: 'networkidle' });
     if (!(await pg.$('#firstrun[hidden]'))) { await pg.keyboard.press('Escape'); await pg.waitForTimeout(400); }
     await pg.waitForTimeout(1400);
     const seen = await pg.evaluate(() => {
@@ -40,6 +45,7 @@ const { chromium } = require('playwright');
         rings: nr ? nr.querySelectorAll('circle.gu, circle.gt, circle.gf').length : -1,
         face: nr ? nr.querySelectorAll('.avatar-initials, image').length : -1,
         running: document.querySelectorAll('.acard:not(.notrunning)').length,
+        offCards: document.querySelectorAll('.acard.notrunning').length,
       };
     });
     const say = (ok, l, x) => { console.log((ok ? 'PASS  ' : 'FAIL  ') + theme + ': ' + l + (x ? '  ' + x : '')); if (!ok) fails.push(l); };
@@ -47,8 +53,13 @@ const { chromium } = require('playwright');
     say(/Not running/.test(seen.cardText), 'it says Not running', seen.cardText.slice(0, 70));
     say(seen.rings === 0, 'no memory ring at all, not even the unknown one', String(seen.rings));
     say(seen.face === 1, 'the face is still drawn', String(seen.face));
-    say(!seen.off.hidden && seen.off.t === '2', 'the tile counts them', JSON.stringify(seen.off));
-    say(Number(seen.agents.t) === seen.running + 2, 'the row adds up', seen.agents.t + ' = ' + seen.running + ' running + 2');
+    /* ⚠️ COUNTED OFF THE SCREEN, not hardcoded. This said `=== 2` because the
+       sandbox I first seeded had two stopped agents, so the check answered a
+       question about my fixture rather than about the board. */
+    say(!seen.off.hidden && Number(seen.off.t) === seen.offCards,
+      'the tile counts exactly the not-running cards', seen.off.t + ' vs ' + seen.offCards);
+    say(Number(seen.agents.t) === seen.running + seen.offCards, 'the row adds up',
+      seen.agents.t + ' = ' + seen.running + ' running + ' + seen.offCards + ' not running');
     await pg.screenshot({ path: '/tmp/nrshots/nr-' + theme + '.png', clip: { x: 0, y: 60, width: 1400, height: 420 } });
     await pg.close();
   }

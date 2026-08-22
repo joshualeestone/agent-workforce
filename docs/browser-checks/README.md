@@ -81,6 +81,7 @@ one invented by somebody who did not write them.
 | `render-connection.js` | **no header sentence.** Read it before running it, and give it one. |
 | `render-fields.js` | The field and control invariants, measured in a real browser, in BOTH schemes |
 | `render-first-run.js` | Render every first-run state in a real browser and look at it |
+| `render-list-row.js` | The not-running row in the list layout, measured cell by cell against a running one (#278) |
 | `render-memory-words.js` | Measure the two unknown-memory captions on all three surfaces that draw them, |
 | `render-model-more.js` | The create form's model hint and "More models" disclosure (#202) |
 | `render-survival.js` | The panel naming the agents that will not come back after a restart (#277) |

@@ -6081,6 +6081,16 @@ function card(a) {
    *
    * 🔑 QUIETER ON PURPOSE, so a board of twenty says which are up before
    * anybody reads a pill.
+   *
+   * ⚠️ THE PILL CLASS IS `st-stopped`, AND IT WAS `st-off`, WHICH HAS NO CSS IN
+   * THIS FILE AT ALL. Every other pill is named after its state word, and the
+   * stopped treatment is already dressed in four rules including both dark ones.
+   * Under the wrong name the pill fell back to the base: in dark its border was
+   * 1.27:1 against the card, which is no outline at all, and in light its text
+   * rendered at full ink, making the pill on the card we deliberately quietened
+   * the loudest thing on the board. Two spellings of one state, which is the
+   * inverse of the defect this file keeps finding (Mona Lisa, measured).
+   * 📌 The `off` modifier on the card and the row is a different thing and stays.
    */
   if (a.running === false) {
     return `<div class="acard off notrunning" data-agent="${esc(a.sessionName)}">
@@ -6092,7 +6102,7 @@ function card(a) {
       <span class="pres off" aria-hidden="true"></span></div>
     <div class="aname"><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button></div>
     <div class="ameta">${esc(roleLine(a))}</div>
-    <div class="astate st-off">${GLYPH.stopped}<b>Not running</b></div>
+    <div class="astate st-stopped">${GLYPH.stopped}<b>Not running</b></div>
   </div>`;
   }
   /* ⚠️ THE PACK'S CARD (stage 3). Column order: gauge -> name -> state pill
@@ -6178,14 +6188,36 @@ function lrow(a) {
    * no task. Not blanks and not stale values.
    */
   if (a.running === false) {
+    /**
+     * 🛑 FIVE SLOTS, ALWAYS, AND THE FIRST VERSION SUPPLIED FOUR. `.lrow` is a
+     * five-column grid, so a row with four children shifts every cell one
+     * column right: measured on a real board, `.lstate` at left=463 where the
+     * rows above and below it have it at 313.
+     *
+     * ⚠️ AND THE ALIGNMENT WAS THE SMALLER HALF. The extra `.lrole` landed IN
+     * the state column, so scanning that column down a list read "Idle /
+     * Legal / Idle" — an agent's ROLE rendered where its state goes, which is
+     * wrong in the way that reads as information rather than as a glitch
+     * (Mona Lisa, rendered rather than reasoned).
+     *
+     * 🔑 THE FIX IS THE SAME COLUMNS, not its own geometry. A row that keeps
+     * the board's rhythm reads as an agent in a different state; a row with
+     * its own reads as a different kind of object, and it is not one. So the
+     * role goes where the running row puts it, under the name, and the two
+     * cells this agent cannot answer are EMPTY rather than absent.
+     *
+     * ⚠️ EMPTY, and not a dash or "no task": a stopped agent has no task to
+     * not-show. Same rule as the card carrying no memory ring at all.
+     */
     const off = a.hasAvatar
       ? `<img src="/api/agent/${encodeURIComponent(a.sessionName)}/avatar" alt="">`
       : `<span class="lavtint" style="background:${discTint(a.name)};color:${discInk(a.name)}">${esc(initials(a.name))}</span>`;
     return `<div class="lrow off notrunning" data-agent="${esc(a.sessionName)}">
-      <span class="lav">${off}</span>
-      <span class="lname"><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button></span>
-      <span class="lrole">${esc(roleLine(a))}</span>
-      <span class="lstate st-off">${GLYPH.stopped}<b>Not running</b></span>
+      <div class="lav">${off}</div>
+      <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button></b><small>${esc(roleLine(a))}</small></div>
+      <div class="lstate st-stopped">${GLYPH.stopped}Not running</div>
+      <div class="ltask"></div>
+      <div class="lmem"></div>
     </div>`;
   }
   const m = cardStOf(a);
