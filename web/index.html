@@ -3402,6 +3402,37 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   </section>
   </div>
 
+  <!-- 🛑 RESTART WAS UNREACHABLE UNLESS THE INSTRUCTIONS HAD DRIFTED. The
+       engine has had `removal.restart` and the route `/api/agent/<name>/restart`
+       for as long as this screen has existed, and the only button that called
+       either lived inside the stale-instructions notice, which `renderStale`
+       hides whenever the state is `current`. So a person could restart an agent
+       whose instructions had changed and could NOT restart one that was simply
+       wedged, which is the case anybody would actually reach for. Complete on
+       the server and unreachable on the screen (the shape Mona Lisa re-keyed
+       #204 on, found the same night).
+
+       ⚠️ ABOVE Remove, NOT beside it, and outside the danger block. A restart
+       takes nothing away: the files and the instructions are untouched, and the
+       one real consequence is that the agent comes back with an empty memory
+       ring. Putting it in a red box would teach that those two acts are the
+       same weight, and they are not. -->
+  <div class="field" id="d-restart-agent" hidden>
+    <div>
+    <label class="flabel"><b>Restart this agent</b></label>
+    <!-- The consequence, named before the click rather than discovered after
+         it. Josh has twice read a restarted agent's empty memory as the
+         product being broken, which is why this sentence exists at all and why
+         it says what it says. -->
+    <div class="fhint">It stops and starts, so it comes back with nothing in its memory. Its instructions and its files are untouched.</div>
+    </div>
+    <div class="frow">
+      <button class="btn" id="d-restart-start" type="button"
+              data-restart-agent="" data-restart-note="d-restart-msg">Restart it</button>
+    </div>
+    <div class="fmsg" id="d-restart-msg" role="status" aria-live="polite"></div>
+  </div>
+
   <!-- ⚠️ THE ONE CONTROL THAT TAKES SOMETHING AWAY, and it is here rather than
        on the card deliberately: at the bottom of the one screen you have to
        open on purpose, after everything else. Nothing about removing an agent
@@ -10188,6 +10219,37 @@ async function loadRemoval(sessionName, { fromPoll = false } = {}) {
     REMOVE_ASK = null;
   }
 
+  /* ⚠️ RESTART IS UNCONDITIONAL, which is the difference between it and the
+     block below. Removal asks the board first, because whether an agent CAN be
+     removed is a question with a real answer. Restart has no such question: the
+     route stops and starts it, and if that fails it says so afterwards. Gating
+     this on the removal answer would have hidden the control on exactly the
+     machines where an agent is wedged, which is when somebody wants it.
+
+     🔑 The message is cleared on the SAME condition as its neighbour and for
+     the same reason: blanking it every five seconds would wipe the receipt of a
+     restart the person just performed, while they are still reading it.
+
+     ⚠️ AND IT IS OFFERED FOR AN AGENT KOSMOS DID NOT START, which looks like
+     the defect fixed on the create page's tell box the same night and is not.
+     That box was checked while the engine was about to drop the send, and
+     NOTHING SAID SO: the failure was silence. Here `remove.js` refuses with a
+     sentence that names the reason and the remedy, "was not started by Kosmos,
+     so we cannot start it again, whatever launched it is what can restart it",
+     and it arrives on the click. The thing to avoid is not an action that can
+     fail; it is an action that fails without saying it did. Hiding it would
+     also contradict this screen's own rule for Remove, one block down: an
+     agent Kosmos can show you but not manage is a hole, not a safeguard. */
+  const rst = document.getElementById('d-restart-agent');
+  const rstBtn = document.getElementById('d-restart-start');
+  rstBtn.dataset.restartAgent = sessionName;
+  rst.hidden = false;
+  if (!fromPoll) {
+    document.getElementById('d-restart-msg').textContent = '';
+    rstBtn.disabled = false;
+    rstBtn.textContent = 'Restart it';
+  }
+
   const mine = ++REMOVE_TOKEN;
   let ask = null;
   let reached = true;
@@ -11059,6 +11121,14 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
    that node whenever the staleness changes, so a listener on the button itself
    would be discarded and re-created, and a click landing between the two would
    do nothing. */
+/* Where a restart button's message goes. Named by the button when it has one,
+   because the two controls that restart an agent sit in different shapes and a
+   single sibling query is right for exactly one of them. */
+function noteFor(btn) {
+  const named = btn.dataset.restartNote && document.getElementById(btn.dataset.restartNote);
+  return named || (btn.parentNode && btn.parentNode.querySelector('.instr-restart-note'));
+}
+
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest && e.target.closest('[data-restart-agent]');
   if (!btn) return;
@@ -11076,14 +11146,27 @@ document.addEventListener('click', async (e) => {
          differently. */
       btn.textContent = was;
       btn.disabled = false;
-      const note = btn.parentNode && btn.parentNode.querySelector('.instr-restart-note');
+      /* ⚠️ BY ID WHEN THE BUTTON NAMES ONE. The sibling lookup below is right
+         for the stale notice, where the button and its note share a parent; it
+         finds NOTHING for the detail-page control, whose button sits inside a
+         `.frow`. A failure that lands nowhere is worse here than on the notice,
+         because that box disappears on success and this one does not, so
+         silence is the same picture as either outcome. */
+      const note = noteFor(btn);
       if (note) note.textContent = (out && (out.because || out.error)) || 'We could not restart it.';
       return;
     }
-    /* ⚠️ NO SUCCESS SENTENCE HERE. The five-second poll repaints this notice
-       from the record, and a restarted agent's instructions are no longer
-       stale -- so the whole box disappears on its own, which is a truer
-       receipt than a line claiming it worked. */
+    /* ⚠️ NO SUCCESS SENTENCE ON THE NOTICE, AND ONE ON THE PANEL, which is the
+       same rule rather than two. The notice's receipt is that it DISAPPEARS:
+       the poll repaints it from the record and a restarted agent's
+       instructions are no longer stale, which is truer than a line claiming it
+       worked. The detail-page control has no such disappearance, so without a
+       sentence its success and its silent failure look identical. A receipt is
+       owed wherever the screen does not provide one by changing. */
+    const done = noteFor(btn);
+    if (done) done.textContent = 'Restarted. It starts fresh, so it will look idle until you say something to it.';
+    btn.textContent = was;
+    btn.disabled = false;
     await tick();
   } catch {
     btn.textContent = was;
