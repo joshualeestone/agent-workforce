@@ -2978,8 +2978,12 @@ test('the detail meta line keeps the machine-name disclosure the card gave up', 
     assert.ok(from > -1 && write > from && write < end,
       'the meta-line write fell outside the extracted slice');
     // eslint-disable-next-line no-new-func
-    new Function('document', 'a', 'modelLine', 'roleLine', 'runsOnLine', script.slice(from, end))(
-      { getElementById: () => el }, card, modelLine, roleLine, runsOnLine);
+    /* ⚠️ `ROLE_TITLES` IS SUPPLIED AS NULL, WHICH IS A CASE AND NOT A STUB. The
+       meta line now calls `roleLine(a, ROLE_TITLES)`, and null is the state the
+       page holds until the roles route answers -- so this drives the fallback
+       path, which is the one whose capitals the assertion below is about. */
+    new Function('document', 'a', 'modelLine', 'roleLine', 'runsOnLine', 'ROLE_TITLES', script.slice(from, end))(
+      { getElementById: () => el }, card, modelLine, roleLine, runsOnLine, null);
     return el.textContent;
   };
   const surfaced = drive({ role: 'archive worker', modelName: 'Claude Opus 5', nameDerived: false, state: 'working' });
@@ -7612,13 +7616,26 @@ test('a parsed role is sentence-cased and an acronym survives it', () => {
   // when this landed: 14 agents on the dev machine, ZERO with a profile role,
   // all 14 falling back. So the fallback is the board, not an edge case.
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-  const at = raw.indexOf('function roleLine(a)');
+  const at = raw.indexOf('function roleLine(a, titles)');
   assert.ok(at > -1, 'roleLine moved; re-point this test');
   // eslint-disable-next-line no-new-func
   const roleLine = new Function(raw.slice(at, raw.indexOf('\n}\n', at) + 3) + '\nreturn roleLine;')();
 
   assert.equal(roleLine({ role: 'web-properties worker' }), 'Web-properties worker');
   assert.equal(roleLine({ role: 'executive assistant' }), 'Executive assistant');
+  // 🔑 WITH THE CATALOGUE IN HAND IT PRINTS THE CATALOGUE'S OWN TITLE. Josh,
+  // 2026-08-22: the board was showing "Project manager" because that is the
+  // prose on disk. A LOOKUP fixes that; a title-case transform would fix it and
+  // break the acronym below in the same line.
+  const titles = new Map([['project manager', 'Project Manager'], ['seo specialist', 'SEO Specialist']]);
+  assert.equal(roleLine({ role: 'project manager' }, titles), 'Project Manager');
+  assert.equal(roleLine({ role: '  Project Manager  ' }, titles), 'Project Manager');
+  // ⚠️ AND A ROLE THE CATALOGUE HAS NEVER HEARD OF IS UNTOUCHED BY IT, which is
+  // most of them: the parsed line is the agent's own words, not a menu choice.
+  assert.equal(roleLine({ role: 'web-properties worker' }, titles), 'Web-properties worker');
+  // The positive control for the map itself: without it the same input is
+  // sentence-cased, so a test that passed an empty map would prove nothing.
+  assert.equal(roleLine({ role: 'project manager' }, new Map()), 'Project manager');
   // ⚠️ THE ACRONYM IS THE REASON THIS IS NOT TITLE CASE. Title case turns
   // "SEO specialist" into "Seo Specialist", which is the exact problem whose
   // carve-out this branch deleted from the create heading; a transform here

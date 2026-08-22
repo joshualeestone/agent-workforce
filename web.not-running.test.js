@@ -114,10 +114,13 @@ function offlineRow({ strict = true } = {}) {
  * apart with these tests still green.
  */
 function render(which, a) {
-  const fn = new Function('a', 'esc', 'GLYPH', 'PRESSAY', 'roleLine', 'discTint', 'discInk', 'initials',
+  /* `ROLE_TITLES` is the page's catalogue of role titles, null until the roles
+     route answers. Null here so the renderers run the state the board holds on
+     its first paint, which is the one these rows are about. */
+  const fn = new Function('a', 'esc', 'GLYPH', 'PRESSAY', 'roleLine', 'discTint', 'discInk', 'initials', 'ROLE_TITLES',
     `${page.lift(SCRIPT, 'face')}\n${page.lift(SCRIPT, which)}\nreturn ${which}(a);`);
   return fn(a, (x) => String(x == null ? '' : x), { stopped: '<span class="stop"></span>' },
-    { off: 'Not running' }, (x) => x.role || '', () => '#eee', () => '#111', (n) => n[0]);
+    { off: 'Not running' }, (x) => x.role || '', () => '#eee', () => '#111', (n) => n[0], null);
 }
 
 test('the route puts a known, not-running agent in the roster', () => {
