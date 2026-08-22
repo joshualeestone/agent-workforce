@@ -2253,3 +2253,54 @@ test('a restarted agent that has taken no turns says so, because a synthetic row
     setPaneCapture(null);
   }
 });
+
+test('a full model id beats a bare short form that happens to be later', () => {
+  /**
+   * 🔑 LAST-MATCH IS THE FRAGILE PART, not the regex. Alongside 19500
+   * `claude-opus-5` this machine's transcripts carry 45 of a bare `"opus"` —
+   * a short form somebody passed to `--model`. Taken verbatim the panel reads
+   * "Claude opus": true, ugly, and avoidable when the full id for the same
+   * session is a few lines up.
+   *
+   * ⚠️ ADDED BECAUSE THE MUTATION HARNESS CAUGHT IT UNCOVERED. Dropping the
+   * preference changed the product and nothing went red.
+   *
+   * 📌 AND THE UNRECOGNISED CASE MUST STILL SHOW. The fallback is deliberately
+   * not "refuse anything the table does not know": that would report "we could
+   * not tell" the day a genuinely new model ships, which is what
+   * `modelDisplayName`'s `return id` exists to avoid.
+   */
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const mk = (name, rows) => {
+    const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const projects = nodePath.join(root, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'));
+    fs.mkdirSync(projects, { recursive: true });
+    fs.writeFileSync(nodePath.join(projects, 'sess-' + name + '.jsonl'),
+      rows.map((r) => JSON.stringify({ cwd: dir, message: r })).join('\n') + '\n', 'utf8');
+    setPaneSource(() => `${name}\t0.0\t2.1.239\t0\t${name}\t✳ Claude Code`);
+    setPaneCapture(() => 'Worked for 1m\n> \n');
+    return snapshot().agents.find((a) => a.sessionName === name);
+  };
+
+  try {
+    const short = mk('shortform', [
+      { model: 'claude-opus-5', usage: { input_tokens: 1000 } },
+      { model: 'opus', usage: { input_tokens: 1000 } },
+    ]);
+    assert.equal(short.model, 'claude-opus-5',
+      'a bare short form is being shown because it happened to come last');
+    assert.match(String(short.modelName), /Opus 5/);
+
+    /* 🛑 THE CONTROL: an id nobody recognises is still shown, because a new
+       model looks exactly like this and refusing it would be worse. */
+    const future = mk('futuremodel', [
+      { model: 'claude-opus-9', usage: { input_tokens: 1000 } },
+    ]);
+    assert.equal(future.model, 'claude-opus-9',
+      'a model we do not have a nice name for is being dropped entirely');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});
