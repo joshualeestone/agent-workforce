@@ -3720,12 +3720,40 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
         <p>Your agents run on your own subscription, on this computer.</p>
         <div class="llm on"><span class="llm-m llm-disc gold" aria-hidden="true"></span><div class="llm-w"><b>Claude</b><small>Anthropic &middot; works today</small></div>
           <button class="connect-b" type="button" id="fr-llm-connect">Connect</button></div>
-        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Gemini</b><small>Google</small></div><span class="soon">Coming soon</span></div>
-        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>GPT</b><small>OpenAI</small></div><span class="soon">Coming soon</span></div>
-        <p class="tier">Runs on this computer</p>
-        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Llama</b><small>Meta</small></div><span class="soon">Coming soon</span></div>
-        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Qwen</b><small>Alibaba</small></div><span class="soon">Coming soon</span></div>
-        <div class="llm off"><span class="llm-m llm-disc" aria-hidden="true"></span><div class="llm-w"><b>Mistral</b><small>Open weights</small></div><span class="soon">Coming soon</span></div>
+        <!-- 🛑 THE SAME FIVE, BEHIND THE SAME DISCLOSURE THE CREATE FORM USES
+             (#262). They were six expanded rows here and a closed `More models`
+             there, so a person met one list twice and it looked like two
+             different things.
+
+             ⚠️ MEASURED, and the overflow is a consequence rather than the
+             goal. This card rendered 1003px, so its Continue sat below the fold
+             at 950, 800 and 700, reachable only by scrolling a screen that
+             looked complete. The five rows are 320px plus a 16px tier label
+             less about 20px for the summary: roughly 315px back, which puts the
+             primary above the fold at every height tested. A sticky footer
+             would have kept the button visible and let the card grow forever;
+             this makes the seventh provider cost one line inside a closed
+             element rather than another 64px of screen.
+
+             🔑 AND IT IS THE CORRECT WEIGHT, not a compromise. The step asks a
+             person to choose a model and there is exactly ONE choosable model.
+             Five rows nobody can select are a roadmap, and presenting them at
+             full weight above an invisible Continue inverts the priority: the
+             thing you cannot do is visible and the thing you must do is not.
+             (Mona Lisa, who measured the recovery before ruling it.) -->
+        <details class="smore">
+          <summary>More models</summary>
+          <ul>
+            <li>Gemini, Google &middot; coming soon</li>
+            <li>GPT, OpenAI &middot; coming soon</li>
+          </ul>
+          <p class="smore-t">Runs on this computer</p>
+          <ul>
+            <li>Llama, Meta &middot; coming soon</li>
+            <li>Qwen, Alibaba &middot; coming soon</li>
+            <li>Mistral &middot; coming soon</li>
+          </ul>
+        </details>
         <div id="fr-sub"></div>
         <div class="fr-msg" id="fr-sub-msg" role="status" aria-live="polite"></div>
         <!-- ⚠️ The connect flow's phase announcements, VISUALLY HIDDEN on
