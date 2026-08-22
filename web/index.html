@@ -1455,8 +1455,14 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    📌 The 34rem cap stays and IS the reading tier: this is a form. Left rather
    than centred is the pack's arrangement and Josh's "elements right on the
    page"; one word to reverse if he meant centred. */
+/* 🔑 CENTRED, which is Josh reversing this morning's call and the comment above
+   said it was one word away. It was left-aligned on the pack's arrangement;
+   with the chrome now spanning the window, a 544px form pinned to the far left
+   of a 1712px page reads as an orphan rather than as a choice. Josh,
+   2026-08-22: "I want it to be centered underneath Agents, Projects, and
+   Settings." */
 #panel-create { max-width: 34rem; background: none; border: 0; box-shadow: none; padding: 0;
-                margin: 0; }
+                margin: 0 auto; }
 /* The paper ground belongs to the LIST view only; the one-project, add,
    and project-settings views (view D territory, not this chunk) keep the
    shell the panel used to give them. */
@@ -12922,7 +12928,18 @@ function buildPicker() {
 function updateRecPill() {
   const name = document.getElementById('pick-pm-name');
   if (!name || !ROLES || !ROLES.length) return;
-  const want = BOARD_SEEN && (LAST || []).length === 0;
+  /* 🛑 UNCONDITIONAL NOW, AND THAT OVERRIDES A RECORDED PACK RULE. It read
+     "shown only when the board has been seen and seen empty", on the pack's
+     reasoning that a recommendation is useful to somebody with no agents and
+     noise to somebody who already has six. Josh, 2026-08-22, looking at a
+     board of ten: "Let's put in the recommended badge." He is the one person
+     who can overrule that and he has.
+     ⚠️ The three defects the old version had are worth keeping in mind if it
+     ever comes back: a deep link raced the first status tick and showed the
+     pill over a full board, a second visit kept a stale one, and "we have not
+     heard yet" was read as "empty". A condition on a board reading is what
+     made all three possible; there is no condition now. */
+  const want = true;
   const has = name.querySelector('.prec');
   if (want && !has) {
     const b = document.createElement('span');
