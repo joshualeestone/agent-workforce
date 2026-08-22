@@ -331,19 +331,26 @@ test('every reader treats a parts task exactly as it treats the legacy one', () 
    * board would say "has not said it is on this" about an agent that was never
    * told the task existed.
    */
+  /* ⚠️ ITS OWN AGENT NAME, and the reason is a real product behaviour rather
+     than test hygiene: `ambiguityCounts` counts (agent, task number) across
+     EVERY project in the store, and an earlier test in this file already gives
+     `april` a task 1. Two projects with an april task 1 makes "task 1"
+     genuinely ambiguous, so the join correctly answers could-not-tell -- and my
+     first version of this test read that correct answer as a bug in the parts
+     work. */
   const p = freshProject('Same to every reader');
-  projects.addAgent(p.id, 'april');
-  const legacy = tasks.create(p.id, { sentence: 'Legacy shape', who: 'april' });
-  const modern = tasks.create(p.id, { sentence: 'Modern shape', who: 'april' });
+  projects.addAgent(p.id, 'onlyreader');
+  const legacy = tasks.create(p.id, { sentence: 'Legacy shape', who: 'onlyreader' });
+  const modern = tasks.create(p.id, { sentence: 'Modern shape', who: 'onlyreader' });
   // force the modern one into the parts shape without changing anything else
-  tasks.addPart(p.id, modern.number, { sentence: 'a second piece', who: 'april' });
+  tasks.addPart(p.id, modern.number, { sentence: 'a second piece', who: 'onlyreader' });
 
   const stored = projects.readAll().find((x) => x.id === p.id);
   const inColumn = tasks.columnTasks(stored).map((t) => t.number);
   assert.ok(inColumn.includes(legacy.number), 'the premise: the legacy task is in the column');
   assert.ok(inColumn.includes(modern.number), 'a task with parts fell out of the column');
 
-  assert.deepEqual(tasks.whoOf(tasks.byNumber(stored, modern.number)), ['april'],
+  assert.deepEqual(tasks.whoOf(tasks.byNumber(stored, modern.number)), ['onlyreader'],
     'the same agent, named twice, should read as one person on the task');
 
   /* 🛑 THE CLAIM JOIN, and it had no test at all until a mutation went
@@ -351,7 +358,7 @@ test('every reader treats a parts task exactly as it treats the legacy one', () 
      with parts got no claim computed, so the card silently lost its
      says-it-is-on-this line and nobody would have known which change did it. */
   const commitments = require('./commitments');
-  commitments.report('april', [{ what: 'On task ' + modern.number + ': the modern one' }]);
+  commitments.report('onlyreader', [{ what: 'On task ' + modern.number + ': the modern one' }]);
   const described = projects.get(p.id, []);
   const modernSeen = described.tasks.find((x) => x.number === modern.number);
   assert.equal(modernSeen.claim && modernSeen.claim.claimed, true,
@@ -360,7 +367,7 @@ test('every reader treats a parts task exactly as it treats the legacy one', () 
   assert.equal(legacySeen.claim && legacySeen.claim.claimed, false,
     'the premise: the unreported legacy task joins as a definite no');
 
-  const block = projects.blockBody([stored], 'april');
+  const block = projects.blockBody([stored], 'onlyreader');
   assert.match(block, new RegExp('Task ' + legacy.number), 'the premise: the legacy task is in the agent\'s instructions');
   assert.match(block, new RegExp('Task ' + modern.number),
     'a task with parts vanished from the agent\'s own instructions, so it would never be told');

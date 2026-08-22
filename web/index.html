@@ -1293,6 +1293,29 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .tmeta > b { font-weight: 600; text-align: right; min-width: 0; }
 .tkstate { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 .tkclosenote { margin: 10px 0 18px; }
+/* One part of a task. A row rather than a card: the column already is the
+   card, and a box inside a box is the shape that made Settings look busy. */
+.tkpart { display: flex; align-items: center; gap: 10px; padding: 9px 0;
+          border-bottom: 1px solid var(--k-rule); }
+.tkpart:last-of-type { border-bottom: 0; }
+.tkpart .lav { flex: 0 0 34px; }
+.tkpart .lav.q { background: var(--k-sunk); color: var(--label-2); }
+.tkpart .tkwho-b { flex: 1; min-width: 0; }
+.tkpart .tksay { display: block; font-style: normal; font-size: .75rem; color: var(--label-2); }
+/* ⚠️ A finished part reads finished at a glance, and its NAME is what gets the
+   line through: striking the whole row would strike the agent's face too. */
+.tkpart.done .tkwho-b b { text-decoration: line-through; color: var(--label-2); }
+.tkpart-go { flex: 0 0 auto; }
+/* ⚠️ THE ADD ROW HAD TO BE SIZED DOWN, and rendering is the only thing that
+   showed it: `.frow` gives the input `flex: 1` and `.btn-quiet` is a
+   full-weight control, so at this column's width the pair WRAPPED and Add
+   arrived as a large button on a line of its own, reading as the main action
+   of the panel rather than the small addition it is. The pack's own treatment
+   for a quiet control inside a column is .875rem with its own padding. */
+.tkpart-add { flex-wrap: nowrap; gap: 8px; }
+.tkpart-add input { flex: 1; min-width: 0; }
+.tkpart-add .btn-quiet { flex: 0 0 auto; font-size: .875rem;
+                         padding: calc(.5em - 1px) calc(1.05em - 1px); }
 .tkwho { display: flex; align-items: center; gap: 10px; }
 .tkwho .lav { flex: 0 0 34px; }
 .tkwho-b { min-width: 0; }
@@ -12096,7 +12119,16 @@ document.getElementById('pj-tasklist').addEventListener('click', (e) => {
        why the old closer had to fall back to the New task button. */
 let TK_ACT = null;   // the act the visible label promises; see the click handler
 function tkStateWord(t) {
-  return t.closedAt ? 'Done' : 'Open';
+  /* 🔑 THE COUNT, NOT A WORD, ONCE THERE IS MORE THAN ONE PART. Mona Lisa's
+     spec: the parent's state is DERIVED from its parts, which is why it cannot
+     disagree with them. A single-part task keeps Open/Done, because "0 of 1
+     parts done" is a sentence about a structure nobody chose.
+     ⚠️ Reads `t.progress` from the engine rather than counting here: the page
+     counting its own parts is a second implementation of the rule that decides
+     what stored data means. */
+  const g = t.progress;
+  if (g && g.total > 1) return g.done + ' of ' + g.total + ' parts done';
+  return (g ? g.closed : t.closedAt) ? 'Done' : 'Open';
 }
 /**
  * "Added" as a person would say it. Whole days apart, in the machine's own
@@ -12125,7 +12157,7 @@ function paintTaskPage() {
      page has to go somewhere, and the project it belonged to is the only
      honest destination. */
   if (!t) { TK_OPEN = null; if (p) { pjView('one'); } else { pjView('list'); PJ_CURRENT = null; } return; }
-  TK_ACT = t.closedAt ? 'reopen' : 'close';
+  TK_ACT = (t.progress ? t.progress.closed : Boolean(t.closedAt)) ? 'reopen' : 'close';
   const who = t.who ? tkMemberName(p, t.who) : null;
   document.getElementById('tk-back').textContent = '\u2190 ' + p.name;
   document.getElementById('tk-num').textContent = 'Task ' + t.number;
@@ -12138,35 +12170,67 @@ function paintTaskPage() {
   document.getElementById('tk-added').textContent = tkAdded(t);
   document.getElementById('tk-state').textContent = tkStateWord(t);
 
-  /* Who is on it. One person today; parts are the next step and this column
-     is where they land, which is why it is a column rather than a line in the
-     meta rail beside it. */
+  /**
+   * Who is on it: the task's PARTS, one row each (#206 step 2).
+   *
+   * 🔑 THE PARTS COME FROM THE SERVER, ALREADY DERIVED. A legacy task has a
+   * `who` and no parts array, and deriving that here would be a second
+   * implementation of the migration rules living in the browser -- two copies
+   * of a rule that decides what somebody's stored data means. `engine/tasks.js`
+   * owns it; this draws what it is told.
+   *
+   * ⚠️ ONE ROW EVEN WITH NOBODY ON IT, because "Nobody yet" is a state and a
+   * blank column is not. A task with no parts and a task with one unassigned
+   * part are different screens, and only the second is ever true of a real
+   * task.
+   */
+  const parts = Array.isArray(t.parts) && t.parts.length
+    ? t.parts : [{ id: 1, who: t.who || null, sentence: t.sentence, closedAt: t.closedAt || null }];
+  const prog = t.progress || { done: parts.filter((x) => x.closedAt).length, total: parts.length };
+  const nameOf = (sn) => (sn ? tkMemberName(p, sn) : null);
   /* ⚠️ THE SAME FACE THE MEMBERS COLUMN DRAWS, built from `pjMember`'s rule
-     rather than a fresh one. The first version wrote a bare `<span class=lav>`
-     with one letter in it, and rendering it in DARK showed why that is wrong:
-     every other `.lav` in this file carries a discTint/discInk inline style or
-     a real avatar, so the class's own `rgba(20,22,26,.06)` background is a
-     default nothing actually uses -- a near-black disc on a near-black card.
-     `hasAvatar` is gated on TIED in the engine and that gate travels with it:
-     a stranger's pane borrowing the name must not lend this row a photograph
-     of somebody it is not. */
-  const member = t.who ? (p.agents || []).find((a) => a && a.sessionName === t.who) : null;
-  const face = !who ? ''
-    : (member && member.hasAvatar)
-      ? '<span class="lav" aria-hidden="true"><img src="/api/agent/'
-        + encodeURIComponent(t.who) + '/avatar" alt=""></span>'
-      : '<span class="lav" aria-hidden="true" style="background:' + discTint(who)
-        + ';color:' + discInk(who) + '">' + esc(initials(who)) + '</span>';
+     rather than a fresh one. Every other `.lav` in this file carries a
+     discTint/discInk inline style or a real avatar, so the class's own
+     background is a default nothing uses -- a near-black disc on a near-black
+     card in dark. `hasAvatar` is gated on TIED in the engine and that gate
+     travels with it: a stranger's pane borrowing the name must not lend a row
+     a photograph of somebody it is not. */
+  const faceFor = (sn) => {
+    const shown = nameOf(sn);
+    if (!shown) return '<span class="lav q" aria-hidden="true">+</span>';
+    const m = (p.agents || []).find((a) => a && a.sessionName === sn);
+    return (m && m.hasAvatar)
+      ? '<span class="lav" aria-hidden="true"><img src="/api/agent/' + encodeURIComponent(sn) + '/avatar" alt=""></span>'
+      : '<span class="lav" aria-hidden="true" style="background:' + discTint(shown)
+        + ';color:' + discInk(shown) + '">' + esc(initials(shown)) + '</span>';
+  };
+  /* The say-line is the TASK's claim, shown on the part its agent holds. A
+     report naming "task 15" is a claim about the task; agents have not been
+     taught a per-part spelling, so pretending otherwise would put a fact
+     nobody computed under somebody's name. */
   const say = (t.claim
     ? (t.claim.claimed === true ? 'says it is on this'
       : t.claim.claimed === false ? 'says it is not on this'
         : 'we could not check')
     : '');
-  document.getElementById('tk-who').innerHTML = who
-    ? '<div class="tkwho">' + face
-      + '<div class="tkwho-b"><b>' + esc(who) + '</b>'
-      + (say ? '<small>' + esc(say) + '</small>' : '') + '</div></div>'
-    : '<p class="fhint">Nobody yet.</p>';
+  const firstWho = parts.map((x) => x.who).filter(Boolean)[0] || null;
+  document.getElementById('tk-who').innerHTML = parts.map((part) => {
+    const shown = nameOf(part.who);
+    const line = part.sentence && part.sentence !== t.sentence ? part.sentence : '';
+    return '<div class="tkpart' + (part.closedAt ? ' done' : '') + '" data-part="' + esc(String(part.id)) + '">'
+      + faceFor(part.who)
+      + '<div class="tkwho-b"><b>' + esc(shown || 'Nobody yet') + '</b>'
+      + (line ? '<small>' + esc(line) + '</small>' : '')
+      + (say && part.who && part.who === firstWho && !part.closedAt ? '<em class="tksay">' + esc(say) + '</em>' : '')
+      + '</div>'
+      + '<button class="linkish tkpart-go" type="button" data-part-act="' + (part.closedAt ? 'reopen' : 'close') + '">'
+      + (part.closedAt ? 'Put back' : 'Done') + '</button>'
+      + '</div>';
+  }).join('')
+    + '<div class="frow tkpart-add" style="margin-top:12px;">'
+    + '<input type="text" id="tk-newpart" maxlength="200" placeholder="Add a part" aria-label="Add a part to this task">'
+    + '<button class="btn-quiet" type="button" id="tk-newpart-go">Add</button></div>';
+  void prog;
 
   const why = document.getElementById('tk-why');
   const unknownBecause = (t.claim && t.claim.claimed === null && t.claim.because) ? t.claim.because : '';
@@ -12186,7 +12250,8 @@ function paintTaskPage() {
   } else {
     note.hidden = true;
   }
-  document.getElementById('tk-done').textContent = t.closedAt ? 'Reopen' : 'Mark as done';
+  const parentClosed = t.progress ? t.progress.closed : Boolean(t.closedAt);
+  document.getElementById('tk-done').textContent = parentClosed ? 'Reopen' : 'Mark as done';
 }
 function openTaskPage(n) {
   const p = pjById(PJ_CURRENT);
@@ -12207,6 +12272,60 @@ function leaveTaskPage() {
   const card = document.querySelector('.tkcard[data-task="' + was + '"]');
   (card || document.getElementById('pj-newtask')).focus();
 }
+/* ---- the part verbs -------------------------------------------------
+   ⚠️ DELEGATED FROM THE COLUMN, not bound per row: `paintTaskPage` rewrites
+   that innerHTML on every five-second poll, so listeners attached to the rows
+   would be discarded and re-created twice a minute, and any click landing
+   between the two would do nothing. */
+async function tkPartPost(url, body) {
+  const p = pjById(PJ_CURRENT);
+  if (!p || TK_OPEN === null) return;
+  const msg = document.getElementById('tk-msg');
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(p.id) + '/task/' + TK_OPEN + url, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) { msg.textContent = (out && out.error) || 'we could not change that'; return false; }
+    msg.textContent = '';
+    await pjReload();
+    return true;
+  } catch {
+    msg.textContent = 'we could not change that';
+    return false;
+  }
+}
+document.getElementById('tk-who').addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('[data-part-act]');
+  if (!btn) return;
+  const row = btn.closest('.tkpart');
+  if (!row) return;
+  btn.disabled = true;
+  tkPartPost('/part/' + encodeURIComponent(row.dataset.part) + '/' + btn.dataset.partAct);
+});
+document.getElementById('tk-who').addEventListener('click', async (e) => {
+  if (!e.target || e.target.id !== 'tk-newpart-go') return;
+  const input = document.getElementById('tk-newpart');
+  const said = input.value.trim();
+  /* Nothing typed is not an error, it is a person pressing a button with an
+     empty box. The caret is the answer. */
+  if (!said) { input.focus(); return; }
+  e.target.disabled = true;
+  const ok = await tkPartPost('/parts', { sentence: said });
+  if (!ok) { e.target.disabled = false; return; }
+  /* ⚠️ The repaint has replaced the box, so focus the NEW one rather than the
+     handle captured before the reload -- which is detached and unfocusable. */
+  const fresh = document.getElementById('tk-newpart');
+  if (fresh) fresh.focus();
+});
+document.getElementById('tk-who').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target || e.target.id !== 'tk-newpart') return;
+  e.preventDefault();
+  const go = document.getElementById('tk-newpart-go');
+  if (go) go.click();
+});
+
 document.getElementById('tk-back').addEventListener('click', leaveTaskPage);
 document.getElementById('tk-done').addEventListener('click', async () => {
   const p = pjById(PJ_CURRENT);

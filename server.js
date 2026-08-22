@@ -3230,6 +3230,33 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  /**
+   * Re-tell everybody named on a task, after its record changed.
+   *
+   * 🔑 ONE HELPER RATHER THAN FOUR COPIES. Close, reopen, add-a-part, assign
+   * and finish-a-part all change what an assignee's managed block should list,
+   * and the block only follows the record if every one of them says so. Four
+   * call sites each remembering to do it is four chances for the one that
+   * forgets to be the one somebody uses.
+   * ⚠️ Non-gating in every case: failing to update an agent's instructions must
+   * not fail the edit that already landed.
+   */
+  const tellEveryoneOn = (t) => {
+    const named = tasks.whoOf(t);
+    if (!named.length) return undefined;
+    const roster = safeRoster();
+    let last;
+    for (const one of named) {
+      try { last = projects.syncAgent(one, roster); }
+      catch (err2) { last = { state: projects.TOLD.COULD_NOT, because: String((err2 && err2.message) || 'we could not reach that agent') }; }
+    }
+    /* The LAST verdict, which is the shape the single-assignee route has
+       always returned. With several agents on a task the screen has no place
+       to show more than one, and inventing a per-agent panel here would be
+       drawing a surface nobody designed. */
+    return last;
+  };
+
   const taskAct = pathname.match(/^\/api\/project\/([^/]+)\/task\/(\d+)\/(close|reopen)$/);
   if (taskAct && req.method === 'POST') {
     const id = decodeSegment(taskAct[1]);
@@ -3238,12 +3265,10 @@ const server = http.createServer((req, res) => {
       const t = taskAct[3] === 'close' ? tasks.close(id, taskAct[2]) : tasks.reopen(id, taskAct[2]);
       // Close and reopen change what the assignee's block should list, so
       // the block follows the record. Non-gating.
-      let told;
-      if (t.who) {
-        const roster = safeRoster();
-        try { told = projects.syncAgent(t.who, roster); }
-        catch (err2) { told = { state: projects.TOLD.COULD_NOT, because: String((err2 && err2.message) || 'we could not reach that agent') }; }
-      }
+      // ⚠️ `whoOf`, not `t.who`: a task with parts has no `who`, so the block
+      // stopped following the record and an agent's instructions kept listing
+      // a task it had already finished.
+      let told = tellEveryoneOn(t);
       sendJson(res, 200, { task: t, told });
     } catch (err) {
       const msg = String((err && err.message) || '');
@@ -3251,6 +3276,52 @@ const server = http.createServer((req, res) => {
         : (/no project by that name|no task by that number/.test(msg) ? 404 : 400);
       sendJson(res, code, { error: msg || 'we could not change that task' });
     }
+    return;
+  }
+
+  /* The parts of a task (#206 step 2). One route per verb, the same shape as
+     close/reopen above, and every one of them re-tells the people named on the
+     task afterwards. */
+  const partMake = pathname.match(/^\/api\/project\/([^/]+)\/task\/(\d+)\/parts$/);
+  if (partMake && req.method === 'POST') {
+    const id = decodeSegment(partMake[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req).then((raw) => {
+      let body = null;
+      try { body = JSON.parse(raw || 'null'); } catch { body = null; }
+      try {
+        const out = tasks.addPart(id, partMake[2], { sentence: body && body.sentence, who: body && body.who });
+        if (!out.ok) { sendJson(res, 400, { error: out.because }); return; }
+        sendJson(res, 200, { task: out.task, told: tellEveryoneOn(out.task) });
+      } catch (err) {
+        const msg = String((err && err.message) || '');
+        sendJson(res, /no project by that name|no task by that number/.test(msg) ? 404 : 400,
+          { error: msg || 'we could not add that part' });
+      }
+    }).catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
+    return;
+  }
+
+  const partAct = pathname.match(/^\/api\/project\/([^/]+)\/task\/(\d+)\/part\/(\d+)\/(who|close|reopen)$/);
+  if (partAct && req.method === 'POST') {
+    const id = decodeSegment(partAct[1]);
+    if (id === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req).then((raw) => {
+      let body = null;
+      try { body = JSON.parse(raw || 'null'); } catch { body = null; }
+      try {
+        const verb = partAct[4];
+        const out = verb === 'who'
+          ? tasks.assignPart(id, partAct[2], partAct[3], body && body.who)
+          : tasks.setPartClosed(id, partAct[2], partAct[3], verb === 'close' ? new Date().toISOString() : null);
+        if (!out.ok) { sendJson(res, 400, { error: out.because }); return; }
+        sendJson(res, 200, { task: out.task, told: tellEveryoneOn(out.task) });
+      } catch (err) {
+        const msg = String((err && err.message) || '');
+        sendJson(res, /no project by that name|no task by that number/.test(msg) ? 404 : 400,
+          { error: msg || 'we could not change that part' });
+      }
+    }).catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
     return;
   }
 

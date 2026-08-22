@@ -472,10 +472,17 @@ function ambiguityCounts(everyProject) {
       // of this agent's projects" (its own join already answers
       // could-not-tell), so it must not suppress the join on the project
       // the agent is actually on.
-      if (!t || !t.who || t.closedAt || typeof t.number !== 'number' || !Number.isSafeInteger(t.number)) continue;
-      if (!(p.agents || []).includes(t.who)) continue;
-      const key = t.who + '\u0000' + Number(t.number);
-      counts.set(key, (counts.get(key) || 0) + 1);
+      if (!t || t.closedAt || typeof t.number !== 'number' || !Number.isSafeInteger(t.number)) continue;
+      /* ⚠️ `whoOf`, not `t.who`: a task with parts has no `who`, so it counted
+         as no task at all and could not make a number ambiguous. Every agent
+         named on the task counts, because the ambiguity being counted is
+         "task 15" meaning two things TO ONE AGENT. */
+      const tasksModC = require('./tasks');
+      for (const one of tasksModC.whoOf(t)) {
+        if (!(p.agents || []).includes(one)) continue;
+        const key = one + '\u0000' + Number(t.number);
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
     }
   }
   AMBIGUITY_COUNTS.set(everyProject, counts);
@@ -528,8 +535,8 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
   // Same type guard as the count and the matcher: a hand-edited
   // `number: true` coerces to 1 and would render the ambiguity sentence
   // where claimFor's "not a whole number" is the truer reason.
-  const ambiguous = (t) => typeof t.number === 'number' && Number.isSafeInteger(t.number)
-    && counts.get(t.who + '\u0000' + t.number) > 1;
+  const ambiguous = (t, who) => typeof t.number === 'number' && Number.isSafeInteger(t.number)
+    && counts.get(who + '\u0000' + t.number) > 1;
   const readings = shared;
   const readFor = (who) => {
     if (!readings.has(who)) {
@@ -540,8 +547,35 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
     }
     return readings.get(who);
   };
+  /**
+   * 🔑 THE DERIVED SHAPE TRAVELS WITH EVERY TASK, and it is computed HERE
+   * rather than on the page. The screen needs a task's parts and its "1 of 3
+   * done" on every surface that draws a task, and a second implementation in
+   * the browser is a second thing to keep in step with the migration rules --
+   * which is exactly the drift the read-time migration exists to avoid.
+   * ⚠️ Applied to EVERY task, not only the ones that earn a claim: an
+   * unassigned or finished task returns early from the claim work below and
+   * would otherwise reach the screen with no parts at all, which the page
+   * cannot tell apart from "a task with nothing on it".
+   */
+  const withParts = (t) => (t ? {
+    ...t,
+    parts: tasksMod.partsOf(t),
+    progress: (({ done, total, closed, assigned }) => ({ done, total, closed, assigned }))(tasksMod.progressOf(t)),
+  } : t);
   return tasks.map((t) => {
-    if (!t || !t.who || t.closedAt) return t;
+    /* 🛑 THE SECOND `t.who` GATE, AND IT IS THE ONE THAT ACTUALLY BIT. The
+       filter at the top of this function was corrected for parts and this was
+       not, so a task with parts sailed past the filter and fell straight out
+       here: no claim computed, `claim: undefined`, and the card silently short
+       one line. Found only because a mutation of the OTHER gate went unnoticed
+       and the missing test exposed this one.
+       📌 `who` is the first agent named on the task. The claim is asked of the
+       task as a whole, because "task 15" in a report is a claim about the task;
+       per-part claims would need a spelling agents have not been taught. */
+    if (!t || t.closedAt) return withParts(t);
+    const who = tasksMod.whoOf(t)[0];
+    if (!who || tasksMod.progressOf(t).closed) return withParts(t);
     // ⚠️ A departed assignee: removal does not unassign (the given-to record
     // is the person's, and history should not vanish because membership
     // changed), but the taught convention and the managed block both derive
@@ -549,9 +583,9 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
     // this task. Could-not-tell with the real reason -- rendering a
     // still-fresh "task N" report as a definite claim here would be the
     // told-when-not shape back through the removal door.
-    if (!members.includes(t.who)) {
+    if (!members.includes(who)) {
       return {
-        ...t,
+        ...withParts(t),
         claim: {
           claimed: null,
           because: 'this agent is no longer on the project, so what it reports cannot be checked against this task',
@@ -560,25 +594,25 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
     }
     if (rosterUnreadable) {
       return {
-        ...t,
+        ...withParts(t),
         claim: {
           claimed: null,
           because: 'we could not check which agents are running, so we cannot say who holds this task',
         },
       };
     }
-    if (borrowed(t.who)) {
+    if (borrowed(who)) {
       return {
-        ...t,
+        ...withParts(t),
         claim: {
           claimed: null,
           because: 'we cannot tell whether this is the same agent, so we cannot say whether it holds this task',
         },
       };
     }
-    if (ambiguous(t)) {
+    if (ambiguous(t, who)) {
       return {
-        ...t,
+        ...withParts(t),
         claim: {
           claimed: null,
           because: '"task ' + Number(t.number) + '" names more than one of this '
@@ -591,7 +625,7 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
        the task as a whole, because "task 15" in a report is a claim about the
        task; per-part claims would need a spelling agents have not been taught
        and would be a fact nobody computed. */
-    return { ...t, claim: tasksMod.claimFor(t, readFor(tasksMod.whoOf(t)[0])) };
+    return { ...withParts(t), claim: tasksMod.claimFor(t, readFor(who)) };
   });
 }
 
