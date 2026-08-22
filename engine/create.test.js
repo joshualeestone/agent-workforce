@@ -1649,22 +1649,31 @@ test('the defaults are not appended to a person\'s own words uninvited', () => {
   assert.ok(text.startsWith(mine), 'the person\'s own words were rewritten');
 });
 
-test('at the size margin the defaults are dropped, never the agent', () => {
+test('a role-made boot file is nowhere near the size its reader refuses', () => {
   const instructions = require('./instructions');
   recorder();
   create.setDryRun(false);
-  /* ⚠️ THE FAILURE THIS CATCHES WAS REAL AND IT WAS NOT A DROPPED BLOCK. The
-     first wiring appended the defaults BEFORE validation, so a near-cap file
-     crossed MAX_BYTES and creation was REFUSED: the person lost their agent
-     because the product wanted to teach it something. The block is the thing
-     that gives way. */
-  const header = 'You are **Edge**, a tester.\n';
-  const nearCap = header + 'x'.repeat(instructions.MAX_BYTES - Buffer.byteLength(header, 'utf8') - 11) + '\n';
-  const r = create.createAgent({ ...BINS, name: 'edge-def', role: 'pm', instructions: nearCap });
+  const r = create.createAgent({ ...BINS, name: 'sized-def', role: 'pm' });
   assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
-  const text = fs.readFileSync(create.instructionFile('edge-def'), 'utf8');
-  assert.ok(!text.includes('How you work, whatever the job'), 'the defaults crossed the size margin');
-  assert.ok(Buffer.byteLength(text, 'utf8') <= instructions.MAX_BYTES, 'the boot file outgrew its own reader');
+  const bytes = Buffer.byteLength(fs.readFileSync(create.instructionFile('sized-def'), 'utf8'), 'utf8');
+  assert.ok(bytes <= instructions.MAX_BYTES, 'the boot file outgrew its own reader');
+  /* 🛑 THIS TEST REPLACED ONE THAT PROVED NOTHING, and the replacement is
+     narrower on purpose. The original built instructions ten bytes under
+     MAX_BYTES and asserted the defaults were dropped rather than the agent
+     refused. It passed with the fits-check deleted, because near-cap
+     instructions are CUSTOM instructions, and the defaults are not appended to
+     those at all: it was measuring the standing ruling and reporting it as the
+     size guard.
+
+     There is no reachable near-cap case on the role path. Role text is under a
+     kilobyte, the two blocks are bounded, and the cap is 256KB, so the margin
+     is four orders of magnitude wide. That is the honest claim and it is what
+     this asserts. The fits-check in create.js stays as defence against future
+     growth and is labelled there as currently unfireable, so that nobody
+     writes this test again believing it proves something. */
+  assert.ok(bytes < instructions.MAX_BYTES / 8,
+    'a role-made boot file has grown toward the cap; the fits-check may now be reachable and testable ('
+    + bytes + ' bytes)');
 });
 
 test('appending the defaults twice does not double every rule', () => {
