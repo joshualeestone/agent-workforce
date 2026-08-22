@@ -83,17 +83,19 @@ const ROLES = [
     // tells-you-who-and-why half is her call on her own authority,
     // reporting is what makes it delegation rather than opacity; Josh can
     // strike it.
-    /* 🛑 STRUCK BY JOSH, 2026-08-22, which the note above anticipated in those
-       words. It read: "It talks to your other agents, not to anyone outside
-       your team. It briefs them itself and tells you who it briefed and why."
-       ⚠️ WHAT GOES WITH IT, said plainly rather than left to be discovered: the
-       create card was the only place a person was told a Project Manager acts
-       on its own. The reach half was never a legal caution, it was the sentence
-       that made autonomous briefing something the person had seen before it
-       happened. Nothing else on that screen says it now.
-       📌 The field is removed rather than emptied, because an empty caution and
-       a role with nothing to caution about are the same thing to every reader
-       here, and a dead field under a twenty-line comment is worse than either. */
+    /* 🔑 OFF THE CARD, NOT OUT OF THE PRODUCT. Josh struck this from the
+       choosing screen on 2026-08-22, which the note above anticipated in those
+       words, and he is right about the card: a caution sitting in a comparison
+       reads as a downside of one option rather than as a fact about the job.
+       🛑 AND IT HAS TO BE SOMEWHERE BEFORE THE AGENT EXISTS, because once it
+       exists it may already have briefed somebody. This file's own rule is that
+       a caution must never understate an agent's reach. So it moved to the last
+       step, beside the button that creates it: still the moment of choice, which
+       is this engine's stated shipping condition, and no longer competing with
+       a comparison (Mona Lisa's ruling, superseding the placement not the rule).
+       ⚠️ NINE ROLES CARRY ONE. This is a pattern rather than one string, and the
+       last step renders whichever role was chosen. */
+    caution: 'It talks to your other agents, not to anyone outside your team. It briefs them itself and tells you who it briefed and why.',
     firstAction: 'Tell me what you want off your plate, and I will work out who should do it.',
     instructions: [
       'You are **{{NAME}}**, a project manager.',
