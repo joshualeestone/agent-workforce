@@ -124,6 +124,13 @@ test('the consequence is named before the click, not after it', () => {
      broken. The sentence exists for that, and it belongs above the button. */
   const block = PAGE.slice(PAGE.indexOf('id="d-restart-agent"'), PAGE.indexOf('id="d-remove-agent"'));
   assert.ok(block.length > 0 && block.length < 4000, 'the two blocks are no longer adjacent');
+  /* ⚠️ AND IT DOES NOT RESTATE THE VERB. "It stops and starts, so" is what the
+     word restart already means, and a hint that spends its opening clause on
+     the heading's own meaning buys nothing (Mona Lisa, #259). Asserted as an
+     absence with the presence beside it, so a rewrite that drops the whole
+     sentence fails rather than passing on the absence alone. */
+  assert.ok(!/It stops and starts/.test(block),
+    'the hint reopened with a restatement of what restart means');
   const hintAt = block.indexOf('comes back with nothing in its memory');
   const btnAt = block.indexOf('<button');
   assert.ok(hintAt > -1, 'the memory consequence is not stated');
