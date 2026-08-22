@@ -1431,6 +1431,15 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .tkpart .lav { flex: 0 0 34px; }
 .tkpart .lav.q { background: var(--k-sunk); color: var(--label-2); }
 .tkpart .tkwho-b { flex: 1; min-width: 0; }
+/* The name as a control. It must read as the NAME at rest -- the row is a
+   fact first and a menu second -- so it inherits everything and only picks up
+   an affordance when somebody reaches for it. */
+.tkwho-pick { font: inherit; font-weight: 700; color: inherit; background: none;
+              border: 0; padding: 0; cursor: pointer; text-align: left;
+              border-bottom: 1px dashed transparent; }
+.tkwho-pick:hover, .tkwho-pick:focus-visible { border-bottom-color: var(--label-2); }
+.tkwho-pick:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
+.tkwho-sel { font: inherit; max-width: 100%; }
 .tkpart .tksay { display: block; font-style: normal; font-size: .75rem; color: var(--label-2); }
 /* ⚠️ A finished part reads finished at a glance, and its NAME is what gets the
    line through: striking the whole row would strike the agent's face too. */
@@ -3229,7 +3238,16 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          signal for the person who does want to look. Hiding it would buy
          simplicity with a small dishonesty. -->
     <label class="flabel" for="d-instr">Instructions</label>
-    <div class="fhint">What this agent is for, in your words. It is the first thing they read every time they start.</div>
+    <!-- ⚠️ "a restart does not change WHAT IT SAYS", not "does not clear it".
+         The bare pronoun was unambiguous grammatically and ambiguous on the
+         SCREEN: this page now carries a Memory box that also talks about
+         restarts, and a reader glancing between two boxes about the same act
+         can carry the wrong subject across. A restart really does clear the
+         memory ring -- the session is new and so is its transcript -- and
+         really does not touch this file, which is what the Restart button on
+         the notice below already says. Three surfaces, one fact. (#198; the
+         name-the-noun form is mine, the sentence is Mona Lisa's.) -->
+    <div class="fhint">What this agent is for, in your words. It is the first thing they read when they start, and a restart does not change what it says.</div>
     <!-- Ships DISABLED. `loadInstructions` enables it when there is something
          real in it. Without this, /?tab=detail (a deep link this file supports)
          never calls that function at all and renders a permanently enabled,
@@ -4091,7 +4109,15 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            the attachment path lands, which is the same chunk that brings the
            composer's `+`. -->
       <div class="field" style="margin-top: var(--space-6)">
-        <h3 class="dlab">Project documents</h3>
+        <!-- 🛑 "Project documents" WAS THE ONLY THING ON THIS SECTION THAT
+             LIED. Every sentence under it is already honest that it reads the
+             project FOLDER; the heading promised something else. Josh, on what
+             he actually meant: "They are all files in the conversation that I'm
+             referring to" -- and that is a DIFFERENT feature with its own card
+             (the attachment path). Naming this section for what it really shows
+             is what stops it looking like the other one arrived. (#110, heading
+             from Mona Lisa.) -->
+        <h3 class="dlab">Files in this project</h3>
         <div id="pj-docs" class="pj-docs"></div>
         <p class="fmsg" id="pj-docs-msg" aria-live="polite"></p>
         <!-- ⚠️ "Show them all in Finder", NOT "see all files". Josh asked for a
@@ -13152,7 +13178,22 @@ function paintTaskPage() {
     const line = part.sentence && part.sentence !== t.sentence ? part.sentence : '';
     return '<div class="tkpart' + (part.closedAt ? ' done' : '') + '" data-part="' + esc(String(part.id)) + '">'
       + faceFor(part.who)
-      + '<div class="tkwho-b"><b>' + esc(shown || 'Nobody yet') + '</b>'
+      /* 🛑 THE NAME IS A BUTTON, because assignment-after-creation is the whole
+         reason parts exist and shipped unreachable: the engine and the route
+         were both there (`assignPart`, `POST .../part/<n>/who`) and no screen
+         could call either. My own gap, three hours old.
+         🔑 IT IS THE NAME ITSELF RATHER THAN A CONTROL BESIDE IT. The fact and
+         the way to change it are the same thing, which is how the role field
+         and the model line already work here -- and it keeps the resting row
+         exactly as the pack draws it, since a button styled as text IS the
+         text until somebody reaches for it.
+         ⚠️ Only while the part is open. Choosing who does a finished piece of
+         work is a control with nothing to act on. */
+      + '<div class="tkwho-b">'
+      + (part.closedAt
+        ? '<b>' + esc(shown || 'Nobody yet') + '</b>'
+        : '<button class="tkwho-pick" type="button" data-pick-part="' + esc(String(part.id)) + '"'
+          + ' aria-label="Change who is on this part">' + esc(shown || 'Nobody yet') + '</button>')
       + (line ? '<small>' + esc(line) + '</small>' : '')
       + (say && part.who && part.who === firstWho && !part.closedAt ? '<em class="tksay">' + esc(say) + '</em>' : '')
       + '</div>'
@@ -13229,6 +13270,52 @@ async function tkPartPost(url, body) {
     return false;
   }
 }
+/* Choosing who is on a part. The row's name becomes a menu in place, so the
+   fact and the control never sit in two places disagreeing about it. */
+document.getElementById('tk-who').addEventListener('click', (e) => {
+  const btn = e.target.closest && e.target.closest('[data-pick-part]');
+  if (!btn) return;
+  const p = pjById(PJ_CURRENT);
+  if (!p) return;
+  const row = btn.closest('.tkpart');
+  const members = p.agents || [];
+  /* ⚠️ WITH NOBODY ON THE PROJECT THERE IS NOBODY TO PICK, and a menu holding
+     only "Nobody yet" is a decision offered to somebody who has none to make.
+     Say where the people come from instead, because that IS the next step. */
+  if (!members.length) {
+    document.getElementById('tk-msg').textContent =
+      'Add an agent to this project first, then you can put them on a part.';
+    return;
+  }
+  const sel = document.createElement('select');
+  sel.className = 'tkwho-sel';
+  sel.setAttribute('aria-label', 'Who is on this part');
+  sel.innerHTML = ['<option value="">Nobody yet</option>'].concat(
+    members.map((m) => '<option value="' + esc(m.sessionName) + '"'
+      + (m.sessionName === btn.dataset.who ? '' : '') + '>'
+      + esc(m.name || m.sessionName) + '</option>'),
+  ).join('');
+  const current = row.querySelector('[data-pick-part]');
+  sel.value = '';
+  for (const opt of sel.options) {
+    if (opt.textContent === (current && current.textContent)) { sel.value = opt.value; break; }
+  }
+  btn.replaceWith(sel);
+  sel.focus();
+  let done = false;
+  const send = async () => {
+    if (done) return;
+    done = true;
+    await tkPartPost('/part/' + encodeURIComponent(row.dataset.part) + '/who', { who: sel.value || null });
+  };
+  sel.addEventListener('change', send);
+  /* ⚠️ BLUR SENDS NOTHING. A menu that saves when you click away saves the
+     value you were passing THROUGH with the keyboard, and this is a change to
+     who is doing somebody's work. Leaving without choosing simply repaints. */
+  sel.addEventListener('blur', () => { if (!done) paintTaskPage(); });
+  sel.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { done = true; paintTaskPage(); } });
+});
+
 document.getElementById('tk-who').addEventListener('click', (e) => {
   const btn = e.target.closest && e.target.closest('[data-part-act]');
   if (!btn) return;
