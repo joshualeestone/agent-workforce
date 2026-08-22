@@ -88,6 +88,7 @@ one invented by somebody who did not write them.
 | `render-survival.js` | The panel naming the agents that will not come back after a restart (#277) |
 | `render-not-running.js` | The card and the tile for an agent Kosmos knows about that is not running (#278) |
 | `render-offline-note.js` | What the page says when the server it was loaded from is killed under it (#269) |
+| `render-org-chart.js` | The org chart: opaque faces, no hub stroke, a pressable callout, centred on its own drawing (#284) |
 | `render-pjsettings.js` | **no header sentence.** Read it before running it, and give it one. |
 | `render-projects.js` | Render every state of the Projects screens in a real browser, light and dark |
 | `render-reload-toast.js` | The reload toast in both tones, beside the shipped offer toast it must not look like (#270) |

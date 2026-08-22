@@ -844,7 +844,14 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .hub {
   position: absolute; transform: translate(-50%, -50%);
   width: 104px; height: 104px; border-radius: 50%;
-  background: var(--k-bg); border: 2px solid var(--k-ink);
+  /* 🔑 NO STROKE, AND A SURFACE INSTEAD OF THE PAGE COLOUR. Josh: "there's a
+     black stroke around me as the user. Let's take that off." The background
+     was `--k-bg`, the same colour as the page, so the border was the only thing
+     giving the hub an edge: removing it alone would turn a hub whose photo
+     failed to load into an invisible hole with lines converging on nothing
+     (Mona Lisa, #284). The surface colour keeps it an object without a line
+     around it. */
+  background: var(--k-surface); border: 0;
   display: grid; place-items: center;
   font: 600 15px var(--font-ui); color: var(--k-ink);
 }
@@ -854,17 +861,31 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   width: 44px; height: 44px; cursor: pointer;
   border: 0; padding: 0; background: none;
 }
+/* 🛑 THE LINES WERE NEVER ON TOP OF THE FACES. Josh: "the lines that connect
+   the agents go behind the Avatars, because right now the lines are going over
+   the top of each of the agents' faces." They are already behind. The DISC was
+   half transparent, so the wire showed through it, and z-order was never the
+   mechanism: changing it fixes nothing (Mona Lisa, #284).
+
+   ⚠️ AND HIS TWO INSTRUCTIONS WERE IN DIRECT CONFLICT, because one property was
+   doing two jobs. His earlier ruling is recorded here: half opacity keeps the
+   portrait quieter than the state ring, so state wins over portraiture. Alpha on
+   the whole element delivered that AND made the disc see-through, and only the
+   first was ever wanted.
+
+   🔑 SPLIT, SO NOTHING IS TRADED: the disc is opaque and no line can cross it;
+   the portrait inside it stays at half strength and the ring still wins. */
 .onode .face {
   width: 100%; height: 100%; border-radius: 50%; overflow: hidden;
-  /* ⚠️ HALF OPACITY IS THE RESTING STATE, per Josh. It is what lets the rings
-     stay the loudest thing on screen: a 50% face is quieter than a 100%
-     stroke, so state still wins over portraiture. */
-  opacity: .5; transition: opacity .12s ease;
   background: #cfcdc8; display: grid; place-items: center;
   font: 600 .875rem var(--font-ui);
 }
 .onode .face img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.onode:hover .face, .onode:focus-visible .face { opacity: 1; }
+/* 🔑 THE CONTENTS ARE DIMMED, WHATEVER THEY ARE, so a face with a photo and a
+   face with initials get the same treatment. The disc stays opaque either way,
+   which is what stops a wire crossing it. */
+.onode .face > * { opacity: .5; transition: opacity .12s ease; }
+.onode:hover .face > *, .onode:focus-visible .face > * { opacity: 1; }
 .onode:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 4px; border-radius: 50%; }
 /* the state ring, drawn around the face */
 .onode::after {
@@ -886,11 +907,24 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   position: absolute; left: 50%; transform: translateX(-50%);
   white-space: nowrap; pointer-events: none;
 }
+/* 🛑 THE ONE THING THAT LOOKS PRESSABLE HAS TO BE PRESSABLE. Josh asked for the
+   callout to read as a button you could click to go to that agent, and clicking
+   the node already does exactly that -- but the callout was excluded from the
+   hit area, so somebody aiming at the thing that looks like a button hit
+   nothing. Making it LOOK clickable while it is not is worse than leaving it
+   plain, so the look and the hit area move together (Mona Lisa, #284).
+   ⚠️ THE NAME LABEL IS DELIBERATELY LEFT ALONE. `.oname` shares the rule above
+   and it sits at rest under every node on a small fleet, where two neighbouring
+   labels can overlap; the nearer one would then eat clicks meant for the node
+   behind it. The callout only exists on hover, over the node it belongs to. */
+.onode .callout { pointer-events: auto; }
 .onode .oname { top: 52px; font: 600 12px var(--font-ui); color: var(--k-ink-2); }
+/* On brand and legibly pressable: the same gold this app uses for a primary
+   action, with the dark ink that stays readable on it in both themes. */
 .onode .callout {
-  bottom: 56px; background: var(--k-bg); border: 2px solid var(--k-ink);
+  bottom: 56px; background: var(--gold-bright); border: 2px solid var(--gold-bright);
   border-radius: 9px; padding: 5px 14px; font: 600 14px var(--font-ui);
-  color: var(--k-ink); opacity: 0; transition: opacity .12s ease;
+  color: #14161a; opacity: 0; transition: opacity .12s ease;
 }
 .onode:hover .callout, .onode:focus-visible .callout { opacity: 1; }
 @media (prefers-color-scheme: dark) {
@@ -8230,8 +8264,26 @@ document.getElementById('klink').addEventListener('click', () => {
    sees. Circumference is finite: fourteen nodes at one radius touch and thirty
    overlap. So a level that fills spills to a second distance rather than
    crushing -- same data, same hierarchy, still one level. */
-const ORG_R0 = 150;          // the first ring
-const ORG_STEP = 96;         // how much further out each generation sits
+/* 🛑 "THE SPLITS MAKE THEM SUPER DUPER WIDE." Measured off Josh's own
+   screenshot rather than reasoned from these numbers, and it is not what the
+   words suggest: on his 1303x846 board the drawing occupied 489x434, which is
+   38% of the width. It was not too wide, it was too SPARSE and off-centre
+   (Mona Lisa, #284). The centring is fixed in `paintOrg`; these close the gaps.
+
+   ⚠️ AND THIS IS NOT A NUMBER TO KEEP LOWERING UNTIL IT LOOKS RIGHT. It has a
+   cliff, the cliff moves with the fleet size, and it is invisible on a small
+   board. How many fit in the first ring before it spills into a second lane:
+
+     ORG_R0 150   15 fit   94px apart   what shipped
+     ORG_R0 120   12 fit   75px apart   this
+     ORG_R0 105   10 fit   66px apart   the last value that holds ten
+     ORG_R0  95    9 fit   60px apart   ten agents split into two lanes
+
+   A fleet with nobody assigned puts EVERYBODY on the first ring, which is the
+   first screen anyone sees, so the spill is the common case rather than the
+   exotic one. */
+const ORG_R0 = 120;          // the first ring
+const ORG_STEP = 74;         // how much further out each generation sits
 const ORG_MIN_ARC = 62;      // the arc a 44px node needs to not touch its neighbour
 let ORG_HTML = null;         // the repaint guard's memory
 
@@ -8350,8 +8402,33 @@ function paintOrg() {
   const { placed, maxR } = orgPlace(orgTreeOf(agents));
   const pad = 78;
   const size = Math.round((maxR + pad) * 2);
-  const cx = size / 2;
-  const cy = size / 2;
+  /**
+   * 🔑 CENTRED ON THE DRAWING, NOT ON THE HUB, and this is the change that does
+   * most of the work for "too wide". The hub was pinned to the middle of the
+   * canvas while the tree grew whichever way the fleet happened to point, so on
+   * Josh's board the content sat 118px up and to the left with dead space
+   * opposite. What reads as sprawl is the imbalance, not the size.
+   *
+   * ⚠️ THE HUB IS INCLUDED IN THE BOX, because it is part of the drawing: a
+   * fleet that all reports upward would otherwise centre the agents and push
+   * the hub off the edge. Its own 52px radius counts, as does a node's 22px
+   * plus the 5px its state ring sits outside that.
+   *
+   * 📌 Same nodes, same scale, translated. Nothing here changes who is where
+   * relative to anything else.
+   */
+  const NODE_EXTENT = 27;
+  const HUB_EXTENT = 52;
+  let minX = -HUB_EXTENT; let maxX = HUB_EXTENT;
+  let minY = -HUB_EXTENT; let maxY = HUB_EXTENT;
+  for (const spot of placed.values()) {
+    const x = Math.cos(spot.ang) * spot.r;
+    const y = Math.sin(spot.ang) * spot.r;
+    minX = Math.min(minX, x - NODE_EXTENT); maxX = Math.max(maxX, x + NODE_EXTENT);
+    minY = Math.min(minY, y - NODE_EXTENT); maxY = Math.max(maxY, y + NODE_EXTENT);
+  }
+  const cx = Math.round(size / 2 - (minX + maxX) / 2);
+  const cy = Math.round(size / 2 - (minY + maxY) / 2);
 
   /* ⚠️ NAMES AT REST ONLY WHILE THEY FIT, and the pack decides this by
      example rather than by rule: its median-customer drawing (you and three
@@ -8382,7 +8459,10 @@ function paintOrg() {
     const shown = a.name || a.sessionName;
     const face = a.hasAvatar
       ? '<img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt="">'
-      : esc(initials(shown));
+      /* ⚠️ WRAPPED, so the rule above has an element to reach. Bare text in the
+         disc cannot be dimmed without dimming the disc itself, which is the
+         transparency Josh asked us to remove. */
+      : '<span class="oinit">' + esc(initials(shown)) + '</span>';
     const tint = a.hasAvatar ? '' : ' style="background:' + discTint(shown) + ';color:' + discInk(shown) + '"';
     nodes.push('<button class="onode' + ring + '" type="button" data-agent="' + esc(a.sessionName) + '"'
       + ' style="left:' + x.toFixed(1) + 'px;top:' + y.toFixed(1) + 'px"'
