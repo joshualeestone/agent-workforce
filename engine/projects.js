@@ -484,7 +484,12 @@ function ambiguityCounts(everyProject) {
 
 const READINGS = new WeakMap();
 function joinTaskClaims(tasks, all, memberOf, roster) {
-  const withWho = tasks.filter((t) => t && t.who && !t.closedAt);
+  const tasksModEarly = require('./tasks');
+  /* ⚠️ `whoOf`/`progressOf`, not `t.who`. A task that stores PARTS has no `who`
+     at all, so this filter dropped every one of them and no claim was ever
+     computed for a multi-part task -- the card silently lost its
+     says-it-is-on-this line with nothing on screen saying why. */
+  const withWho = tasks.filter((t) => t && tasksModEarly.whoOf(t).length > 0 && !tasksModEarly.progressOf(t).closed);
   if (!withWho.length) return tasks;
   const tasksMod = require('./tasks');
   const commitments = require('./commitments');
@@ -582,7 +587,11 @@ function joinTaskClaims(tasks, all, memberOf, roster) {
         },
       };
     }
-    return { ...t, claim: tasksMod.claimFor(t, readFor(t.who)) };
+    /* One reading, for the first agent named on the task. The claim is asked of
+       the task as a whole, because "task 15" in a report is a claim about the
+       task; per-part claims would need a spelling agents have not been taught
+       and would be a fact nobody computed. */
+    return { ...t, claim: tasksMod.claimFor(t, readFor(tasksMod.whoOf(t)[0])) };
   });
 }
 
@@ -1620,7 +1629,15 @@ function blockBody(projects, sessionName) {
       ? `\n  - Post to everyone on it: \`${cliShown} post ${oneLine(String(p.id))} "your message"\``
       : '');
     const mine = (sessionName && Array.isArray(p.tasks))
-      ? p.tasks.filter((t) => t && t.who === sessionName && !t.closedAt && typeof t.number === 'number' && Number.isSafeInteger(t.number))
+      /* 🛑 THE ONE THAT WOULD HAVE BROKEN QUIETLY AND WORST. This is the list
+         of "your open tasks" written into an agent's own instructions, and it
+         is how an agent learns the `task <n>` spelling the join depends on. A
+         task with parts has no `who`, so this dropped it, the agent never saw
+         it, never reported it, and the board then showed "has not said it is
+         on this" -- a true sentence about an agent that was never told. */
+      ? p.tasks.filter((t) => t && require('./tasks').whoOf(t).includes(sessionName)
+          && !require('./tasks').progressOf(t).closed
+          && typeof t.number === 'number' && Number.isSafeInteger(t.number))
       : [];
     if (!mine.length) return head;
     any = true;

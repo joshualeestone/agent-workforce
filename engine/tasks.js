@@ -107,6 +107,79 @@ function create(projectId, { sentence, detail, who } = {}, roster) {
   return made;
 }
 
+/**
+ * Write a task's parts back, ALWAYS materialising the derived ones first.
+ *
+ * 🛑 THE TRAP THIS EXISTS TO CLOSE. A legacy task has `who` and no `parts`. Add
+ * a second part to it and store only that one, and the FIRST part -- the
+ * original assignment -- silently ceases to exist, because `partsOf` only
+ * derives when the array is empty. The person adds a part and loses one.
+ * So every write starts from `partsOf`, which is the derived list, and the
+ * legacy `who` is retired in the same edit rather than left to disagree.
+ */
+function writeParts(projectId, n, fn) {
+  let changed;
+  projects.mutate(projectId, (p) => {
+    const t = byNumber(p, n);
+    if (!t) throw new Error('there is no task by that number on this project');
+    const parts = fn(partsOf(t), t);
+    if (!parts) throw new Error('that did not change anything');
+    changed = { ...t, parts };
+    /* ⚠️ `who` is DROPPED once parts are stored, not kept in step. Two fields
+       answering "who is on this" is two things that disagree the first time
+       one of them is edited, and every reader would then have to know which
+       one wins. `partsOf` no longer looks at it once `parts` is there. */
+    delete changed.who;
+    return { ...p, tasks: (p.tasks || []).map((x) => (x.number === changed.number ? changed : x)) };
+  });
+  return changed;
+}
+
+function nextPartId(parts) {
+  /* ⚠️ Never reused, including after a delete, for the reason the task number
+     is never reused: an id that comes back means "part 2" stops meaning one
+     thing forever. */
+  return parts.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1;
+}
+
+/** Add a piece to a task. Its own sentence, and nobody on it until asked. */
+function addPart(projectId, n, { sentence, who } = {}) {
+  const said = typeof sentence === 'string' ? sentence.trim() : '';
+  if (!said) return { ok: false, because: 'say what this part is' };
+  if (said.length > SENTENCE_MAX) return { ok: false, because: `keep it under ${SENTENCE_MAX} characters` };
+  const whoKey = typeof who === 'string' && who.trim() ? who.trim() : null;
+  if (whoKey && whoKey.length > WHO_MAX) return { ok: false, because: 'who is on it has to be an agent\'s name' };
+  const task = writeParts(projectId, n, (parts) =>
+    parts.concat([{ id: nextPartId(parts), who: whoKey, sentence: said, closedAt: null }]));
+  return { ok: true, task };
+}
+
+/** Put somebody on a part, or take them off it (`who: null`). */
+function assignPart(projectId, n, partId, who) {
+  const whoKey = typeof who === 'string' && who.trim() ? who.trim() : null;
+  if (whoKey && whoKey.length > WHO_MAX) return { ok: false, because: 'who is on it has to be an agent\'s name' };
+  let found = false;
+  const task = writeParts(projectId, n, (parts) => parts.map((x) => {
+    if (Number(x.id) !== Number(partId)) return x;
+    found = true;
+    return { ...x, who: whoKey };
+  }));
+  if (!found) return { ok: false, because: 'there is no part by that number on this task' };
+  return { ok: true, task };
+}
+
+/** Finish a part, or put it back. The parent's state follows from its parts. */
+function setPartClosed(projectId, n, partId, closedAt) {
+  let found = false;
+  const task = writeParts(projectId, n, (parts) => parts.map((x) => {
+    if (Number(x.id) !== Number(partId)) return x;
+    found = true;
+    return { ...x, closedAt };
+  }));
+  if (!found) return { ok: false, because: 'there is no part by that number on this task' };
+  return { ok: true, task };
+}
+
 function byNumber(p, n) {
   return (p.tasks || []).find((t) => t.number === Number(n));
 }
@@ -136,13 +209,91 @@ function setClosed(projectId, n, closedAt) {
 }
 
 /**
+ * A task's PARTS: the assignable things it is made of.
+ *
+ * 🔑 THE PARENT HAS NO ASSIGNEE OF ITS OWN. Mona Lisa's spec: a real job splits
+ * into pieces needing different agents, so assignment lives on the part and the
+ * parent is just the thing they add up to. Its state is DERIVED from its parts,
+ * which is why it cannot disagree with them.
+ *
+ * 🛑 AND THE MIGRATION IS A READ, NOT A REWRITE. Every task already on disk has
+ * a `who` and no `parts`, and a bulk pass over somebody's stored tasks is a
+ * chance to lose them for a shape change nobody asked for. So this DERIVES the
+ * parts of a legacy task every time it is read, and only new writes carry the
+ * field. A record written in July keeps working in December with no upgrade
+ * step and no version number.
+ *
+ * ⚠️ ONE PART, NEVER ZERO, when there is nobody on it. Mona Lisa's line
+ * verbatim: "A task with no parts and a task with one unassigned part are
+ * different screens: the first has nothing to show, the second says 'Nobody
+ * yet', which is the state the pack draws and the only one that is true of an
+ * existing task."
+ */
+function partsOf(task) {
+  if (!task) return [];
+  if (Array.isArray(task.parts) && task.parts.length) {
+    return task.parts.map((part, i) => ({
+      id: typeof part.id === 'number' ? part.id : i + 1,
+      who: typeof part.who === 'string' && part.who.trim() ? part.who.trim() : null,
+      /* A part with no sentence of its own IS the whole task, which is exactly
+         what a migrated single part is. */
+      sentence: (typeof part.sentence === 'string' && part.sentence.trim())
+        ? part.sentence.trim() : task.sentence,
+      closedAt: part.closedAt || null,
+    }));
+  }
+  return [{
+    id: 1,
+    who: typeof task.who === 'string' && task.who.trim() ? task.who.trim() : null,
+    sentence: task.sentence,
+    /* ⚠️ The legacy task's own closedAt, so a finished task migrates to
+       "1 of 1 done" rather than to a finished parent holding an open part.
+       The two halves of one record must not disagree the moment they are read
+       through a new shape. */
+    closedAt: task.closedAt || null,
+  }];
+}
+
+/**
+ * What a person reads on the card: how many of a task's parts are finished.
+ *
+ * ⚠️ `done` is derived from the PARTS and never stored, so the sentence cannot
+ * drift from the rows underneath it. A task whose parts are all closed IS
+ * closed, whatever a parent field says.
+ */
+function progressOf(task) {
+  const parts = partsOf(task);
+  const done = parts.filter((x) => x.closedAt).length;
+  return {
+    parts,
+    done,
+    total: parts.length,
+    /* The parent's own truth. `closedAt` on the task still exists and still
+       wins when it is set, because closing a task is a thing a person does to
+       the whole thing; all-parts-done is the other way in. */
+    closed: Boolean(task && task.closedAt) || (parts.length > 0 && done === parts.length),
+    assigned: parts.filter((x) => x.who).length,
+  };
+}
+
+/** Whoever is on this task at all, for the join and the card's face. */
+function whoOf(task) {
+  const named = partsOf(task).map((x) => x.who).filter(Boolean);
+  return [...new Set(named)];
+}
+
+/**
  * The column's list versus the whole list, per the pack's door rule: the
  * column shows a task with somebody on it that is not finished; finished
  * tasks and tasks nobody has picked up are both real and both behind the
  * door.
  */
 function columnTasks(p) {
-  return (p.tasks || []).filter((t) => t.who && !t.closedAt);
+  /* ⚠️ THROUGH `whoOf` AND `progressOf`, not through `t.who`. Once a task
+     stores parts it has no `who` at all, so the old test dropped every
+     multi-part task out of the column silently -- the door would have shown
+     tasks the column was hiding for no reason a person could see. */
+  return (p.tasks || []).filter((t) => whoOf(t).length > 0 && !progressOf(t).closed);
 }
 
 
@@ -167,7 +318,12 @@ function columnTasks(p) {
  * Unassigned and closed tasks have no claim to compute (null, no because).
  */
 function claimFor(task, reading) {
-  if (!task || !task.who || task.closedAt) return null;
+  /* ⚠️ Same correction as columnTasks: a task with parts has no `who`, so this
+     returned null for every assigned multi-part task and the card lost its
+     says-it-is-on-this line with nothing saying why. The claim is still asked
+     of the task as a whole (one report naming "task 15" is a claim about the
+     task); per-part claims need a spelling agents have not been taught. */
+  if (!task || whoOf(task).length === 0 || progressOf(task).closed) return null;
   // ⚠️ The DEFINITE branch is allowlisted, never the unknown one: a state
   // this module does not recognize (a future vocabulary word, a hand-edited
   // record) must fall to could-not-tell, because falling to true/false would
@@ -197,4 +353,6 @@ function claimFor(task, reading) {
   return { claimed: named, because: null };
 }
 
-module.exports = { create, close, reopen, byNumber, columnTasks, claimFor, taskProblem, SENTENCE_MAX, DETAIL_MAX, WHO_MAX };
+module.exports = { create, close, reopen, byNumber, columnTasks, claimFor, taskProblem,
+  partsOf, progressOf, whoOf, addPart, assignPart, setPartClosed,
+  SENTENCE_MAX, DETAIL_MAX, WHO_MAX };

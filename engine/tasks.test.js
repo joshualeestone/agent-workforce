@@ -271,3 +271,133 @@ test('a task records who added it, while the answer is still free', () => {
   const stored = projects.readAll().find((x) => x.id === p.id).tasks[0];
   assert.equal(stored.addedBy, 'operator');
 });
+
+/* ---- parts (#206 step 2) ------------------------------------------------
+   🔑 THE SHAPE OF THIS FEATURE IS A READ-TIME MIGRATION. Every task already on
+   disk has a `who` and no `parts`, and a bulk rewrite of somebody's stored
+   tasks is a chance to lose them for a shape change nobody asked for. So a
+   legacy task DERIVES its single part on every read, and only new writes carry
+   the field. These tests pin both shapes through the same readers. */
+
+test('a legacy task derives exactly one part, and a finished one derives it finished', () => {
+  const p = freshProject('Legacy parts');
+  const open = tasks.create(p.id, { sentence: 'Rewrite the handoff checklist' });
+  const nobody = tasks.create(p.id, { sentence: 'Nobody on this one' });
+  const done = tasks.create(p.id, { sentence: 'An old one' });
+  tasks.close(p.id, done.number);
+  const stored = projects.readAll().find((x) => x.id === p.id);
+
+  for (const [t, label] of [[tasks.byNumber(stored, open.number), 'open'],
+    [tasks.byNumber(stored, nobody.number), 'unassigned'],
+    [tasks.byNumber(stored, done.number), 'closed']]) {
+    const parts = tasks.partsOf(t);
+    /* ⚠️ ONE PART, NEVER ZERO, even with nobody on it. Mona Lisa's line: a task
+       with no parts and a task with one unassigned part are different screens.
+       The first has nothing to show; the second says "Nobody yet", which is the
+       only state that is true of an existing task. */
+    assert.equal(parts.length, 1, label + ': a legacy task did not derive exactly one part');
+    assert.equal(parts[0].sentence, t.sentence, label + ": the part is the whole task, so it carries its sentence");
+  }
+  const closed = tasks.progressOf(tasks.byNumber(stored, done.number));
+  assert.deepEqual([closed.done, closed.total], [1, 1], 'a finished task derives 1 of 1, not a finished parent over an open part');
+  const still = tasks.progressOf(tasks.byNumber(stored, open.number));
+  assert.deepEqual([still.done, still.total], [0, 1]);
+});
+
+test('adding a part to a legacy task keeps the part that was already there', () => {
+  const p = freshProject('Legacy add');
+  projects.addAgent(p.id, 'april');
+  const t = tasks.create(p.id, { sentence: 'Rewrite it', who: 'april' });
+
+  /* 🛑 THE TRAP. A legacy task has `who` and no `parts`. Store only the NEW
+     part and the original assignment ceases to exist, because the derivation
+     only fires on an empty array: the person adds a part and loses one. */
+  const out = tasks.addPart(p.id, t.number, { sentence: 'Check it against the live flow' });
+  assert.equal(out.ok, true, out.because);
+  const parts = tasks.partsOf(out.task);
+  assert.equal(parts.length, 2, 'adding a part swallowed the one that was already on the task');
+  assert.equal(parts[0].who, 'april', 'the original assignment was lost');
+  assert.equal(parts[1].who, null, 'a new part starts with nobody on it');
+  assert.equal(out.task.who, undefined,
+    'the legacy field survived alongside parts, so two fields now answer "who is on this"');
+});
+
+test('every reader treats a parts task exactly as it treats the legacy one', () => {
+  /**
+   * 🔑 THE POINT OF THIS TEST. Four separate places keyed on `t.who`, and a
+   * task with parts has no `who` at all. Each would have failed SILENTLY and
+   * differently: the column would hide the task, the claim would never be
+   * computed, and the agent's own instructions would stop listing it -- so the
+   * board would say "has not said it is on this" about an agent that was never
+   * told the task existed.
+   */
+  const p = freshProject('Same to every reader');
+  projects.addAgent(p.id, 'april');
+  const legacy = tasks.create(p.id, { sentence: 'Legacy shape', who: 'april' });
+  const modern = tasks.create(p.id, { sentence: 'Modern shape', who: 'april' });
+  // force the modern one into the parts shape without changing anything else
+  tasks.addPart(p.id, modern.number, { sentence: 'a second piece', who: 'april' });
+
+  const stored = projects.readAll().find((x) => x.id === p.id);
+  const inColumn = tasks.columnTasks(stored).map((t) => t.number);
+  assert.ok(inColumn.includes(legacy.number), 'the premise: the legacy task is in the column');
+  assert.ok(inColumn.includes(modern.number), 'a task with parts fell out of the column');
+
+  assert.deepEqual(tasks.whoOf(tasks.byNumber(stored, modern.number)), ['april'],
+    'the same agent, named twice, should read as one person on the task');
+
+  const block = projects.blockBody([stored], 'april');
+  assert.match(block, new RegExp('Task ' + legacy.number), 'the premise: the legacy task is in the agent\'s instructions');
+  assert.match(block, new RegExp('Task ' + modern.number),
+    'a task with parts vanished from the agent\'s own instructions, so it would never be told');
+});
+
+test('a part can be given to somebody, finished, and put back', () => {
+  const p = freshProject('Part verbs');
+  projects.addAgent(p.id, 'april');
+  const t = tasks.create(p.id, { sentence: 'Three pieces' });
+  tasks.addPart(p.id, t.number, { sentence: 'Write it' });
+  const two = tasks.partsOf(tasks.byNumber(projects.readAll().find((x) => x.id === p.id), t.number));
+  assert.equal(two.length, 2);
+
+  const assigned = tasks.assignPart(p.id, t.number, two[1].id, 'april');
+  assert.equal(assigned.ok, true, assigned.because);
+  assert.equal(tasks.partsOf(assigned.task)[1].who, 'april');
+
+  const closed = tasks.setPartClosed(p.id, t.number, two[1].id, new Date().toISOString());
+  assert.equal(closed.ok, true, closed.because);
+  const prog = tasks.progressOf(closed.task);
+  assert.deepEqual([prog.done, prog.total, prog.closed], [1, 2, false],
+    'one of two done should not close the parent');
+
+  const back = tasks.setPartClosed(p.id, t.number, two[1].id, null);
+  assert.equal(tasks.progressOf(back.task).done, 0);
+
+  // and nobody on it again is a real state, not a refusal
+  const off = tasks.assignPart(p.id, t.number, two[1].id, null);
+  assert.equal(off.ok, true, off.because);
+  assert.equal(tasks.partsOf(off.task)[1].who, null);
+});
+
+test('all parts done closes the parent, without anything storing that', () => {
+  const p = freshProject('Derived close');
+  const t = tasks.create(p.id, { sentence: 'Two pieces' });
+  tasks.addPart(p.id, t.number, { sentence: 'the other piece' });
+  const stored = () => tasks.byNumber(projects.readAll().find((x) => x.id === p.id), t.number);
+  for (const part of tasks.partsOf(stored())) {
+    tasks.setPartClosed(p.id, t.number, part.id, new Date().toISOString());
+  }
+  const prog = tasks.progressOf(stored());
+  assert.equal(prog.closed, true, 'every part is finished and the task still reads as open');
+  assert.equal(stored().closedAt, null,
+    'the parent stored a closed stamp, so the derived state can now disagree with its parts');
+});
+
+test('a part needs words, and a part number that is not there is refused', () => {
+  const p = freshProject('Part refusals');
+  const t = tasks.create(p.id, { sentence: 'Something' });
+  assert.equal(tasks.addPart(p.id, t.number, { sentence: '   ' }).ok, false);
+  assert.match(tasks.addPart(p.id, t.number, {}).because, /say what this part is/);
+  assert.match(tasks.assignPart(p.id, t.number, 99, 'april').because, /no part by that number/);
+  assert.match(tasks.setPartClosed(p.id, t.number, 99, null).because, /no part by that number/);
+});
