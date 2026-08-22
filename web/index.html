@@ -7306,11 +7306,18 @@ function orgTreeOf(agents) {
     if (!kids.has(to)) kids.set(to, []);
     kids.get(to).push(a);
   }
-  /* 🛑 A CYCLE MUST NOT HANG THE PAGE. Two agents reporting to each other is
-     refused at both write points, but a hand-edited profile file is not, and a
-     walk with no seen-set on this data recurses until the tab dies. Anything
-     already placed is skipped, so a cycle simply draws as far as its first
-     repeat and no further. */
+  /* 🛑 A CYCLE MUST NOT HANG THE PAGE -- BUT THIS SET IS NOT WHAT PREVENTS IT,
+     and believing it was is how the real protection went untested. The walk
+     starts only at agents with no manager, and every agent has AT MOST ONE
+     manager, so everything reachable from the root is a tree: `walk` cannot
+     arrive at the same node twice by any path. A cycle has no member reachable
+     from the root at all, which is why it never enters the recursion, and why
+     its members are drawn by the sweep below instead.
+
+     What this set actually catches is a REPEATED sessionName, which happens
+     for a plainer reason than a hand-edited profile: a tmux session with two
+     panes yields two cards carrying the same name. Without it that agent is
+     pushed twice and drawn twice, one node exactly on top of another. */
   const seen = new Set();
   const out = [];
   const walk = (parent, depth) => {
