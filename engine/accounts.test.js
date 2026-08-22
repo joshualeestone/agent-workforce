@@ -84,3 +84,61 @@ test('an account whose memory could not be found says so', () => {
   assert.equal(found.memoryReadable, false,
     'an account with nowhere to keep transcripts is being reported as fine');
 });
+
+test('a prepared account shares the one memory tree, so an agent keeps its history', () => {
+  /**
+   * 🔑 JOSH'S RULE, 2026-08-22: *"her memory should follow her everywhere she
+   * goes"* — across models, accounts, and providers. A principle rather than a
+   * setting, so it is encoded here rather than offered as a choice.
+   *
+   * 🛑 WITHOUT IT A SECOND ACCOUNT IS A QUIET AMNESIA, and the fleet has the
+   * write-up: *"An agent restarted onto a fresh account comes up with no
+   * memory, and nothing on screen says so. It looks like a working agent and
+   * behaves like a blank one."*
+   */
+  const made = accounts.prepare('Work Account');
+  assert.equal(made.ok, true, made.because);
+  assert.equal(made.label, 'work-account', 'the label was not made safe for a directory name');
+  assert.equal(nodePath.basename(made.dir), '.claude-work-account',
+    'the directory is named something status.configRoots() will never scan');
+  assert.equal(made.memoryShared, true, 'the account got its own empty history');
+
+  /* The link points at the ONE tree, so a transcript written under either
+     account is found under both. */
+  const shared = nodePath.join(SANDBOX, '.claude', 'projects');
+  fs.writeFileSync(nodePath.join(shared, 'proof.txt'), 'x', 'utf8');
+  assert.ok(fs.existsSync(nodePath.join(made.dir, 'projects', 'proof.txt')),
+    'the new account cannot see history written on the first one');
+
+  /* And it is listed once it is signed in, not before: a directory with no
+     account record is not an account. */
+  assert.ok(!accounts.list().some((a) => a.dir === made.dir),
+    'an empty directory is being offered as a connected account');
+  write('.claude-work-account/.claude.json', { oauthAccount: { emailAddress: 'work@example.com' } });
+  const now = accounts.list().find((a) => a.dir === made.dir);
+  assert.ok(now, 'a signed-in account is not listed');
+  assert.equal(now.memoryReadable, true);
+});
+
+test('preparing an account twice does not disturb history that is already there', () => {
+  /**
+   * 🛑 THE AMNESIA ARRIVING FROM THE OTHER DIRECTION. If a `projects` directory
+   * is already sitting in an account folder it is somebody's existing history,
+   * and replacing it with a link would be this product deleting the thing it
+   * exists to protect. Re-running must be safe.
+   */
+  const first = accounts.prepare('twice');
+  assert.equal(first.memoryShared, true);
+  const again = accounts.prepare('twice');
+  assert.equal(again.ok, true);
+  assert.equal(again.memoryShared, true, 're-running lost the shared tree');
+
+  /* A REAL directory there is left exactly alone, and reported honestly. */
+  const own = nodePath.join(SANDBOX, '.claude-hasown');
+  fs.mkdirSync(nodePath.join(own, 'projects', 'something'), { recursive: true });
+  const kept = accounts.prepare('hasown');
+  assert.equal(kept.memoryShared, false,
+    'an account with its own history is being reported as sharing the common one');
+  assert.ok(fs.existsSync(nodePath.join(own, 'projects', 'something')),
+    'existing history was destroyed to make room for a link');
+});
