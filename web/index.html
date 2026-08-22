@@ -884,7 +884,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* the read-failure message spans the grid: squeezed into one 15.5rem track
    it is the least readable thing on screen at exactly the moment it is the
    only thing that matters (same rule the projects grid records) */
-.cards > .err { grid-column: 1 / -1; }
+.cards > .err, .cards > .pj-empty { grid-column: 1 / -1; }
 .acard { display: flex; flex-direction: column; background: var(--k-surface);
          color: var(--k-ink);
          border: 1px solid var(--k-rule); border-radius: 16px;
@@ -1770,6 +1770,10 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .pj-empty { border: 0.5px dashed var(--separator); border-radius: var(--radius-card);
   padding: var(--space-7); text-align: center; }
 .pj-empty p { font: var(--text-body) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-5); }
+/* ⚠️ SOLID, and it is the one visual difference that carries meaning here. A
+   dashed border is the shape of a slot waiting to be filled; "we could not
+   read this" is not an empty slot, it is an unanswered question. */
+.pj-empty.boardfail { border-style: solid; border-color: var(--border-strong); }
 .pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -6511,11 +6515,23 @@ async function tick() {
       }
     }
     const shown = lim ? data.agents.slice(0, Number(lim)) : data.agents;
-    document.getElementById('grid').innerHTML = shown.map(card).join('');
+    /* 🛑 ZERO AGENTS DREW NOTHING AT ALL, and the rule it broke is stated at
+       the declaration of BOARD_SEEN eleven hundred lines below: [] before the
+       first answer means "not heard yet", not "empty board", and the two must
+       never be conflated. The org view honours it and the Recommended pill
+       honours it. These two rendered the same empty string for both, so a
+       person who had just finished the install could be looking at a New agent
+       tile, four zeroes, and then nothing.
+
+       ⚠️ IT IS NOT AN EDGE CASE. First-run's third ending offers "Show me my
+       agents", which lands here having created nothing. So does skipping
+       first-run, and so does removing the last agent. (Mona Lisa, #? on the
+       agents-page package, 2026-08-22.) */
+    document.getElementById('grid').innerHTML = shown.length ? shown.map(card).join('') : boardEmpty();
     // The list is the SAME agents through the same derivations, painted on
     // the same tick -- hidden or not. Painting only the visible layout would
     // hand the toggle a stale copy of whichever view was resting.
-    document.getElementById('alist').innerHTML = shown.map(lrow).join('');
+    document.getElementById('alist').innerHTML = shown.length ? shown.map(lrow).join('') : boardEmpty();
     /* ⚠️ THE THIRD VIEW REPAINTS ON THE SAME TICK, but through its own guard
        rather than an unconditional innerHTML write. The two above can be
        rewritten every five seconds because nothing in them holds focus that
@@ -7693,6 +7709,58 @@ let BOARD_LOOKED = false;
 // the person finished the flow with no agents on the project. The honest
 // sentence is the board's: we cannot see them, which is not that there are none.
 let BOARD_LOOK_FAILED = null;
+
+/**
+ * What the board says when it is holding no cards, which is THREE answers.
+ *
+ * 🔑 THE STATE IS ALREADY DERIVED; only the grid was not asking. `BOARD_SEEN`
+ * and `BOARD_LOOK_FAILED` have existed for as long as the honesty rule has,
+ * and the org view and the Recommended pill both read them. This is the fourth
+ * reader, not a fourth source of truth.
+ *
+ * 🛑 THE THIRD ANSWER IS THE ONE THAT MATTERS AND THE ONE NOBODY SEES WHILE
+ * BUILDING, because the machine you build on answers. "We could not tell" is
+ * not "there are none", and a screen that renders them identically is making
+ * the claim this product exists to refuse. Its border is SOLID rather than
+ * dashed on purpose: a dashed box is the shape of a slot waiting to be
+ * filled, and this is not that.
+ */
+function boardEmpty() {
+  if (BOARD_LOOK_FAILED) {
+    return '<div class="pj-empty boardfail">'
+      + '<p><b>We cannot read your agents right now.</b><br>'
+      + 'This is not the same as having none. Something on this computer did '
+      + 'not answer, so we are not telling you the board is empty.</p>'
+      + '<button class="btn" type="button" data-board-retry>Try again</button>'
+      + '</div>';
+  }
+  if (!BOARD_SEEN) {
+    /* No button. There is nothing to decide yet, and offering one here invites
+       a click that races the answer. */
+    return '<div class="pj-empty">'
+      + '<p><b>Looking for your agents</b><br>This takes a second on a cold start.</p>'
+      + '</div>';
+  }
+  /* The same three-part shape the pack already uses for "No projects yet" and
+     "No tasks yet": name the absence, say in one sentence what the thing is,
+     offer the one action. The definition earns its place because this is the
+     screen where somebody meets the word. */
+  return '<div class="pj-empty">'
+    + '<p><b>No agents yet.</b><br>An agent is a worker you put on a job. It '
+    + 'runs on this computer and keeps going while you get on with something '
+    + 'else.</p>'
+    /* ⚠️ `.btn`, NOT the spec's `.btn-gold`, and this is a deliberate departure
+       rather than a miss. `.btn-gold` has no rule anywhere in this app: an
+       existing comment beside the chat composer already records that it and
+       `.inp` are pack classes the build never adopted, and shipping it here
+       would render a plain button while the code claimed a gold one. The
+       app's gold primary is `.btn.uprime`. Plain is also what the sibling
+       empty state uses ("No projects yet" -> "Add a project"), and two empty
+       states on two screens must not weight their one action differently.
+       Raised with Mona Lisa rather than silently swapped. */
+    + '<button class="btn" type="button" data-board-new>Create your first agent</button>'
+    + '</div>';
+}
 // Ordering guard for the folder browser, the same shape `PJ_GEN` gives the
 // projects reads: two in-flight looks must not paint out of order.
 let PJ_BROWSE_GEN = 0;
@@ -11605,6 +11673,17 @@ function openCreate() {
 }
 
 document.getElementById('new-agent').addEventListener('click', openCreate);
+/* Delegated: both live inside innerHTML the poll replaces wholesale, so a
+   listener bound to the node would be thrown away on the next tick. */
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-board-new]')) { openCreate(); return; }
+  /* Retry is the same act the stamp's own refresh performs: ask again. It does
+     NOT clear BOARD_LOOK_FAILED first -- clearing it here would flip the box to
+     "no agents yet" for the length of one request, which is the exact
+     conflation this box exists to refuse. */
+  if (e.target.closest('[data-board-retry]')) tick();
+});
+
 // ⚠️ Leaving the panel STOPS THE WATCH. `openCreate` bumps the token and this
 // did not, so walking away mid-creation left the loop polling /api/status every
 // two seconds and repainting a hidden panel for the rest of the thirty seconds.
