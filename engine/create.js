@@ -1179,6 +1179,38 @@ function createAgent(opts) {
         if (Buffer.byteLength(spliced, 'utf8') <= MAX_BYTES) text = spliced;
       } catch { /* ships without the block */ }
     }
+    // The operating defaults (#122): how an agent behaves whatever its job,
+    // as opposed to what it is. Same gate and the same reason as the block
+    // above, and the gate is a STANDING RULING rather than a choice made here.
+    //
+    // ⚠️ I WIRED THIS FOR BOTH PATHS FIRST, on the reasoning that an agent
+    // somebody described in their own words needs operating defaults exactly
+    // as much as one picked off the menu. That reasoning is not wrong, and it
+    // is not mine to act on: the comment above states the decision already
+    // taken, that nothing is appended to a person's own words uninvited, and
+    // its own test pins it. A gap worth raising is not a gap worth closing
+    // silently, so it is raised instead.
+    //
+    // ⚠️ THE FITS-CHECK IS DEFENCE AGAINST GROWTH AND CANNOT CURRENTLY FIRE,
+    // which is stated here because an unlabelled guard reads as a tested one.
+    // On this path the text is a role template under a kilobyte plus two
+    // bounded blocks, against a 256KB cap: the margin is four orders of
+    // magnitude. The near-cap case exists only for CUSTOM instructions, and
+    // those never enter this branch. A test asserting the drop passed with
+    // this line deleted for exactly that reason, and was replaced by one that
+    // measures the margin instead.
+    //
+    // It stays because the first wiring appended before validation, which
+    // turned a too-large file into a REFUSAL to create the agent at all.
+    // Dropping the block is the right failure; refusing somebody their agent
+    // because the product wanted to teach it something is not.
+    if (wantInstructions === undefined) {
+      try {
+        const withDefaults = require('./defaults').appendTo(text);
+        const { MAX_BYTES } = require('./instructions');
+        if (Buffer.byteLength(withDefaults, 'utf8') <= MAX_BYTES) text = withDefaults;
+      } catch { /* ships without the defaults */ }
+    }
     fs.writeFileSync(instructionFile(name), text, 'utf8');
   });
 

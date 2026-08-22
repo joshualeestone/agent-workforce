@@ -1585,6 +1585,107 @@ test('custom instructions are written verbatim with a trailing newline, and the 
     'the role template leaked into instructions the person replaced');
 });
 
+/**
+ * The operating defaults (#122).
+ *
+ * 🔑 EVERY ONE OF THESE READS THE FILE THE AGENT ACTUALLY BOOTS FROM, not the
+ * module's return value. What `defaults.block()` contains is not the question;
+ * what lands in `CLAUDE.md` is, and the two are separated by a size gate, a
+ * standing ruling about whose words get appended to, and two other blocks that
+ * splice into the same string.
+ */
+test('an agent made from a role is taught how to work, not only what it is', () => {
+  recorder();
+  create.setDryRun(false);
+  const made = create.createAgent({ ...BINS, name: 'defaulted', role: 'pm' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  const text = fs.readFileSync(create.instructionFile('defaulted'), 'utf8');
+  assert.ok(text.includes('project manager'), 'the role text is missing, so this proves nothing about ordering');
+  assert.ok(text.includes('How you work, whatever the job'), 'the operating defaults never reached the boot file');
+  /* The four events and the room rule are the two passages the block exists
+     for, and both were once written against a surface nobody had watched an
+     agent try to reach. Named individually so a truncated block fails here
+     rather than passing on its first heading. */
+  assert.ok(text.includes('**Blocked:** on what, and who owns it.'), 'the four events are missing');
+  assert.ok(text.includes('your reply goes back to that'), 'the answer-where-you-were-asked rule is missing');
+  assert.ok(text.includes('Look for what is already on this computer'), 'the look-before-you-install rule is missing');
+  assert.ok(text.includes('When you make something for a person'), 'the what-you-hand-a-person rule is missing');
+});
+
+test('nothing in an agent boot file breaks the rule that boot file states', () => {
+  recorder();
+  create.setDryRun(false);
+  const made = create.createAgent({ ...BINS, name: 'nodashes', role: 'researcher' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  const text = fs.readFileSync(create.instructionFile('nodashes'), 'utf8');
+  /* 🛑 ASSERTED ON THE COMPOSED FILE, which is the only place it can be
+     checked honestly. The block tells every agent never to use an em dash;
+     a block containing one teaches a rule it is visibly breaking, and the
+     role text, the colleagues block and the defaults all land in this one
+     string from three different modules. Checking any one of them alone
+     would leave the other two free to carry it in. */
+  const dashes = text.split('\u2014').length - 1;
+  assert.equal(dashes, 0, 'the boot file contains ' + dashes + ' em dashes while instructing against them');
+});
+
+test('the defaults are not appended to a person\'s own words uninvited', () => {
+  recorder();
+  create.setDryRun(false);
+  const mine = 'You are **Quill**, and I wrote this myself.\n';
+  const made = create.createAgent({ ...BINS, name: 'ownwords-def', role: 'pm', instructions: mine });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+  const text = fs.readFileSync(create.instructionFile('ownwords-def'), 'utf8');
+  /* ⚠️ THIS PINS A STANDING RULING, NOT A PREFERENCE, and the ruling is older
+     than this feature: custom instructions are the person's own words, and the
+     colleagues block is gated on exactly the same condition for exactly the
+     same reason. It is worth stating that the ruling has a COST, since a test
+     asserting an absence reads like the absence is desirable: an agent whose
+     person wrote its file gets no operating defaults, which are the difference
+     between an agent that stops overnight and one that does not. That is the
+     operator's call to change, and until they change it this is the behaviour.
+     If it flips, this test flips with it rather than being deleted. */
+  assert.ok(!text.includes('How you work, whatever the job'),
+    'the defaults were appended to instructions the person wrote themselves');
+  assert.ok(text.startsWith(mine), 'the person\'s own words were rewritten');
+});
+
+test('a role-made boot file is nowhere near the size its reader refuses', () => {
+  const instructions = require('./instructions');
+  recorder();
+  create.setDryRun(false);
+  const r = create.createAgent({ ...BINS, name: 'sized-def', role: 'pm' });
+  assert.equal(r.outcome, create.OUTCOME.CREATED, r.because);
+  const bytes = Buffer.byteLength(fs.readFileSync(create.instructionFile('sized-def'), 'utf8'), 'utf8');
+  assert.ok(bytes <= instructions.MAX_BYTES, 'the boot file outgrew its own reader');
+  /* 🛑 THIS TEST REPLACED ONE THAT PROVED NOTHING, and the replacement is
+     narrower on purpose. The original built instructions ten bytes under
+     MAX_BYTES and asserted the defaults were dropped rather than the agent
+     refused. It passed with the fits-check deleted, because near-cap
+     instructions are CUSTOM instructions, and the defaults are not appended to
+     those at all: it was measuring the standing ruling and reporting it as the
+     size guard.
+
+     There is no reachable near-cap case on the role path. Role text is under a
+     kilobyte, the two blocks are bounded, and the cap is 256KB, so the margin
+     is four orders of magnitude wide. That is the honest claim and it is what
+     this asserts. The fits-check in create.js stays as defence against future
+     growth and is labelled there as currently unfireable, so that nobody
+     writes this test again believing it proves something. */
+  assert.ok(bytes < instructions.MAX_BYTES / 8,
+    'a role-made boot file has grown toward the cap; the fits-check may now be reachable and testable ('
+    + bytes + ' bytes)');
+});
+
+test('appending the defaults twice does not double every rule', () => {
+  const defaults = require('./defaults');
+  const once = defaults.appendTo('You are **Sam**, a bookkeeper.\n');
+  assert.equal(defaults.appendTo(once), once, 'a second append duplicated the block');
+  /* POSITIVE CONTROL: the guard is reading the file, not returning early on
+     something incidental. Text without the block must gain it. */
+  assert.ok(defaults.appendTo('plain text\n').includes('How you work, whatever the job'),
+    'the guard refuses text that never had the block');
+});
+
 test('a chosen label lands in the profile only on a completed creation', () => {
   recorder();
   create.setDryRun(false);
