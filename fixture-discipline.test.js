@@ -645,3 +645,39 @@ test('every suite that creates an agent sandboxes CLAUDE CODE’s config too', (
   assert.deepEqual(missing, [],
     'these suites create agents without sandboxing ~/.claude.json, so running them writes into the operator’s real Claude config');
 });
+
+/**
+ * Nothing is tracked under a directory an unset variable made.
+ *
+ * 🛑 THIS IS NOT HOUSEKEEPING. Two screenshots sat committed under a folder
+ * literally named `undefined`, put there by an ad-hoc script whose output path
+ * interpolated a variable that was never set, and swept in by `git add -A`. An
+ * accident that produces a path rather than an error is invisible: the script
+ * reported success, the files existed, and the commit looked ordinary in a
+ * diff of forty files.
+ *
+ * 🔑 KEYED ON THE ACCIDENT, NOT ON THE NAMES. `undefined/` was this instance;
+ * `null/`, `NaN/` and a bare `http:/host/` from a redirected download are the
+ * same mistake wearing a different word, and a check listing the one name we
+ * happened to see would pass the next four. Every one of them is a value that
+ * was supposed to be a path and was not.
+ */
+test('no file is tracked under a path an unset variable produced', () => {
+  const tracked = require('node:child_process')
+    .execSync('git ls-files', { cwd: __dirname, encoding: 'utf8' })
+    .split('\n').filter(Boolean);
+  assert.ok(tracked.length > 100, 'git ls-files returned almost nothing, so this test proved nothing');
+  const ACCIDENTS = new Set(['undefined', 'null', 'NaN', '[object Object]']);
+  const bad = tracked.filter((f) => f.split('/').some(
+    (seg) => ACCIDENTS.has(seg) || /^[a-z][a-z0-9+.-]*:$/.test(seg),
+  ));
+  assert.deepEqual(bad, [], 'tracked under a path that came from an unset value: ' + bad.join(', '));
+  /* POSITIVE CONTROL: the matcher recognises the shapes it claims to, so an
+     empty result means the tree is clean rather than the predicate being dead. */
+  const wouldCatch = ['undefined/a.png', 'x/null/b', 'http:/127.0.0.1/c', 'NaN/d']
+    .filter((f) => f.split('/').some((seg) => ACCIDENTS.has(seg) || /^[a-z][a-z0-9+.-]*:$/.test(seg)));
+  assert.equal(wouldCatch.length, 4, 'the matcher does not recognise its own examples');
+  assert.ok(!['docs/browser-checks/shots/a.png', 'engine/update.js']
+    .some((f) => f.split('/').some((seg) => ACCIDENTS.has(seg) || /^[a-z][a-z0-9+.-]*:$/.test(seg))),
+  'the matcher flags ordinary paths');
+});
