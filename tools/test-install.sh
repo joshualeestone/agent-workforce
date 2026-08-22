@@ -47,6 +47,23 @@ SB="$(mktemp -d)"
 trap 'for _p in "$SB"/home*/board.pid; do if [ -f "$_p" ]; then _k="$(cat "$_p" 2>/dev/null)"; [ "$_k" = "$$" ] || kill "$_k" 2>/dev/null || true; fi; done; chflags -R nouchg "$SB" 2>/dev/null || true; chmod -R u+w "$SB" 2>/dev/null || true; rm -rf "$SB"' EXIT
 mkdir -p "$SB/data" "$SB/launch"
 
+# 🛑 REAL CONTENT IN THE DATA FOLDER, BEFORE ANYTHING RUNS. The "user data
+# untouched" check further down asserted only that the DIRECTORY still
+# existed, and this folder was created empty, so it passed on an uninstall
+# that had emptied it and would have passed on one that emptied it every
+# time. The most consequential promise either path makes is that a person's
+# agents, projects and history are not deleted, and it was resting on
+# `[ -d ]` against nothing.
+#
+# ⚠️ Shapes the product really writes, so a sweep keyed on any of them would
+# find these: a JSON record, a per-agent folder, and a dot-file.
+mkdir -p "$SB/data/projects" "$SB/data/agents/harness-agent"
+printf '{"name":"Josh","does":"Runs a company"}' > "$SB/data/you.json"
+printf 'their own words\n' > "$SB/data/agents/harness-agent/CLAUDE.md"
+printf '[{"id":"p1","name":"A project"}]' > "$SB/data/projects/projects.json"
+printf 'x' > "$SB/data/.hidden-record"
+DATA_FINGERPRINT="$(cd "$SB/data" && find . -type f -exec shasum {} \; | sort)"
+
 # ⚠️ THE PRODUCT'S DEFAULT PORT, RECORDED BEFORE ANYTHING RUNS, and checked
 # again at the end. Found by Splinter, 2026-08-21: a test run left a board
 # answering on the default port from a deleted worktree, and the installer's
@@ -143,6 +160,15 @@ seed_residue() { # $1 = full residue path, $2 = the KOSMOS_HOME it bakes
 echo "== install (piped into sh, local sources, port $PORT) =="
 RC=0; cat "$SETUP" | sh > "$SB/install.log" 2>&1 || RC=$?
 chk "install exits 0" "[ $RC -eq 0 ]"
+# 🔑 THE UPGRADE PATH, ASSERTED HERE AND NOT ONLY AFTER THE UNINSTALL. An
+# update re-runs THIS installer over an existing install (engine/update.js
+# fetches /setup and runs it), so "install does not touch the person's data" is
+# the upgrade promise, and it is the one nobody tests because the machine you
+# build on already has data and you would notice. Checked at both ends so a
+# failure names the right actor: the post-uninstall comparison alone would
+# report an install that ate the data as an uninstall bug.
+chk "installing over an existing home leaves user data byte for byte" \
+  "[ \"\$(cd \"$SB/data\" && find . -type f -exec shasum {} \\; | sort)\" = \"\$DATA_FINGERPRINT\" ]"
 chk "board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q running"
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
@@ -209,7 +235,21 @@ chk "symlink gone" "[ ! -e \"$SB/bin/kosmos\" ] && [ ! -L \"$SB/bin/kosmos\" ]"
 chk "app gone" "[ ! -d \"$SB/apps/Kosmos.app\" ]"
 chk "override-branch stage and aside residue swept" "[ ! -e \"$SB/apps/.Kosmos.app.stage.333\" ] && [ ! -e \"$SB/apps/.Kosmos.app.old.444\" ]"
 chk "agent plist removed" "[ ! -e \"$SB/launch/com.kosmos.agent.tiharness.plist\" ]"
-chk "user data untouched" "[ -d \"$SB/data\" ]"
+chk "user data folder survives" "[ -d \"$SB/data\" ]"
+# ⚠️ BYTE FOR BYTE, not merely present. The directory check above cannot tell
+# a preserved folder from an emptied one, and an uninstall that deleted a
+# person's agents while leaving the folder would have passed it.
+chk "every user file survives the uninstall byte for byte" \
+  "[ \"\$(cd \"$SB/data\" && find . -type f -exec shasum {} \\; | sort)\" = \"\$DATA_FINGERPRINT\" ]"
+# POSITIVE CONTROL: the fingerprint is not empty, so the comparison above is
+# comparing something. An empty string equals an empty string.
+# ⚠️ `grep -c .` COUNTS LINES; `printf '%s' | wc -l` COUNTS NEWLINES and so
+# under-reports by one on a string with no trailing newline. The first version
+# used the latter against a threshold of 4 with 4 files seeded, so the control
+# failed while the thing it guards was working perfectly. A control that cries
+# wolf gets deleted, which would have left the vacuous comparison standing.
+chk "the fingerprint covers real files" \
+  "[ \"\$(printf '%s\\n' \"\$DATA_FINGERPRINT\" | grep -c .)\" -ge 4 ]"
 chk "PATH wiring removed from the sandbox profile" "! grep -q kosmos \"$SB/zprofile\""
 chk "the export line came out too (adjacency arm has a check that can fail)" "! grep -qF \"$SB/bin\" \"$SB/zprofile\""
 chk "the operator's own profile line survives" "grep -q 'own line' \"$SB/zprofile\""
