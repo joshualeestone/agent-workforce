@@ -553,3 +553,46 @@ test('the stuck screen offers the Terminal way out only when there is something 
   assert.match(src, /Nothing is broken by this\. You can try again'/,
     'the reassurance was moved inside a branch, so one of the two paths loses it');
 });
+
+test('the port-collision message names what was seen, and the escape clears the OTLP range', () => {
+  /**
+   * 🛑 KOSMOS BINDS 4317, WHICH IS THE OPENTELEMETRY OTLP/gRPC DEFAULT. Found by
+   * Shredder on an independent walk of the install, verified in source by
+   * Splinter, and it matters tonight specifically: Josh is demoing to somebody
+   * who already runs agents, which makes a collector on 4317 materially likelier
+   * than average.
+   *
+   * ⚠️ TWO THINGS WENT WRONG AT ONCE, AND EVERY STEP BEFORE THEM SUCCEEDED.
+   * The install finished, the browser correctly did not open, and the last
+   * paragraph asserted a cause it could not know — *"often another account's
+   * Kosmos"* — sending a person to look for a second Kosmos that does not exist.
+   * Then it suggested `PORT + 1`, which is **4318, the OTLP/HTTP default**: on
+   * the machine most likely to have 4317 taken, the escape hatch pointed at the
+   * second-most-likely-occupied port on the box.
+   *
+   * 📌 A SOURCE READ, said plainly: driving a real install against a held port
+   * belongs in `tools/test-install.sh`, and this pins the two properties that
+   * were actively harmful so they cannot come back quietly.
+   */
+  /* ⚠️ COMMENT LINES STRIPPED FIRST, for the reason this file keeps re-learning:
+     the comment that RECORDS a removed phrase contains that phrase, so an
+     unstripped check reads the explanation as the defect. It then punishes
+     writing the explanation down, which is the opposite of what it is for.
+     Whole-line only — a '#' inside a printf string is part of the message. */
+  const setup = fs.readFileSync(path.join(__dirname, 'install', 'setup.sh'), 'utf8')
+    .split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+
+  assert.ok(!setup.includes('often another'),
+    'the message asserts a cause again; it can see the port is busy, not who has it');
+  assert.ok(setup.includes('port for OpenTelemetry collectors'),
+    'the message no longer names the collision a person is likeliest to actually have');
+
+  /* 🛑 THE ESCAPE MUST NOT BE PORT+1. */
+  assert.ok(!setup.includes('_alt=$((PORT + 1))'),
+    'the suggested port is 4318 again, which is the other OpenTelemetry default');
+  assert.ok(setup.includes('_alt=4417'), 'the escape no longer clears the OTLP range');
+
+  /* And the sentence that has to survive either way: the install DID work. */
+  assert.ok(setup.includes('Kosmos is installed, but something else is already answering'),
+    'a person whose port is busy is no longer told the install itself succeeded');
+});
