@@ -52,6 +52,12 @@ test('the path line is gone from the instructions box (#198)', () => {
      removing it would be a change to the panel's wiring rather than to its
      copy, and the card was about the copy. */
   assert.match(PAGE, /id="d-instr-foot"/, 'the element went with the sentence, which is a wiring change');
+  /* ⚠️ AND IT COLLAPSES. `hidden = !data.editable` shows it whenever the file is
+     editable, so with the sentence gone it is an empty visible div. That costs
+     nothing while `.fpath` has no box model and costs a gap the day it gets a
+     margin. */
+  assert.match(PAGE, /\.fpath:empty\s*{[^}]*display:\s*none/,
+    'the emptied path element no longer collapses, so it can grow a gap');
 });
 
 test('the stale sentence names the edits rather than pointing at nothing (#212)', () => {

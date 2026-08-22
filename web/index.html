@@ -2207,6 +2207,13 @@ svg { display: block; }
    Mouse print got smaller in IMPORTANCE, not in legibility. Only two elements
    carry this class, both in this panel, so the blast radius is the panel. */
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
+/* ⚠️ COLLAPSES WHEN EMPTY, which it now always is on the instructions box: the
+   path sentence was cut (#198) and the element stays only because four call
+   sites wire its visibility. `hidden = !data.editable` therefore SHOWS an empty
+   div, which costs nothing today because this rule has no box model, and would
+   cost a gap the moment somebody gives `.fpath` a margin. Same guard `.fhint`
+   already carries, for the same reason. */
+.fpath:empty { display: none; }
 /* ⚠️ TWO CLASSES THAT WERE WORN AND NEVER DEFINED. Project settings renders the
    folder NAME — the answer to the question that screen exists to answer — as
    `<p class="shint"><code class="t">`, and neither class had a rule anywhere in
