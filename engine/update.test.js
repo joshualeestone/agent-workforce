@@ -288,3 +288,58 @@ test('a PERSON whose install fails does not suppress the next automatic one', as
 
   update.setInstalledRoot(null); update.setAutoPref(null); update.setInstallRunner(null);
 });
+
+/**
+ * The one command in this product that ends in `| sh`.
+ *
+ * 🛑 NOTHING EXERCISED OR CHECKED IT. Every test that reaches `beginInstall`
+ * injects `installRunner`, which replaces the spawn entirely, so the real
+ * command was never built, never run and never asserted. That is the highest
+ * consequence line in the codebase and it had the least coverage of any line
+ * near it.
+ *
+ * 🔑 THE PROPERTY IS SYNTACTIC, so the check reads the source rather than
+ * running it. "This value must not be interpolated into a shell string" is a
+ * fact about the TEXT, and the only way to observe it at runtime would be to
+ * actually execute a hostile URL. The URL travels as a positional parameter
+ * (`sh -c '... "$1"' sh <url>`), which is what makes a base containing
+ * `; rm -rf ~` an argument rather than a command.
+ *
+ * ⚠️ AND THE BASE IS OVERRIDABLE. `setBase` and `KOSMOS_RELEASE_BASE` exist for
+ * staging, so the URL is not a constant this file controls. That is exactly why
+ * the shape matters rather than being belt-and-braces.
+ */
+const SRC = require('node:fs').readFileSync(require('node:path').join(__dirname, 'update.js'), 'utf8');
+
+test('the installer URL is a positional parameter, never interpolated into the shell string', () => {
+  const at = SRC.indexOf("spawn('/bin/sh'");
+  assert.ok(at > -1, 'the installer spawn is gone or no longer uses /bin/sh directly');
+  const call = SRC.slice(at, SRC.indexOf(')', SRC.indexOf('setupUrl()', at)) + 1);
+
+  /* The safe shape, asserted positively first: the command references `$1` and
+     the URL rides as its own argv element after the `sh` argv[0] filler. */
+  assert.match(call, /'-c',\s*'curl -fsSL "\$1" \| sh',\s*'sh',\s*setupUrl\(\)/,
+    'the installer command is no longer the reviewed shape: ' + call);
+
+  /* And the unsafe shapes, by name. A template literal or a concatenation
+     inside the `-c` string is the whole failure: it turns a release base into
+     shell. */
+  const dashC = call.slice(call.indexOf("'-c'"), call.indexOf("'sh',"));
+  assert.ok(!/\$\{/.test(dashC), 'the command string interpolates: ' + dashC);
+  assert.ok(!/\+/.test(dashC), 'the command string concatenates: ' + dashC);
+  assert.ok(!/setupUrl/.test(dashC), 'the URL is inside the command string rather than beside it');
+});
+
+test('a hostile release base cannot become a command', () => {
+  /* 🔑 THE CONTROL, and it exercises the real builder rather than restating it.
+     `setupUrl()` is what feeds that positional parameter, so a base carrying
+     shell metacharacters must come back as a URL string and nothing else. What
+     makes it harmless is its POSITION, which the test above pins; this pins
+     that nothing sanitises it into looking harmless while the position changes
+     underneath. */
+  update.setBase('https://example.com/dist"; rm -rf ~; echo "');
+  const url = update.setupUrl();
+  assert.match(url, /rm -rf ~/, 'the base was silently rewritten, so this test no longer proves anything');
+  assert.ok(!url.includes('\n'), 'the URL carries a newline, which no positional parameter should');
+  update.setBase(null);
+});
