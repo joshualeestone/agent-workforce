@@ -346,6 +346,20 @@ test('every reader treats a parts task exactly as it treats the legacy one', () 
   assert.deepEqual(tasks.whoOf(tasks.byNumber(stored, modern.number)), ['april'],
     'the same agent, named twice, should read as one person on the task');
 
+  /* 🛑 THE CLAIM JOIN, and it had no test at all until a mutation went
+     unnoticed: reverting `joinTaskClaims` to `t.who` broke nothing red. A task
+     with parts got no claim computed, so the card silently lost its
+     says-it-is-on-this line and nobody would have known which change did it. */
+  const commitments = require('./commitments');
+  commitments.report('april', [{ what: 'On task ' + modern.number + ': the modern one' }]);
+  const described = projects.get(p.id, []);
+  const modernSeen = described.tasks.find((x) => x.number === modern.number);
+  assert.equal(modernSeen.claim && modernSeen.claim.claimed, true,
+    'a task with parts got no claim, so the card cannot say the agent is on it');
+  const legacySeen = described.tasks.find((x) => x.number === legacy.number);
+  assert.equal(legacySeen.claim && legacySeen.claim.claimed, false,
+    'the premise: the unreported legacy task joins as a definite no');
+
   const block = projects.blockBody([stored], 'april');
   assert.match(block, new RegExp('Task ' + legacy.number), 'the premise: the legacy task is in the agent\'s instructions');
   assert.match(block, new RegExp('Task ' + modern.number),
