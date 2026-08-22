@@ -1179,6 +1179,30 @@ function createAgent(opts) {
         if (Buffer.byteLength(spliced, 'utf8') <= MAX_BYTES) text = spliced;
       } catch { /* ships without the block */ }
     }
+    // The operating defaults (#122): how an agent behaves whatever its job,
+    // as opposed to what it is. Same gate and the same reason as the block
+    // above, and the gate is a STANDING RULING rather than a choice made here.
+    //
+    // ⚠️ I WIRED THIS FOR BOTH PATHS FIRST, on the reasoning that an agent
+    // somebody described in their own words needs operating defaults exactly
+    // as much as one picked off the menu. That reasoning is not wrong, and it
+    // is not mine to act on: the comment above states the decision already
+    // taken, that nothing is appended to a person's own words uninvited, and
+    // its own test pins it. A gap worth raising is not a gap worth closing
+    // silently, so it is raised instead.
+    //
+    // ⚠️ AND THE FITS-CHECK IS NOT OPTIONAL. Instructions that validate just
+    // under MAX_BYTES cross it once five kilobytes of defaults land, and the
+    // append happening before validation turned that into a REFUSAL to create
+    // the agent at all. Dropping the block is the right failure; refusing the
+    // person their agent because we wanted to teach it something is not.
+    if (wantInstructions === undefined) {
+      try {
+        const withDefaults = require('./defaults').appendTo(text);
+        const { MAX_BYTES } = require('./instructions');
+        if (Buffer.byteLength(withDefaults, 'utf8') <= MAX_BYTES) text = withDefaults;
+      } catch { /* ships without the defaults */ }
+    }
     fs.writeFileSync(instructionFile(name), text, 'utf8');
   });
 
