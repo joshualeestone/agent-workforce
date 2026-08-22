@@ -10008,7 +10008,11 @@ let PANEL_WITHDRAWN = false;
 let HIST_RETURN = null;
 function histSay(sum) {
   if (!sum || sum.readable === false) return null;
-  const bits = sum.parts.filter((p) => p.count > 0).map((p) => p.count + ' ' + p.label);
+  /* The engine supplies both forms; the screen picks by count and invents no
+     grammar of its own. "1 reports" is only wrong at exactly one value, which
+     is why reading the code never caught it and rendering did. */
+  const bits = sum.parts.filter((p) => p.count > 0)
+    .map((p) => p.count + ' ' + (p.count === 1 && p.one ? p.one : p.label));
   return bits.length ? bits.join(' and ') : null;
 }
 /* ---- the person's picture ---------------------------------------------

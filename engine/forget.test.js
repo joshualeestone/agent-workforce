@@ -106,3 +106,19 @@ test('the surface is exactly two names, and widening it takes an edit here', () 
      whoever widened it has to say so in a diff somebody reads. */
   assert.deepEqual(forget.KINDS.map((k) => k.key), ['chats', 'commitments']);
 });
+
+test('one of a thing is not "1 reports"', () => {
+  seed();
+  const sum = forget.summary();
+  const one = sum.parts.find((p) => p.key === 'commitments');
+  assert.equal(one.count, 1, 'the fixture must have exactly one for this to test anything');
+  /* ⚠️ THE PLURAL IS ONLY WRONG AT EXACTLY ONE, which is why reading the code
+     never caught it and rendering the dialog did. Both forms come from the
+     engine, because the screen must not invent grammar for a control with no
+     undo any more than it invents the scope. */
+  assert.equal(one.one, 'report');
+  assert.equal(one.label, 'reports');
+  for (const p of sum.parts) {
+    assert.ok(p.one && p.label && p.one !== p.label, p.key + ' is missing one of its two forms');
+  }
+});

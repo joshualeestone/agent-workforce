@@ -35,9 +35,15 @@ const store = require('./store');
 const BASE = process.env.AGENT_WORKFORCE_DATA || store.ROOT;
 
 /* The whole surface. Adding a name here is the only way to widen this. */
+/* ⚠️ BOTH FORMS, because the screen counts them. "1 reports" shipped on the
+   one dialog a person reads before an irreversible act -- found by rendering
+   it, not by reading it, since the plural is only wrong at exactly one count.
+   📌 The words live HERE rather than on the screen for the reason the module
+   header gives: a control with no undo must not describe its own scope in its
+   own words. That applies to the grammar too. */
 const KINDS = [
-  { key: 'chats', dir: () => path.join(store.ROOT, 'chats'), label: 'conversations' },
-  { key: 'commitments', dir: () => path.join(BASE, 'commitments'), label: 'reports' },
+  { key: 'chats', dir: () => path.join(store.ROOT, 'chats'), label: 'conversations', one: 'conversation' },
+  { key: 'commitments', dir: () => path.join(BASE, 'commitments'), label: 'reports', one: 'report' },
 ];
 
 function countIn(dir) {
@@ -62,7 +68,7 @@ function summary() {
     try {
       if (fs.existsSync(dir)) count = countIn(dir);
     } catch { readable = false; }
-    return { key: k.key, label: k.label, count, readable };
+    return { key: k.key, label: k.label, one: k.one, count, readable };
   });
   return {
     parts,
