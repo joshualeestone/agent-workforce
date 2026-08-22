@@ -90,6 +90,7 @@ one invented by somebody who did not write them.
 | `render-offline-note.js` | What the page says when the server it was loaded from is killed under it (#269) |
 | `render-org-chart.js` | The org chart: opaque faces, no hub stroke, a pressable callout, centred on its own drawing (#284) |
 | `render-role-limit.js` | Where a role's limit on what it reaches is read, now that it is off the create card |
+| `render-role-order.js` | The three role options in Josh's order, natively grouped, with the menu between two of them |
 | `render-pjsettings.js` | **no header sentence.** Read it before running it, and give it one. |
 | `render-projects.js` | Render every state of the Projects screens in a real browser, light and dark |
 | `render-reload-toast.js` | The reload toast in both tones, beside the shipped offer toast it must not look like (#270) |
@@ -478,3 +479,13 @@ echo '{"completedAt":"2026-01-01T00:00:00.000Z"}' > "$SB/data/AgentWorkforce/fir
 is on top of the sentence precisely because its first version did not, and passed
 all twelve checks with the whole page underneath an opaque overlay. Laid out and
 readable are different facts and only one of them is what this pins.
+
+**`render-role-order.js`** also needs first run complete (same seeding as
+`render-role-limit.js` above), and runs BOTH engines. WebKit is not optional:
+the chosen row is marked by `:has(input:checked)` and nothing else, so a
+`:has` that did not resolve would leave every option looking unchosen while the
+form worked perfectly, and Kosmos opens Safari.
+
+⚠️ **On macOS a click does not move keyboard focus to a radio** unless Full
+Keyboard Access is on, so the script focuses before it arrows. Its first version
+clicked, and read the missing focus as "native grouping does not work in Safari".

@@ -128,16 +128,29 @@ const LIVE = `(el) => {
       `describe-it-yourself moved ${Math.round(open.ownTop - before)}px`);
 
     /* --- the styling the platform now drives ---------------------------- */
-    const paint = await page.evaluate(() => {
-      const on = getComputedStyle(document.getElementById('pick-list'));
-      const off = getComputedStyle(document.getElementById('pick-pm'));
-      return { on: on.borderTopColor + ' ' + on.boxShadow, off: off.borderTopColor + ' ' + off.boxShadow };
+    /* 🛑 THE MOUSE IS PARKED FIRST, AND WITHOUT THAT THIS CHECK CANNOT FAIL.
+       Its first version compared the row it had just CLICKED against another
+       row, so `.pick2:hover` supplied the difference: deleting the
+       `:has(input:checked)` rule outright still passed, in both engines. It now
+       compares ONE row against ITSELF, unchecked then checked, with the pointer
+       nowhere near either. */
+    await page.mouse.move(5, 5);
+    const before2 = await page.evaluate(() => {
+      document.querySelectorAll('input[name="rmode"]').forEach((r) => { r.checked = false; });
+      const s = getComputedStyle(document.getElementById('pick-list'));
+      return s.borderTopColor + ' | ' + s.boxShadow;
+    });
+    const after2 = await page.evaluate(() => {
+      document.querySelector('input[name="rmode"][value="list"]').checked = true;
+      const s = getComputedStyle(document.getElementById('pick-list'));
+      return s.borderTopColor + ' | ' + s.boxShadow;
     });
     /* 🛑 THE ONE THAT MATTERS IN WEBKIT: `:has(input:checked)` is the only thing
-       marking the chosen row now. If it does not resolve, both rows compute the
-       same border and the form silently loses its selected state. */
-    check(`[${engine}] the chosen row looks different from an unchosen one`,
-      paint.on !== paint.off, `${paint.on}  vs  ${paint.off}`);
+       marking the chosen row now. If it does not resolve, a chosen row computes
+       exactly what it did unchosen and the form silently loses its selected
+       state while working perfectly. */
+    check(`[${engine}] checking a row changes how that row is painted`,
+      before2 !== after2, `${before2}   ->   ${after2}`);
 
     /* --- the keyboard, which is no longer our code ----------------------- */
     /* ⚠️ FOCUSED, NOT CLICKED, AND THAT IS A REAL PLATFORM DIFFERENCE RATHER
