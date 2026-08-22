@@ -2288,10 +2288,17 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    takes the shared `select` appearance and the same flex width as the text
    field above it, which is what Josh asked for when he called it unstyled. */
 
-.roledesc .caution, #pick-pm-desc .caution {
+/* 📌 `#pick-pm-desc` IS GONE FROM THIS SELECTOR because that card stopped
+   rendering a caution on 2026-08-22, not because the styling was wrong. The
+   role menu still shows one per role, which is the `.roledesc` half. */
+.roledesc .caution, .rolelimit {
   display: block; margin-top: var(--space-3); padding-left: var(--space-4);
   border-left: 2px solid var(--border-strong); color: var(--label);
   font: var(--text-callout) var(--font-ui); }
+/* On the last step it is a block in its own right rather than a tail on a
+   paragraph, so it gets the room a standalone sentence needs above the button. */
+.rolelimit { margin: var(--space-5) 0 0; }
+.rolelimit[hidden] { display: none; }
 .pick small { font: var(--text-callout) var(--font-ui); color: var(--label-3); }
 .ticks { margin: var(--space-6) 0 0; }
 .tick { font: var(--text-body) var(--font-ui); color: var(--label-2);
@@ -4412,6 +4419,17 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          can be reversed knowingly if the cost turns out to bite. The
          same-role-preserving path below still works; only the way to reach it
          is gone. -->
+    <!-- 🛑 THE LAST PLACE THIS CAN BE SAID BEFORE THE AGENT EXISTS, and it has
+         to be said somewhere: once it exists it may already have briefed
+         somebody. Nine of the twenty-eight roles carry a limit on what they
+         reach or decide, and the create card is a comparison, where a limit
+         reads as a downside of one option rather than as a fact about the job.
+         Here it is about the agent being made, with nothing to compare it to
+         (Mona Lisa, superseding the placement rather than the rule).
+         ⚠️ ABOVE THE BUTTON, not below it: below is where a person has already
+         decided, and a sentence they read after pressing is a sentence they read
+         about something that has happened. -->
+    <p class="rolelimit" id="create-limit" hidden></p>
     <div class="sfoot">
       <button class="btn uprime big" id="create-go" type="button">Create agent</button>
     </div>
@@ -12890,8 +12908,12 @@ function buildPicker() {
   // role is ever re-keyed and the fallback promotes a caution role, its
   // limit renders rather than vanishing (the engine's shipping condition;
   // review round 1 found the hole).
-  document.getElementById('pick-pm-desc').innerHTML = esc(pm.blurb) +
-    (pm.caution ? `<span class="caution">${esc(pm.caution)}</span>` : '');
+  /* ⚠️ THE BLURB ONLY. The caution is deliberately not here any more: on a
+     screen where three options sit side by side it reads as a downside of one
+     of them rather than as a fact about the job (Josh, 2026-08-22). It is
+     rendered on the last step instead, beside the button that creates the
+     agent, which is still before the agent exists. */
+  document.getElementById('pick-pm-desc').textContent = pm.blurb;
   updateRecPill();
   const rest = ROLES.filter((r) => r.key !== pm.key);
   document.getElementById('pick-list-desc').textContent =
@@ -13134,6 +13156,14 @@ document.getElementById('role-next').addEventListener('click', () => {
   FILLED_ROLE = PICKED;
   if (!AVATAR_FILE) drawCreateMark();
   document.getElementById('create-blurb').textContent = role.blurb + '.';
+  /* The limit on what this role reaches, on the last screen before it exists.
+     ⚠️ HIDDEN RATHER THAN EMPTIED when a role has none: an empty bordered
+     paragraph still draws a rule down the page. Nineteen of the twenty-eight
+     roles take that branch, as does every agent described in the person's own
+     words, so it is the common case rather than the edge. */
+  const limit = document.getElementById('create-limit');
+  limit.textContent = role.caution || '';
+  limit.hidden = !role.caution;
   cstep('name');
   document.getElementById('create-name').focus();
 });
