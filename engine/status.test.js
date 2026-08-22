@@ -2197,3 +2197,59 @@ test('a synthetic placeholder is not reported as the model an agent runs on', ()
     setPaneCapture(null);
   }
 });
+
+test('a restarted agent that has taken no turns says so, because a synthetic row is not its usage', () => {
+  /**
+   * 🛑 JOSH, 2026-08-21, ON AVA SECONDS AFTER SWITCHING HER MODEL: *"Ava's
+   * memory could not be read. Usage data was empty."* Nothing had failed. She
+   * had restarted and taken no turns — and Claude Code had written one row of
+   * its own, carrying a `usage` object, which the flat scan counted as hers.
+   *
+   * 🔑 HIS POINT IS WHY THIS IS NOT COSMETIC: *"for whitecollar people they
+   * will do just like me and think, this didnt work."* He read a working
+   * feature as broken twice in ten minutes, and he built it.
+   *
+   * ⚠️ AND A JUST-RESTARTED AGENT IS A COMMON STATE NOW, not an edge one:
+   * restart shipped today and every use of it passes through here.
+   *
+   * 📌 THE FIX IS AN EXCLUSION, NOT A NEW MEANING. An earlier attempt made a
+   * zero-sum usage mean "nothing yet"; that was wrong and its own test says so
+   * by name — a zero sum is either a fresh agent or bad data, and the only
+   * separator is age. This changes what COUNTS as a reading.
+   */
+  const root = process.env.AGENT_WORKFORCE_CONFIG_ROOT;
+  const name = 'freshrestart';
+  const dir = nodePath.join(process.env.AGENT_WORKFORCE_WORKERS, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const projects = nodePath.join(root, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'));
+  fs.mkdirSync(projects, { recursive: true });
+  // Exactly her shape: a transcript whose ONLY usage belongs to a row Claude
+  // Code wrote itself.
+  fs.writeFileSync(nodePath.join(projects, 'sess-fresh.jsonl'),
+    JSON.stringify({ cwd: dir, type: 'summary' }) + '\n'
+    + JSON.stringify({ cwd: dir, message: { model: '<synthetic>', usage: { input_tokens: 12 } } }) + '\n',
+    'utf8');
+
+  setPaneSource(() => `${name}\t0.0\t2.1.239\t0\t${name}\t✳ Claude Code`);
+  setPaneCapture(() => 'Worked for 1m\n> \n');
+  try {
+    const card = snapshot().agents.find((a) => a.sessionName === name);
+    assert.ok(card, 'the fixture did not produce a card at all');
+    assert.equal(card.context.notYet, true,
+      'a restarted agent that has taken no turns is still being told its memory could not be read');
+    assert.match(card.context.because, /has not used any memory yet/);
+
+    /* 🛑 THE CONTROL. A REAL row's usage must still be read, or this "fix" is
+       just a board that reports every agent as fresh. */
+    fs.appendFileSync(nodePath.join(projects, 'sess-fresh.jsonl'),
+      JSON.stringify({ cwd: dir, message: { model: 'claude-opus-5', usage: { input_tokens: 40000 } } }) + '\n',
+      'utf8');
+    const spoken = snapshot().agents.find((a) => a.sessionName === name);
+    assert.equal(spoken.context.notYet, false, 'a real reading was thrown away with the synthetic one');
+    assert.ok(spoken.context.tokens >= 40000,
+      'the agent has used memory and we are not reporting it');
+  } finally {
+    setPaneSource(null);
+    setPaneCapture(null);
+  }
+});

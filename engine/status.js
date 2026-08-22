@@ -1705,11 +1705,45 @@ function readContext(agentName, model, exactSession) {
     // 7579 of a 9575-line transcript). The verdict was right and the reason was
     // invented, which is worse than a wrong verdict: it would have been believed
     // and reused.
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
-             because: 'its transcript is empty, which tells us about the file rather than the agent' };
+    /* ⚠️ THE COMMENT THIS REPLACES SAID AN EMPTY FILE "tells us about the file
+       rather than the agent", and that was right when nothing could tell the
+       two apart. For an agent KOSMOS STARTED we now can: it was launched in a
+       folder we made, so an empty transcript there is an agent that has not
+       spoken, not a file we failed to read. Anything we did not start keeps the
+       admission, because it could have run anywhere. Same gate as the
+       no-transcript branch above, same reason. */
+    return notYetStarted(agentName)
+      ? { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: true,
+          because: 'it has not done anything yet' }
+      : { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
+          because: 'its transcript is empty, which tells us about the file rather than the agent' };
   }
 
-  const usages = [...text.matchAll(/"usage":\{([^}]*)\}/g)];
+  /**
+   * 🔑 A SYNTHETIC ROW'S USAGE IS NOT THE AGENT'S USAGE. Claude Code stamps
+   * `"model":"<synthetic>"` on rows it writes itself — a usage-limit notice
+   * among them — and those rows can carry a `usage` object of their own. Scanned
+   * flat, one of them is the agent's memory reading.
+   *
+   * ⚠️ THIS IS WHAT JOSH ACTUALLY HIT, 2026-08-21. Ava, seconds after a restart:
+   * *"Ava's memory could not be read. Usage data was empty."* She had taken no
+   * turns; the only usage in her transcript belonged to a row Claude Code had
+   * written. Excluding it leaves NO usage at all, and the branch below already
+   * reasons that case correctly — read the whole file and find none, and the
+   * agent has not used any memory.
+   *
+   * 📌 SO THE FIX IS AN EXCLUSION, NOT A NEW RULE. I first tried to make a
+   * zero-sum usage mean "nothing yet" and that was wrong: a zero sum is either
+   * a fresh agent or bad data, the only separator is age, and that threshold is
+   * the thing this split refused. Its test says so by name. This changes what
+   * COUNTS as a reading rather than what a reading means.
+   *
+   * ⚠️ Line by line, because a row is the unit that has a model: JSONL puts one
+   * object per line, so a line carrying the placeholder is a row we skip whole.
+   */
+  const usages = text.split('\n')
+    .filter((line) => line && !/"model":"<[^"]*>"/.test(line))
+    .flatMap((line) => [...line.matchAll(/"usage":\{([^}]*)\}/g)]);
   if (!usages.length) {
     // 🛑 AND ONLY IF WE READ THE WHOLE FILE. `tailBytes` returns the last 256KB
     // of a transcript that can reach 8MB, so "no usage rows" from a truncated
@@ -1738,6 +1772,13 @@ function readContext(agentName, model, exactSession) {
     // A usage record that sums to zero could be a session that has genuinely
     // done nothing, or data that is wrong. Separating those needs the agent's
     // age, which is the threshold we refused, so it goes to the admission.
+    /* ⚠️ STAYS THE ADMISSION, and I tried to change it and was wrong. A usage
+       record summing to zero is either an agent that has done nothing or data
+       that is wrong, and the only separator anyone has proposed is the agent's
+       AGE — the threshold this whole split refused. Its test says so by name.
+       📌 What DID fix Josh's case is one branch up: a synthetic row's usage is
+       not the agent's usage, so it is not counted at all, and the no-usage
+       branch's existing `whole` reasoning takes over. */
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'usage data was empty' };
   }
 
@@ -1850,7 +1891,28 @@ function readModel(agentName, exactSession) {
     .map((m) => m[1])
     .filter((v) => !/^<.*>$/.test(v));
   if (!matches.length) return { model: null, confidence: CONFIDENCE.NONE };
-  return { model: matches[matches.length - 1], confidence: CONFIDENCE.STRUCTURED };
+  /**
+   * 🔑 A RECOGNISED ID WINS OVER A MERELY RECENT ONE, which is Mona Lisa's
+   * point on this defect and is worth more than the bracket rule above.
+   *
+   * Last-match is the fragile part: the tail also carries `"model":"opus"`
+   * (45 occurrences on this machine against 19500 `claude-opus-5`), a bare
+   * short form somebody passed to `--model`. Taking it verbatim renders
+   * "Claude opus" — true, ugly, and avoidable when a full id for the same
+   * session is sitting a few lines up.
+   *
+   * ⚠️ AND THE FALLBACK IS DELIBERATELY NOT "REFUSE THE UNRECOGNISED". Mona
+   * proposed accepting only ids `MODEL_NAMES` knows; that would report "we
+   * could not tell" the day a genuinely new model ships, which is exactly what
+   * `modelDisplayName`'s `return id` was written to avoid. A future
+   * `claude-opus-6` looks like a model and should be shown; `<synthetic>` does
+   * not and is dropped above. The two questions are separated rather than
+   * merged: BRACKETS decide "is this an id at all", the table decides "do we
+   * have a nicer name for it".
+   */
+  const known = matches.filter((v) => MODEL_NAMES[v] || MODEL_NAMES[v.replace(/-\d{8}$/, '')]);
+  const chosen = known.length ? known[known.length - 1] : matches[matches.length - 1];
+  return { model: chosen, confidence: CONFIDENCE.STRUCTURED };
 }
 
 /**
