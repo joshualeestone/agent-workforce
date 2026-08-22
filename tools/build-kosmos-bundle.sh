@@ -67,7 +67,12 @@ cp -R "$REPO/web" "$STAGE/app/web"
 # marker and the page falls back to the polled value. And VERIFIED, because a
 # silent no-op sed would ship the marker itself to a person's screen: the check
 # below fails the build rather than shipping "version __KOSMOS_VERSION__".
-_ver="$(KOSMOS_PKG="$STAGE/app/package.json" "$STAGE/runtime/bin/node" -p 'JSON.parse(require("fs").readFileSync(process.env.KOSMOS_PKG,"utf8")).version')"
+# ⚠️ READ WITHOUT AN INTERPRETER, and that is an ordering fact rather than a
+# preference. The first version used "$STAGE/runtime/bin/node", which is not
+# staged yet at this point in the build, so the whole build died one line later
+# with "No such file or directory". package.json IS already copied, and one
+# field out of it does not need a JSON parser.
+_ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$STAGE/app/package.json" | head -1)"
 [ -n "$_ver" ] || { echo "could not read the version to bake into the page" >&2; exit 1; }
 sed -i '' "s/__KOSMOS_VERSION__/$_ver/" "$STAGE/app/web/index.html" 2>/dev/null \
   || sed -i "s/__KOSMOS_VERSION__/$_ver/" "$STAGE/app/web/index.html"
