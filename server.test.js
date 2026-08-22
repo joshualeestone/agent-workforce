@@ -220,6 +220,96 @@ async function req(path, options) {
 // The routing bug itself
 // ---------------------------------------------------------------------------
 
+/**
+ * Every field the board sends is read by the page, or is listed here with a
+ * reason.
+ *
+ * 🛑 THE CLASS THIS EXISTS FOR COST THREE FINDINGS IN ONE NIGHT: something
+ * finished on the server that no screen can reach. `commitments` was the worst
+ * of them. `engine/commitments.js` says its own purpose is "to make the restart
+ * confirmation incapable of lying", `server.js` attaches the record to every
+ * agent with a comment saying "the restart dialog reads these", and the word
+ * `commitments` appeared NOWHERE in web/index.html. Engine, route and comment
+ * all complete, screen absent.
+ *
+ * 🔑 A ROUTE-LEVEL CHECK CANNOT SEE THIS. Every /api path was referenced by the
+ * page that night, including the restart one. What was unreachable rode inside
+ * a payload the page already fetched. So the question has to be asked of the
+ * FIELDS, which is what this does.
+ *
+ * ⚠️ IT IS A NAME MATCH AND THAT IS DELIBERATELY CRUDE. It cannot tell that a
+ * field is mentioned but never rendered, and it says nothing about whether the
+ * rendering is any good. What it catches is the specific thing nobody notices:
+ * a field arriving that no line of the page has ever heard of. Being crude is
+ * why it is cheap enough to run every time.
+ */
+const UNREAD_ON_PURPOSE = {
+  isAgentPane: 'a classification the board uses to decide what IS an agent; it '
+    + 'is an input to the list, never a thing to draw',
+  reportedAt: 'the commitments timestamp. The restart dialog shows the age '
+    + 'through the engine\'s own sentence ("it last reported 41 minutes ago") '
+    + 'rather than a raw date, so the field is available and deliberately not '
+    + 'rendered',
+  unknownFullness: 'a count the summary line covers in words rather than by '
+    + 'number',
+  unreadableTokens: 'as above',
+  /* 🛑 THIS ONE IS A REAL GAP AND IS PARKED, NOT DISMISSED. `percent` is capped
+     at `Math.min(100, percent)` and `overCeiling` records that the true figure
+     was higher, so an agent past its ceiling draws identically to one exactly
+     full. The memory reading has five renderers and the treatment needs a copy
+     ruling, so it is with Mona Lisa rather than invented here. Remove this line
+     when it lands. */
+  overCeiling: 'PARKED: a real gap. Over-ceiling draws the same as exactly '
+    + 'full. Five renderers and needs ruled copy; raised 2026-08-22',
+};
+
+test('no field the board sends is unknown to the page', async (t) => {
+  const board = await req('/api/status');
+  if (!board.type.includes('application/json')) {
+    t.skip('the status engine did not return a board on this machine');
+    return;
+  }
+  const page = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const names = new Map();
+  /* ⚠️ EVERY ELEMENT, NOT THE FIRST. Optional fields differ per agent: an
+     agent on an unknown model carries no `overCeiling` at all, so walking only
+     `agents[0]` sees a different field set depending on which agent happens to
+     sort first. That made the allowlist's own control fire on this machine and
+     not on the probe I ran beside it, which is the wrong-key failure in
+     miniature. */
+  const walk = (o, path) => {
+    if (Array.isArray(o)) { for (const v of o) walk(v, path); return; }
+    if (!o || typeof o !== 'object') return;
+    for (const [k, v] of Object.entries(o)) {
+      if (!names.has(k)) names.set(k, path + k);
+      walk(v, path + k + '.');
+    }
+  };
+  walk(JSON.parse(board.body), '');
+  assert.ok(names.size > 20, 'the payload came back with ' + names.size + ' fields, so this proved nothing');
+
+  const unread = [...names].filter(([k]) => !page.includes(k) && !(k in UNREAD_ON_PURPOSE));
+  assert.deepEqual(unread.map(([k, at]) => k + ' (at ' + at + ')'), [],
+    'the board sends these and no line of the page has heard of them. Either draw '
+    + 'them or add them to UNREAD_ON_PURPOSE with the reason');
+
+  /* POSITIVE CONTROL: the allowlist is not silently covering fields that have
+     since been drawn, which is how an allowlist becomes a place where real
+     gaps go to be forgotten. */
+  const drawn = Object.keys(UNREAD_ON_PURPOSE).filter((k) => page.includes(k));
+  assert.deepEqual(drawn, [],
+    'listed as unread on purpose and the page now reads them. Take them off the list');
+  /* ⚠️ "the board no longer sends it" is reported, NOT failed. A field can be
+     legitimately absent from one machine's board (an agent on an unknown model
+     carries no ceiling at all), and failing on that would make this test pass
+     or fail depending on whose fleet ran it, which is not a test. */
+  const absent = Object.keys(UNREAD_ON_PURPOSE).filter((k) => !names.has(k));
+  if (absent.length) {
+    // eslint-disable-next-line no-console
+    console.log('    (not on this board, so not checked: ' + absent.join(', ') + ')');
+  }
+});
+
 test('a query string does not change which handler answers', async () => {
   // The regression test. Before the fix this returned the HTML page at 200.
   const plain = await req('/api/status');
