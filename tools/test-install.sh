@@ -257,6 +257,11 @@ echo "== uninstall reverses the machine =="
 printf '<plist/>' > "$SB/launch/com.kosmos.agent.tiharness.plist"
 seed_residue "$SB/apps/.Kosmos.app.stage.333" "$SB/home"
 seed_residue "$SB/apps/.Kosmos.app.old.444" "$SB/home"
+# ⚠️ THE PREMISE OF THE REMOVAL CHECK, ASSERTED. The agent plist above is
+# seeded here for exactly this reason; the board's is written by the install
+# instead, so "it is gone" would pass vacuously on any run where it was never
+# written — which is precisely the bug this change fixes.
+chk "the board's login job is there before the uninstall (or its removal cannot fail)" "[ -f \"$SB/launch/com.kosmos.board.plist\" ]"
 RC=0; sh -s -- --uninstall < "$SETUP" > "$SB/uninstall.log" 2>&1 || RC=$?
 chk "uninstall exits 0" "[ $RC -eq 0 ]"
 chk "home gone" "[ ! -d \"$SB/home\" ]"
