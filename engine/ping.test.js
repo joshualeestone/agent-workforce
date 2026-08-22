@@ -139,3 +139,37 @@ test('a test run never reaches the real network', () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test('the welcome screen names this as an outbound destination, and agrees with the payload', () => {
+  /**
+   * 🛑 MONA LISA'S RULE 3, AND THE ONLY MECHANISM LEFT THAT CAN ENFORCE IT.
+   * Josh ruled the word IP off every screen, so a reader can no longer check
+   * what is sent against what is written. The welcome screen's own guardian
+   * comment says that paragraph "goes wrong when a FEATURE changes what is
+   * true" -- this feature is that, and this test is what notices next time.
+   *
+   * ⚠️ IT ASSERTS A RELATIONSHIP, NOT A SENTENCE. Pinning the wording would
+   * turn every copy edit into a failing test and teach people to update the
+   * test rather than re-read the screen. What it pins is that the screen SAYS
+   * something leaves, and that the payload has not grown a field the screen
+   * does not cover.
+   */
+  const fs2 = require('node:fs');
+  const page = fs2.readFileSync(nodePath.join(__dirname, '..', 'web', 'index.html'), 'utf8');
+  const pane = page.slice(page.indexOf('id="fr-pane-2"'), page.indexOf('<!-- 4. The machine checks'));
+  const words = pane.replace(/<!--[\s\S]*?-->/g, '');
+
+  assert.match(words, /we're told that it happened/,
+    'the welcome screen no longer says anything leaves when an agent is made');
+  assert.match(words, /you can turn it off/,
+    'it names the sending without naming the way out');
+
+  /* The payload's shape, restated as a relationship: every key it carries is
+     either the event itself, the install identity, or something the screen's
+     "roughly where from" and version-neutral wording already covers. A NEW
+     kind of field -- anything about the agent or the person -- has no cover
+     and this list is where somebody has to come and say so. */
+  const covered = ['event', 'installId', 'at', 'version', 'os'];
+  assert.deepEqual(Object.keys(ping.payload()).sort(), covered.slice().sort(),
+    'the payload grew a field the welcome screen does not cover; change the screen or drop the field');
+});
