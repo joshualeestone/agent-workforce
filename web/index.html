@@ -6732,6 +6732,57 @@ function updatedNoteOnce(nowVersion) {
   document.getElementById('un-ok').addEventListener('click', () => { slot.innerHTML = ''; });
 }
 
+/**
+ * How long ago the board was read, in words a person can take in at a glance.
+ *
+ * 🛑 IT PRINTED RAW SECONDS AT ANY SIZE. "Refreshed 41283 seconds ago" is the
+ * stamp whose entire job is making a frozen board legible, being least legible
+ * exactly when the board is frozen (Mona Lisa, #292). Nobody converts five
+ * figures of seconds in their head, and the number is doing the opposite of
+ * what it is there for: it looks like precision and reads as noise.
+ *
+ * ⚠️ A NEGATIVE AGE IS "JUST NOW", NOT "-4 seconds ago". The two clocks in
+ * this subtraction are the browser's and the server's stamp on a response
+ * that has crossed a network and, after a sleep, possibly a clock correction.
+ * A reading from slightly in the future is a measurement artefact, and the
+ * honest rendering of it is the nearest true thing rather than a minus sign,
+ * which reads as a bug in the product rather than as a rounding.
+ *
+ * 🔑 IT ROUNDS DOWN, NEVER UP, at every step. "1 minute ago" for something 119
+ * seconds old understates the staleness; "2 minutes" would overstate the
+ * freshness of nothing, but rounding UP a boundary would let 30 seconds read
+ * as a minute and cross the stale threshold in words while the class says
+ * otherwise. The two must never disagree on the same paint.
+ *
+ * 📌 The five-second floor is unchanged: below it, "just now" is both true and
+ * the thing a person wants, and a ticking single-digit is furniture.
+ *
+ * 📌 MINUTES RUN TO 90 RATHER THAN 60, so 61 minutes reads as "61 minutes"
+ * rather than "1 hour". It is clunkier and it is accurate, and the band where
+ * somebody is deciding whether their board has died is exactly the band where
+ * an hour of slack is worth more than a tidy word.
+ */
+function freshWords(seconds) {
+  /* ⚠️ A NUMBER OR NOTHING, never `Number(x)`. `Number(null)` is 0, which is
+     finite, which is under the floor, so a null age rendered as 'just now': a
+     positive claim of freshness built out of a missing value. That is the
+     could-not-look versus is-not-there inversion in the one element whose job
+     is saying how current the board is. */
+  const n = typeof seconds === 'number' ? seconds : NaN;
+  /* ⚠️ NOT 'just now', WHICH WOULD BE A CLAIM ABOUT A TIME WE DO NOT HAVE. The
+     poll succeeded, so 'Refreshed' is true; only the age is unreadable, and the
+     honest stamp is the word without the number. */
+  if (!Number.isFinite(n)) return 'Refreshed';
+  if (n < 5) return 'Refreshed just now';
+  if (n < 90) return 'Refreshed ' + n + ' seconds ago';
+  const mins = Math.floor(n / 60);
+  if (mins < 90) return 'Refreshed ' + mins + (mins === 1 ? ' minute ago' : ' minutes ago');
+  const hours = Math.floor(n / 3600);
+  if (hours < 36) return 'Refreshed ' + hours + (hours === 1 ? ' hour ago' : ' hours ago');
+  const days = Math.floor(n / 86400);
+  return 'Refreshed ' + days + (days === 1 ? ' day ago' : ' days ago');
+}
+
 async function tick() {
   const checked = document.getElementById('checked');
   try {
@@ -7133,7 +7184,7 @@ async function tick() {
     // rule lands here for free, and the failed-poll test anchors on it.
     const age = Math.round((Date.now() - new Date(data.checkedAt).getTime()) / 1000);
     checked.className = 'checked stamp' + (age > 30 ? ' stale' : '');
-    checked.innerHTML = '<span>Agent status</span><b>' + (age < 5 ? 'Refreshed just now' : 'Refreshed ' + age + ' seconds ago') + '</b>';
+    checked.innerHTML = '<span>Agent status</span><b>' + freshWords(age) + '</b>';
 
     /**
      * ⚠️ THE REMOVED LIST IS PART OF THE BOARD, so it refreshes with it.
