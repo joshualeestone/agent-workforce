@@ -2654,15 +2654,32 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
   els.orgmap.innerHTML = '<svg class="wires"></svg><div class="hub">You</div>'
     + '<button class="onode" data-agent="april"></button>';
   const checked = { className: '', innerHTML: '' };
+  /* ⚠️ `boardEmpty` IS LIFTED, NOT STUBBED. The catch used to build its own
+     failure card here; it now calls the one function that decides what an
+     empty board says, because two deciders meant the other one was dead code
+     that no test could have caught. A stub would restore exactly the split
+     this change removed, so the real function comes along and the assertions
+     below are about what a person sees. */
+  const beAt = script.indexOf('function boardEmpty(');
+  assert.ok(beAt > -1, 'boardEmpty vanished, so the failure path has no card to paint');
+  let d = 0; let beEnd = -1;
+  for (let k = script.indexOf('{', beAt); k < script.length; k += 1) {
+    if (script[k] === '{') d += 1;
+    else if (script[k] === '}') { d -= 1; if (d === 0) { beEnd = k + 1; break; } }
+  }
   // eslint-disable-next-line no-new-func
-  new Function('document', 'checked', 'esc', 'err', script.slice(from, end))(
-    { getElementById: (id) => els[id] }, checked, (s) => String(s), { message: 'boom' });
+  new Function('document', 'checked', 'esc', 'err', 'BOARD_SEEN', 'BOARD_LOOK_FAILED',
+    script.slice(beAt, beEnd) + '\n' + script.slice(from, end))(
+    { getElementById: (id) => els[id] }, checked, (s) => String(s), { message: 'boom' },
+    true, 'boom');
 
   // The rendered failure card proves the extracted block really ran.
-  assert.match(els.grid.innerHTML, /cannot read the agents/,
+  assert.match(els.grid.innerHTML, /cannot read your agents/,
     'the failure card never painted, so nothing below can mean anything');
-  assert.match(els.alist.innerHTML, /cannot read the agents/,
+  assert.match(els.alist.innerHTML, /cannot read your agents/,
     'the failure card must reach both containers, whichever layout is up');
+  assert.match(els.grid.innerHTML, /not the same as having none/,
+    'the failure card stopped drawing the distinction it exists for');
   for (const id of ['st-agents', 'st-working', 'st-idle', 'st-attn']) {
     assert.equal(els[id].textContent, '?',
       `${id} still asserts a count beside "we cannot see them" -- a headline number the failed poll cannot stand behind`);
