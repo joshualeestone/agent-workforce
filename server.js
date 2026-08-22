@@ -53,6 +53,12 @@ const projects = require('./engine/projects');
 const tasks = require('./engine/tasks');
 const chat = require('./engine/chat');
 const messages = require('./engine/messages');
+/* ⚠️ THE SAME MODULE UNDER A SECOND NAME, and it is not a convenience. The
+   thread handler builds a local `messages` array for its payload, which shadows
+   this binding for the whole of that scope, so `messages.owesReply` in there
+   would be a property of an array. Naming it once here beats a rename inside
+   the handler that would touch a payload key a screen reads. */
+const messageLog = messages;
 const os = require('node:os');
 
 /**
@@ -2349,11 +2355,22 @@ const server = http.createServer((req, res) => {
      * the vocabulary the composer uses ('unsure'), so a second spelling of it
      * would be two derivations of one fact again.
      */
+    const owes = messageLog.owesReply(name);
     sendJson(res, 200, {
       messages,
       olderCount,
       historyBecause,
       historyUnfilable,
+      /* 🔑 THE MISSING HALF OF A SIGNAL THE ROOM ALREADY HAS. `pjSilentSince`
+         is gated on a project having two or more members, so a one-to-one
+         thread had nothing at all. This is that, for this box (#5).
+         ⚠️ IT RIDES HERE RATHER THAN ON THE STATUS PAYLOAD: it is a fact about
+         this conversation and the board has no line to draw it on.
+         🛑 AND IT IS `owesReply` ON THE MODULE, WHICH IS SHADOWED IN THIS
+         SCOPE. `messages` here is the local array being sent; the module of
+         the same name is not reachable by that identifier inside this handler,
+         so it is captured under its own name at the top of the file. */
+      owes,
       presence,
       presenceBecause,
       asking,
