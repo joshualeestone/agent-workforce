@@ -1252,7 +1252,33 @@ function becomeStuck(owner, because, tail) {
   if (activeRequest) { try { activeRequest.destroy(); } catch { /* already ended */ } activeRequest = null; }
   if (activeChild) { try { activeChild.kill(); } catch { /* already exited */ } activeChild = null; }
   killSession(); // fire-and-forget: run() resolves {ok:false} and never rejects
-  writeState({ phase: PHASE.STUCK, because, tail: tail || null, startedOnce: true });
+  /**
+   * 🛑 WHETHER THERE IS ANYTHING TO RUN, ASKED OF THE DISK, RECORDED HERE.
+   *
+   * The stuck screen offers one way out: *"open Terminal, type `claude`, and
+   * follow its sign-in"*. **Three of the five ways to get stuck mean that
+   * program was never installed** — the download failed, the binary is not where
+   * it should be, or the install step (which IS the PATH step) did not finish.
+   * So the screen where somebody is most stuck tells them to run something that
+   * answers `command not found` (#205).
+   *
+   * ⚠️ ASKED OF THE DISK, NEVER INFERRED FROM WHICH CAUSE FIRED. Keying on the
+   * branch infers the binary's existence from the code path we happened to take,
+   * which is a second derivation of a fact the filesystem already holds — and it
+   * would be wrong for the case where a download succeeded and something else
+   * broke afterwards.
+   *
+   * 📌 The failure direction is chosen: any error answering FALSE, so an
+   * unreadable machine withholds the suggestion rather than offering one that
+   * cannot work. A missing way out is a smaller harm than a way out that fails
+   * in front of somebody already stuck.
+   */
+  let canRunClaude = false;
+  try {
+    fs.accessSync(claudeBinPath(), fs.constants.X_OK);
+    canRunClaude = true;
+  } catch { canRunClaude = false; }
+  writeState({ phase: PHASE.STUCK, because, tail: tail || null, startedOnce: true, canRunClaude });
 }
 
 /**
