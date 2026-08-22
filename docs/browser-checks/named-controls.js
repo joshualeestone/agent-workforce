@@ -60,6 +60,25 @@ const SURFACES = [
     await pg.waitForTimeout(1200);
     await pg.click('#d-restart-start');
   }],
+  ['removal dialog', async (pg) => {
+    await pg.locator('.acard .namego').first().click();
+    await pg.waitForTimeout(1400);
+    await pg.click('#d-remove-start');
+  }],
+  /* First run is six panes behind one overlay, and each is a surface a person
+     sees on their first minute with the product. Driven by `frGo` rather than
+     by clicking Continue, because Continue is gated on real machine answers
+     and this check is about names rather than about the flow. */
+  /* ⚠️ THE COUNTS ON THESE SIX INCLUDE THE BOARD BEHIND THE OVERLAY, so "step 3:
+     28 controls" is not 28 first-run controls. The overlay makes the page inert
+     rather than removing it, and an inert element still has a bounding box. The
+     check is still sound, because an unnamed control anywhere is a finding
+     wherever it sits, but the NUMBER should not be read as a measure of the
+     step. Said here rather than fixed, because scoping to the overlay would
+     stop this noticing an unnamed control that the overlay fails to cover. */
+  ...[1, 2, 3, 4, 5, 6].map((n) => ['first run step ' + n, async (pg) => {
+    await pg.evaluate((step) => { document.getElementById('firstrun').hidden = false; frGo(step); }, n);
+  }]),
 ];
 
 /* Read the accessible name the way a screen reader assembles it, not the way a
@@ -110,6 +129,8 @@ const SCAN = () => {
     const pg = await b.newPage({ viewport: { width: 1400, height: 1200 } });
     await pg.goto(URL, { waitUntil: 'networkidle' });
     await pg.waitForTimeout(2200);
+    /* ⚠️ The first-run surfaces REOPEN it, so this dismissal must not fight
+       them: it runs before `go`, and those steps put the overlay back. */
     if (!(await pg.$('#firstrun[hidden]'))) { await pg.keyboard.press('Escape'); await pg.waitForTimeout(600); }
     let reached = true;
     try { await go(pg); } catch (e) {
@@ -130,8 +151,8 @@ const SCAN = () => {
   }
   await b.close();
   console.log(fail.length ? '\n' + fail.length + ' FAILED: ' + fail.join('; ') : '\nall green');
-  console.log('\nNOT CHECKED, said so nobody reads this as a clean bill: the removal '
-    + 'dialog, the new-task and history modals, the project room, first run, and '
-    + 'anything that only appears after an error.');
+  console.log('\nNOT CHECKED, said so nobody reads this as a clean bill: the '
+    + 'new-task and history modals, the project room, and anything that only '
+    + 'appears after an error. Everything else a person can reach is above.');
   process.exit(fail.length ? 1 : 0);
 })().catch((e) => { console.error('HARNESS FAILED', e.message); process.exit(2); });
