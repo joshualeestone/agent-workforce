@@ -8738,3 +8738,99 @@ test('the profile route stores a reporting line, clears it, and refuses a self-l
       'a role edit erased the reporting line');
   }
 });
+
+test('a switch that has not been read says so, rather than showing OFF', () => {
+  /**
+   * 🛑 THE DEFECT THIS PINS SHIPPED AND WAS INVISIBLE. Every switch in Settings
+   * is born in the OFF position in the markup and corrected once its fetch
+   * answers. On a first paint where that fetch THROWS there is no previous
+   * value to keep, so the static OFF stood as a confident answer -- about
+   * settings whose shipped default is ON -- and no message appeared, because
+   * the could-not-read line only fires on a 200 carrying ok:false.
+   *
+   * 🔑 A SWITCH HAS THREE STATES AND ONLY TWO ARE POSITIONS. `aria-checked` has
+   * a third value, `mixed`, which screen readers already announce as partially
+   * checked. (Found by Mona Lisa on the telemetry switch; true of all four.)
+   */
+  const els = {};
+  const el = (id) => els[id] || (els[id] = {
+    id, hidden: undefined, textContent: '', attrs: {}, classes: new Set(),
+    classList: { toggle(c, v) { if (v) { this._s.add(c); } else { this._s.delete(c); } }, _s: null },
+    setAttribute(k, v) { this.attrs[k] = v; },
+    getAttribute(k) { return this.attrs[k]; },
+  });
+  for (const id of ['tell-toggle', 'tell-msg', 'auto-toggle', 'auto-msg']) {
+    const e = el(id); e.classList._s = e.classes;
+  }
+  const raw3 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
+  const sc3 = raw3.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const lift = (name) => {
+    const at = sc3.indexOf('function ' + name + '(');
+    assert.ok(at > -1, name + ' vanished from the page');
+    let depth = 0; let end = -1;
+    for (let k = sc3.indexOf('{', at); k < sc3.length; k += 1) {
+      if (sc3[k] === '{') depth += 1;
+      else if (sc3[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+    }
+    // eslint-disable-next-line no-new-func
+    return new Function('document', sc3.slice(at, end) + '\nreturn ' + name + ';')({ getElementById: el });
+  };
+
+  for (const [paint, toggle, msg] of [['tellPaint', 'tell-toggle', 'tell-msg'],
+    ['autoPaint', 'auto-toggle', 'auto-msg']]) {
+    const p = lift(paint);
+
+    /* Presence before absence: prove it CAN say a real position first, or the
+       assertion below would pass on a painter that says "mixed" always. */
+    p({ on: true, ok: true });
+    assert.equal(el(toggle).getAttribute('aria-checked'), 'true', paint + ': on did not read as on');
+    p({ on: false, ok: true });
+    assert.equal(el(toggle).getAttribute('aria-checked'), 'false', paint + ': off did not read as off');
+
+    /* And the third state, which is what a thrown fetch hands it. */
+    p(null);
+    assert.equal(el(toggle).getAttribute('aria-checked'), 'mixed',
+      paint + ': an unread setting still shows a definite position');
+    assert.equal(el(toggle).classes.has('on'), false, paint + ': unread rendered as on');
+    assert.match(el(msg).textContent, /could not read/,
+      paint + ': an unread setting says nothing, so the switch is the only claim on screen');
+  }
+
+  /**
+   * 🛑 AND THE CALLER, because the painter having a third state is worth
+   * nothing if the failure path never reaches it. Measured: removing the
+   * `tellPaint(null)` from the catch left every assertion above green, since
+   * they drive the painter directly. The defect lives in the seam between the
+   * two, which is exactly where a test that only exercises one half cannot see.
+   */
+  for (const [refresh, toggle, url] of [['refreshTell', 'tell-toggle', '/api/ping-setting'],
+    ['refreshAutoUpdate', 'auto-toggle', '/api/autoupdate']]) {
+    el(toggle).setAttribute('aria-checked', 'false');   // the static markup's lie
+    const at = sc3.indexOf('async function ' + refresh + '(');
+    assert.ok(at > -1, refresh + ' vanished from the page');
+    let depth = 0; let end = -1;
+    for (let k = sc3.indexOf('{', at); k < sc3.length; k += 1) {
+      if (sc3[k] === '{') depth += 1;
+      else if (sc3[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+    }
+    const painterName = refresh === 'refreshTell' ? 'tellPaint' : 'autoPaint';
+    const pAt = sc3.indexOf('function ' + painterName + '(');
+    let pd = 0; let pEnd = -1;
+    for (let k = sc3.indexOf('{', pAt); k < sc3.length; k += 1) {
+      if (sc3[k] === '{') pd += 1;
+      else if (sc3[k] === '}') { pd -= 1; if (pd === 0) { pEnd = k + 1; break; } }
+    }
+    const epoch = refresh === 'refreshTell' ? 'TELL_EPOCH' : 'AUTO_EPOCH';
+    // eslint-disable-next-line no-new-func
+    const run = new Function('document', 'fetch',
+      'let ' + epoch + ' = 0;\n' + sc3.slice(pAt, pEnd) + '\n' + sc3.slice(at, end)
+      + '\nreturn ' + refresh + ';')(
+      { getElementById: el }, () => Promise.reject(new Error('offline')));
+    void url;
+    return run().then(() => {
+      assert.equal(el(toggle).getAttribute('aria-checked'), 'mixed',
+        refresh + ': a thrown fetch left the switch showing a position nobody read');
+    });
+  }
+  return undefined;
+});

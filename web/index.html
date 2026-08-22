@@ -325,6 +325,11 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .hub.haspic img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* The one checkbox on the create form. A row rather than a bare input so the
    whole line is the target: a 13px box on its own is a hard thing to hit. */
+/* The restart button inside the stale-instructions notice. Quiet and inline:
+   the notice is the message and this is its one remedy, not a second heading. */
+.instr-restart { margin-left: 8px; font-size: .8125rem;
+                 padding: calc(.35em - 1px) calc(.85em - 1px); vertical-align: baseline; }
+.instr-restart-note { display: block; margin-top: 6px; color: var(--label-2); font-size: .8125rem; }
 .tellrow { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: .875rem; }
 .tellrow input { width: 16px; height: 16px; flex: 0 0 16px; accent-color: var(--gold-deep, #b8860b); }
 .acct-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
@@ -1124,6 +1129,20 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
             box-shadow: 0 1px 2px rgba(20,22,26,.3); }
 .toggle.on { background: #2f7d5a; }
 .toggle.on i { transform: translateX(18px); }
+/* 🛑 A SWITCH HAS THREE STATES AND ONLY TWO OF THEM ARE POSITIONS. On, off,
+   and NOT YET READ -- and every switch on this screen was born in the OFF
+   position and corrected once its fetch answered. On a first paint where that
+   fetch THROWS, the switch keeps the static off and no message appears, because
+   the could-not-read line only fires on a 200 carrying `ok:false`. So a failed
+   first load showed a confident OFF about a setting whose shipped default is
+   ON, from no reading at all. Found by Mona Lisa on the telemetry switch, and
+   it was true of every switch here.
+   🔑 `aria-checked="mixed"` IS EXACTLY THE THIRD STATE and screen readers
+   already announce it as partially checked, so the fix costs no new vocabulary.
+   The knob sits between the two ends, which is the one position that cannot be
+   mistaken for an answer. */
+.toggle[aria-checked="mixed"] { background: var(--k-track); opacity: .55; }
+.toggle[aria-checked="mixed"] i { transform: translateX(9px); }
 .toggle:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .toggle, .toggle i { transition: none; } }
 .btn-quiet {
@@ -4637,7 +4656,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <div class="setrow" id="lim-row">
         <div><b>Limit how much your agents talk to each other</b>
           <p class="dhint" style="margin:2px 0 0;">Every message between your agents uses your AI plan. If you run a model that does not charge you, turn this off.</p></div>
-        <button class="toggle" id="lim-toggle" role="switch" aria-checked="true" aria-label="Limit how much your agents talk to each other"><i></i></button>
+        <button class="toggle" id="lim-toggle" role="switch" aria-checked="mixed" aria-label="Limit how much your agents talk to each other"><i></i></button>
       </div>
       <div class="frow" id="lim-tier-row" hidden style="margin-top:12px; align-items:center; gap:8px;">
         <label class="dhint" for="lim-tier" style="margin:0;">Stop them after</label>
@@ -4700,14 +4719,14 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <div class="setrow" id="tell-row" style="margin-top:12px;">
         <div><b>Let the Kosmos team know when you make an agent</b>
           <p class="dhint" style="margin:2px 0 0;">Just that it happened, so we know how many people are using Kosmos. Nothing about the agent, and nothing it does.</p></div>
-        <button class="toggle" id="tell-toggle" role="switch" aria-checked="false" aria-label="Let the Kosmos team know when you make an agent"><i></i></button>
+        <button class="toggle" id="tell-toggle" role="switch" aria-checked="mixed" aria-label="Let the Kosmos team know when you make an agent"><i></i></button>
       </div>
       <p class="dhint" id="tell-msg" role="status" style="margin:8px 0 0;"></p>
 
       <div class="setrow" id="auto-row" style="margin-top:12px;">
         <div><b>Update Kosmos automatically</b>
           <p class="dhint" style="margin:2px 0 0;">On by default. New versions install themselves, which takes a few seconds and reloads this board. Agents keep running throughout.</p></div>
-        <button class="toggle" id="auto-toggle" role="switch" aria-checked="false" aria-label="Update Kosmos automatically"><i></i></button>
+        <button class="toggle" id="auto-toggle" role="switch" aria-checked="mixed" aria-label="Update Kosmos automatically"><i></i></button>
       </div>
       <p class="dhint" id="auto-msg" role="status" style="margin:8px 0 0;"></p>
     </section>
@@ -4739,7 +4758,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
                where it applies is decoration. So the row goes back to its own
                job: what the toggle does, and why it is off. -->
           <p class="dhint" style="margin:2px 0 0;">Off by default. It shows the raw session an agent is running in, which most people never need to see.</p></div>
-        <button class="toggle" id="eng-toggle" role="switch" aria-checked="false" aria-label="Show the window each agent is running in"><i></i></button>
+        <button class="toggle" id="eng-toggle" role="switch" aria-checked="mixed" aria-label="Show the window each agent is running in"><i></i></button>
       </div>
       <p class="dhint" id="eng-msg" role="status" style="margin:8px 0 0;"></p>
     </section>
@@ -6784,7 +6803,13 @@ async function paintLimits() {
     msg.textContent = r.ok === false
       ? 'We could not read this setting, so Kosmos is using the default shown here.' : '';
   } catch {
+    /* ⚠️ THIS ONE ALREADY SAID SO, which is why it is the least wrong of the
+       four -- but the SWITCH still read as a definite position beside the
+       sentence admitting we had not looked. The words and the control were
+       answering differently. */
     msg.textContent = 'We could not read this setting just now.';
+    const tog = document.getElementById('lim-toggle');
+    if (tog) tog.setAttribute('aria-checked', 'mixed');
   }
 }
 
@@ -6874,7 +6899,19 @@ async function refreshEngMode() {
     const msg = document.getElementById('eng-msg');
     msg.textContent = r.ok === false
       ? 'We could not read this setting, so the windows stay hidden (the default).' : '';
-  } catch { /* the flag keeps its last honest value */ }
+  } catch {
+    /* Same first-paint hole as its two neighbours: with no previous value there
+       is no "last honest value" to keep, so the static markup would stand as a
+       confident answer nobody read. `mixed` says we have not looked.
+       📌 ENG_ON itself stays false, which is this setting's safe direction --
+       an unreadable preference must not reveal a surface nobody chose. The
+       SWITCH stops claiming that is the person's answer; the BEHAVIOUR still
+       fails toward hidden. */
+    const tog = document.getElementById('eng-toggle');
+    if (tog) tog.setAttribute('aria-checked', 'mixed');
+    const msg = document.getElementById('eng-msg');
+    if (msg && !msg.textContent) msg.textContent = 'We could not read this setting just now.';
+  }
   return ENG_ON;
 }
 let ENG_SAVING = false;
@@ -6921,11 +6958,14 @@ async function engToggleClick() {
 let TELL_EPOCH = 0;
 function tellPaint(r) {
   const tog = document.getElementById('tell-toggle');
-  const on = r && r.on === true;
+  /* Three states. `null` means we have not read it -- not off. */
+  const unread = !r;
+  const on = !unread && r.on === true;
   tog.classList.toggle('on', on);
-  tog.setAttribute('aria-checked', on ? 'true' : 'false');
-  document.getElementById('tell-msg').textContent = (r && r.ok === false)
-    ? 'We could not read this setting, so nothing is sent.' : '';
+  tog.setAttribute('aria-checked', unread ? 'mixed' : (on ? 'true' : 'false'));
+  document.getElementById('tell-msg').textContent = unread
+    ? 'We could not read this setting just now.'
+    : (r.ok === false ? 'We could not read this setting, so nothing is sent.' : '');
 }
 async function refreshTell() {
   const mine = ++TELL_EPOCH;
@@ -6933,7 +6973,14 @@ async function refreshTell() {
     const r = await (await fetch('/api/ping-setting')).json();
     if (mine !== TELL_EPOCH) return;
     tellPaint(r);
-  } catch { /* the switch keeps its last honest position */ }
+  } catch {
+    /* 🛑 "THE SWITCH KEEPS ITS LAST HONEST POSITION" WAS TRUE OF EVERY PAINT
+       BUT THE FIRST, and the first is the one that matters: there is no last
+       position, so it kept the static markup and said nothing. From the
+       person's side a throw and an unreadable file are the same situation, so
+       they get the same answer. */
+    if (mine === TELL_EPOCH) tellPaint(null);
+  }
 }
 let TELL_SAVING = false;
 async function tellToggleClick() {
@@ -6961,11 +7008,14 @@ document.getElementById('tell-toggle').addEventListener('click', tellToggleClick
 let AUTO_EPOCH = 0;
 function autoPaint(r) {
   const tog = document.getElementById('auto-toggle');
-  const on = r && r.on === true;
+  // Same three states as the switch above it, and the same reason (#229).
+  const unread = !r;
+  const on = !unread && r.on === true;
   tog.classList.toggle('on', on);
-  tog.setAttribute('aria-checked', on ? 'true' : 'false');
-  document.getElementById('auto-msg').textContent = (r && r.ok === false)
-    ? 'We could not read this setting, so updates will wait for you to press Install.' : '';
+  tog.setAttribute('aria-checked', unread ? 'mixed' : (on ? 'true' : 'false'));
+  document.getElementById('auto-msg').textContent = unread
+    ? 'We could not read this setting just now.'
+    : (r.ok === false ? 'We could not read this setting, so updates will wait for you to press Install.' : '');
 }
 async function refreshAutoUpdate() {
   const mine = ++AUTO_EPOCH;
@@ -6973,7 +7023,10 @@ async function refreshAutoUpdate() {
     const r = await (await fetch('/api/autoupdate')).json();
     if (mine !== AUTO_EPOCH) return;
     autoPaint(r);
-  } catch { /* the switch keeps its last honest position */ }
+  } catch {
+    // Same first-paint hole as the telemetry switch: no last position to keep.
+    if (mine === AUTO_EPOCH) autoPaint(null);
+  }
 }
 let AUTO_SAVING = false;
 async function autoToggleClick() {
@@ -7555,8 +7608,18 @@ function refreshAvatar() {
 /* The pack's Memory box: a READING, not a control panel. The same
    memBand/pctOf derivations as both board renderers, so this page and the
    grid agree about how full an agent is. The pack's fresh-start actions
-   (compact/clear/restart) have no engine yet and are not drawn -- an
-   action that cannot act is the claim this file refuses (recorded gap). */
+   COMPACT and CLEAR have no engine yet and are not drawn -- an action that
+   cannot act is the claim this file refuses (recorded gap).
+   ⚠️ RESTART USED TO BE ON THAT LIST AND SHOULD NOT HAVE BEEN. It has had a
+   route and an engine for a while (`POST /api/agent/<n>/restart`,
+   `engine/remove.js`), and this sentence kept withholding it anyway -- while
+   the stale-instructions notice apologised in words for not having it. A rule
+   that is right in general, applied to a set where one member quietly stopped
+   belonging, with nothing re-checking membership. Found by Mona Lisa checking
+   all three rather than reading the sentence.
+   📌 It is drawn where it is USEFUL rather than here: on the stale-instructions
+   notice, which is the one place a person has a reason to want it. A restart
+   button on a memory reading would be a control looking for an occasion. */
 function memoryBox(a) {
   const pct = pctOf(a.context);
   if (pct === null) {
@@ -9598,13 +9661,30 @@ function renderStale(s) {
       + (edited && started
         ? `Edited ${esc(edited)}, running since ${esc(started)}. `
         : '')
-      // ⚠️ Says what restarting MEANS and that this app cannot do it. The line
-      // used to read only "Restart to apply.", which is an instruction to
-      // perform an action the product does not offer and does not explain, on a
-      // screen aimed at someone who does not know what restarting an agent is.
-      // Naming it as a manual step is the honest version until the restart
-      // button exists.
-      + 'Restarting the agent is what applies them, and this app cannot do that yet.');
+      /* 🛑 "THIS APP CANNOT DO THAT YET" WAS FALSE AND HAD BEEN FOR A WHILE.
+         `POST /api/agent/<name>/restart` exists and `engine/remove.js` exports
+         `restart`; the route, the engine and the tmux-then-launchd sequence are
+         all implemented. The apology outlived the gap it described.
+         🔑 HOW IT SURVIVED is the part worth keeping: the comment above
+         `memoryBox` withholds three controls together -- compact, clear and
+         restart -- on the grounds that they "have no engine yet". True of two
+         of them. A rule that is right in general, applied to a set where one
+         member quietly stopped belonging, and nothing re-checking membership.
+         Found by Mona Lisa checking all three rather than the sentence.
+         ⚠️ THE CONSEQUENCE IS NAMED ON THE BUTTON'S OWN LINE rather than left
+         to be discovered: a restart ends the session the agent is in, so it
+         comes back with nothing in its memory ring, which Josh has twice read
+         as the product being broken. */
+      + 'Restarting the agent is what applies them.'
+      + '<button class="btn-quiet instr-restart" type="button" data-restart-agent="'
+      /* ⚠️ `CURRENT`, NOT AN ARGUMENT. `renderStale` is handed only the
+         staleness object, and it is only ever called for the agent whose
+         detail panel is open -- which `CURRENT` names. Threading the agent
+         through three call sites to avoid reading one module-level value
+         would be more code and one more place for the two to disagree.
+         Guarded, because a poll can land as the panel closes. */
+      + esc((CURRENT && CURRENT.sessionName) || '') + '">Restart it</button>'
+      + '<small class="instr-restart-note">It starts fresh, so it will look idle until you say something to it. Its instructions and its files are untouched.</small>');
     el.hidden = false;
     return;
   }
@@ -10694,6 +10774,43 @@ document.getElementById('removed-list').addEventListener('click', async (e) => {
   } catch {
     btn.disabled = false;
     btn.textContent = 'Restore failed. Try again.';
+  }
+});
+
+/* ---- restarting an agent from the stale-instructions notice ------------
+   ⚠️ DELEGATED FROM `document`, not bound to the button: `renderStale` rewrites
+   that node whenever the staleness changes, so a listener on the button itself
+   would be discarded and re-created, and a click landing between the two would
+   do nothing. */
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest && e.target.closest('[data-restart-agent]');
+  if (!btn) return;
+  const name = btn.dataset.restartAgent;
+  if (!name) return;
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'Restarting…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(name) + '/restart', { method: 'POST' });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) {
+      /* The engine's own sentence, which distinguishes "we could not close its
+         window" from "launchd refused" -- different facts a person acts on
+         differently. */
+      btn.textContent = was;
+      btn.disabled = false;
+      const note = btn.parentNode && btn.parentNode.querySelector('.instr-restart-note');
+      if (note) note.textContent = (out && (out.because || out.error)) || 'We could not restart it.';
+      return;
+    }
+    /* ⚠️ NO SUCCESS SENTENCE HERE. The five-second poll repaints this notice
+       from the record, and a restarted agent's instructions are no longer
+       stale -- so the whole box disappears on its own, which is a truer
+       receipt than a line claiming it worked. */
+    await tick();
+  } catch {
+    btn.textContent = was;
+    btn.disabled = false;
   }
 });
 
