@@ -32,16 +32,43 @@ const page = require('./test-support/page');
 const fleet = require('./test-support/fleet');
 const SCRIPT = page.scriptOf(PAGE);
 
-/** One real board, asked once, with two agents on disk and neither running. */
-let PAYLOAD = null;
-function board() {
-  if (PAYLOAD) return PAYLOAD;
+/**
+ * A real board, from a real server, against a sandboxed store.
+ *
+ * ⚠️ THE PANE SOURCE IS A STUB `tmux` ON PATH rather than the machine's own.
+ * `engine/status.js` runs a bare `tmux`, so a directory in front of PATH is
+ * the honest seam: the server still spawns a process, still parses its
+ * output, and still decides. Using the operator's real tmux would make this
+ * test depend on which agents happen to be running on the machine.
+ *
+ * 🔑 `mangle` ADDS ONE UNPARSEABLE LINE beside a good one, which is the state
+ * #294 is about: a PARTIAL read. All-unreadable is a different path that
+ * refuses before any of this.
+ */
+const BOARDS = new Map();
+function board({ mangle = false } = {}) {
+  const key = String(mangle);
+  if (BOARDS.has(key)) return BOARDS.get(key);
   const sb = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'kosmos-nr-'));
   const profiles = nodePath.join(sb, 'data', 'AgentWorkforce', 'profiles');
   fs.mkdirSync(profiles, { recursive: true });
   fs.mkdirSync(nodePath.join(sb, 'workers', 'ghosty'), { recursive: true });
   fs.writeFileSync(nodePath.join(profiles, 'ghosty.json'),
     JSON.stringify({ role: 'Copywriter', displayName: 'Ghosty' }));
+
+  /* One good line so the read is PARTIAL rather than total, and its session is
+     not one of ours, so nothing here is offline merely by being unseen. */
+  /* 🔑 BUILT FROM `PANE_COLUMNS` BY KEY, never typed. A hand-written
+     tab-separated line maintains its column positions by counting tabs by eye,
+     and this suite already caught one that put a pane title in the CLAIM
+     column. The lint that forbids it is right, and it caught this fixture. */
+  const good = fleet.line({ session: 'runner', title: 'a title' });
+  const bad = 'anna_0.0_2.1.237_0___ the line that could not be read';
+  const bin = nodePath.join(sb, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(nodePath.join(bin, 'tmux'),
+    `#!/bin/sh\nprintf '%s\\n' "${good}"${mangle ? ` "${bad}"` : ''}\n`,
+    { mode: 0o755 });
 
   const script = `
     const http = require('node:http');
@@ -60,6 +87,7 @@ function board() {
     encoding: 'utf8',
     env: {
       ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
       AGENT_WORKFORCE_DRY_RUN: '1',
       AGENT_WORKFORCE_DATA: nodePath.join(sb, 'data'),
       AGENT_WORKFORCE_WORKERS: nodePath.join(sb, 'workers'),
@@ -67,8 +95,9 @@ function board() {
     },
   });
   fs.rmSync(sb, { recursive: true, force: true });
-  PAYLOAD = JSON.parse(out);
-  return PAYLOAD;
+  const parsed = JSON.parse(out);
+  BOARDS.set(key, parsed);
+  return parsed;
 }
 
 function offlineRow({ strict = true } = {}) {
@@ -189,3 +218,35 @@ for (const which of ['card', 'lrow']) {
     assert.ok(rules > 0, `${which} uses .${cls[1]}, which has no rule anywhere in the stylesheet`);
   });
 }
+
+test('a partial pane read withholds the offline roster entirely', () => {
+  /* 🛑 IT PUBLISHED RUNNING AGENTS AS NOT RUNNING, at the highest confidence
+     level this file has. The offline list is built by subtracting the panes
+     that PARSED from what is registered, so an agent whose line `readPanes`
+     rejected fell through carrying `state: stopped`, `running: false`,
+     `stateConfidence: structured` and a `because` saying nothing on this
+     computer has a session for it. On a partial read all four are false: the
+     agent is running and we could not read its line (Mona Lisa, #294).
+
+     🔑 REACHABLE WITH NOTHING OF OURS BROKEN. `PANE_FORMAT` carries a pane
+     title, which is arbitrary text an agent wrote about itself, and the
+     mangled `anna_0.0_2.1.237_0___` line that cost Josh an hour this morning
+     is exactly that input.
+
+     ⚠️ THE WHOLE LIST IS WITHHELD rather than softened per agent: there is no
+     way to tell WHICH missing agent an unreadable line belonged to, so
+     subtracting a set known to be incomplete cannot give a trustworthy
+     remainder. */
+  const body = board();
+  assert.ok(body.counts.unreadableLines === 0,
+    'this board already has unreadable lines, so the control below proves nothing');
+  assert.ok(body.agents.some((a) => a.running === false),
+    'the clean board has no offline row, so its disappearance would prove nothing');
+
+  const murky = board({ mangle: true });
+  assert.ok(murky.counts.unreadableLines > 0, 'the mangled fixture did not produce an unreadable line');
+  assert.deepEqual(murky.agents.filter((a) => a.running === false), [],
+    'an agent was published as not running off a roster we know is incomplete');
+  /* And zero would be the same claim in another form. */
+  assert.equal(murky.counts.notRunning, null);
+});

@@ -2691,7 +2691,10 @@ test('the stats tiles count the real fleet, and the alert tile hides at zero', (
     { state: 'idle' }, { state: 'idle' },
     { state: 'needs_you' }, { state: 'unknown' },
   ];
-  const live = drive(fleet, { total: 7, needsYou: 1 });
+  /* ⚠️ `notRunning` IS ALWAYS EMITTED by the route, as a number or as `null`,
+     so a fixture omitting it describes a payload the producer does not
+     produce. It was omitted here, and the tile read `undefined` as zero. */
+  const live = drive(fleet, { total: 7, needsYou: 1, notRunning: 0 });
   assert.equal(live['st-agents'].textContent, '7', 'the agents tile stopped carrying the full-fleet total');
   assert.equal(live['st-working'].textContent, '3', 'the working tile does not count exactly the working agents');
   assert.equal(live['st-idle'].textContent, '2', 'the idle tile does not count exactly the idle agents');
@@ -2707,6 +2710,17 @@ test('the stats tiles count the real fleet, and the alert tile hides at zero', (
   /* ⚠️ FROM THE COUNT, not from filtering the roster: the roster here holds no
      not-running rows at all, so a tile derived from it would read 0 and this
      assertion is what says which source won. */
+
+  /* 🛑 THE THIRD ANSWER, AND `|| 0` COLLAPSED IT INTO THE FIRST. `null` is the
+     route saying it could not work the number out: on a poll where some pane
+     lines did not parse, the offline roster is withheld entirely, because
+     subtracting an incomplete set cannot give a trustworthy remainder. A zero
+     there claims none of your agents are stopped on the one poll where that is
+     unknowable, and hiding the tile is the same claim in another form
+     (Mona Lisa, #294). */
+  const murky = drive(fleet, { total: 7, needsYou: 1, notRunning: null });
+  assert.equal(murky['st-off'].textContent, '?', 'an unknowable count renders as a number');
+  assert.equal(murky['st-off-tile'].hidden, false, 'the tile hides, which says none are stopped');
 
   const calm = drive(fleet.filter((a) => a.state !== 'needs_you'), { total: 6, needsYou: 0 });
   assert.equal(calm['st-attn-tile'].hidden, true,

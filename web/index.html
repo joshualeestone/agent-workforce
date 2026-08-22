@@ -7108,8 +7108,17 @@ async function tick() {
        agree today and the tile is a claim about the FLEET, which is what the
        engine counted; a second derivation here is how a headline starts
        disagreeing with the cards underneath it. */
-    document.getElementById('st-off').textContent = String(c.notRunning || 0);
-    document.getElementById('st-off-tile').hidden = !c.notRunning;
+    /* ⚠️ THREE ANSWERS, NOT TWO, and `|| 0` collapsed the third into the first.
+       `null` is the route saying it could not work the number out: on a poll
+       where some pane lines did not parse, the offline roster is withheld
+       entirely (subtracting an incomplete set cannot give a trustworthy
+       remainder), so a 0 there would claim none of your agents are stopped on
+       the one poll where that is unknowable. It shows the same question mark a
+       blind poll does, and the tile STAYS UP: hiding it is the same claim in
+       another form. */
+    const off = c.notRunning;
+    document.getElementById('st-off').textContent = off === null || off === undefined ? '?' : String(off);
+    document.getElementById('st-off-tile').hidden = off === 0;
     document.getElementById('st-attn').textContent = String(c.needsYou || 0);
     document.getElementById('st-attn-tile').hidden = !c.needsYou;
     const bits = [];

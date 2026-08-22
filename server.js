@@ -847,8 +847,36 @@ const server = http.createServer((req, res) => {
        * "unknown" means we tried to read it and could not, and here there is
        * nothing to read.
        */
+      /**
+       * 🛑 A PARTIAL PANE READ PUBLISHED RUNNING AGENTS AS NOT RUNNING, and it
+       * did so at the HIGHEST confidence level this file has. `seen` holds the
+       * panes that PARSED, so an agent whose line `readPanes` rejected fell
+       * straight through into the offline list carrying `state: stopped`,
+       * `running: false`, `stateConfidence: structured` and a `because` saying
+       * nothing on this computer has a session for it. On a partial read all
+       * four are false: the agent is running and we could not read its line.
+       *
+       * 🔑 THE INVERSION MANUFACTURING A CONFIDENT NEGATIVE rather than
+       * withholding, which is the opposite of what every other refusal in this
+       * file does (Mona Lisa, #294). And it defeated the honest warning above
+       * it: the board already says "N we could not read at all, so some agents
+       * may be missing", and a reader who has been handed a Not running card
+       * for that agent has been given an explanation and stops looking.
+       *
+       * ⚠️ REACHABLE WITH NOTHING OF OURS BROKEN. `PANE_FORMAT` carries a pane
+       * TITLE, which is arbitrary text an agent wrote about itself, and the
+       * mangled `anna_0.0_2.1.237_0___` line that cost Josh an hour this
+       * morning is exactly that input. That agent was running throughout.
+       *
+       * 📌 SO THE WHOLE LIST IS WITHHELD, not softened per agent. Subtracting
+       * a set we know to be incomplete cannot produce a trustworthy remainder,
+       * and there is no way to tell WHICH missing agent the unreadable line
+       * belonged to. The board keeps its own sentence about the lines it could
+       * not read, which is the true thing to say in that state.
+       */
       const offline = (() => {
         try {
+          if (snap.counts && snap.counts.unreadableLines > 0) return [];
           const seen = new Set(agents.map((a) => a.sessionName));
           const known = register.survey();
           if (!known.ok) return [];
@@ -895,7 +923,13 @@ const server = http.createServer((req, res) => {
          plus the rest is what is RUNNING, and `notRunning` is the remainder of
          `total`. A single "Agents" number covering both would put a figure on
          screen that no arithmetic on the other tiles reaches. */
-      counts.notRunning = offline.length;
+      /* ⚠️ AND ZERO IS A CLAIM. On a partial read `offline` is deliberately
+         empty, and publishing `notRunning: 0` beside it would say "none of
+         your agents are stopped" on the one poll where that is unknowable.
+         `null` travels as "we could not work it out"; the tile shows it the
+         same way it shows a blind poll. */
+      const couldNotAccount = Boolean(snap.counts && snap.counts.unreadableLines > 0);
+      counts.notRunning = couldNotAccount ? null : offline.length;
       counts.total += offline.length;
       // ⚠️ A MACHINE-LEVEL FACT, DELIBERATELY NOT A PER-AGENT ONE. Whether this
       // computer can reach a Claude subscription is one fact about the machine,
