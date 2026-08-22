@@ -83,6 +83,7 @@ one invented by somebody who did not write them.
 | `render-first-run.js` | Render every first-run state in a real browser and look at it |
 | `render-memory-words.js` | Measure the two unknown-memory captions on all three surfaces that draw them, |
 | `render-model-more.js` | The create form's model hint and "More models" disclosure (#202) |
+| `render-survival.js` | The panel naming the agents that will not come back after a restart (#277) |
 | `render-pjsettings.js` | **no header sentence.** Read it before running it, and give it one. |
 | `render-projects.js` | Render every state of the Projects screens in a real browser, light and dark |
 | `render-sleep-button.js` | **no header sentence.** Read it before running it, and give it one. |

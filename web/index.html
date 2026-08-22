@@ -7033,6 +7033,8 @@ function showTab(tab) {
        Projects or Settings. */
     const rw = document.getElementById('restart-wrap');
     if (rw) rw.hidden = true;
+    /* Leaving the screen is what finishes a repair report; see SURVIVAL_HELD. */
+    SURVIVAL_HELD = false;
   } else { paintRemoved(); paintSurvival(); }
   PANELS.forEach((p) => { document.getElementById('panel-' + p).hidden = (p !== tab); });
   // ⚠️ Re-read on every arrival rather than once at boot. A project's folder can
@@ -11152,6 +11154,19 @@ function removedUnreadable() {
  * it, before pressing anything.
  */
 let SURVIVAL_BUSY = false;
+/**
+ * 🛑 THE RESULT WAS ERASED BY THE NEXT POLL, and only rendering it showed that.
+ * A repair that works empties the missing list, so five seconds later
+ * `paintSurvival` correctly hid the panel -- taking the per-agent report with
+ * it. The person pressed a button, saw a flash, and was left with no record of
+ * which agents came back and which could not be started, which is the half of
+ * the report that matters.
+ *
+ * ⚠️ CLEARED BY LEAVING THE SCREEN, not by a timer. The report is finished
+ * being read when they go somewhere else; on return the panel asks the machine
+ * again, and anything that genuinely failed is still there to say so.
+ */
+let SURVIVAL_HELD = false;
 function survivalSay(n) {
   /* Singular and plural written out rather than assembled, because "1 agents"
      is exactly the seam this screen keeps being caught on. */
@@ -11165,7 +11180,7 @@ async function paintSurvival() {
   /* ⚠️ NEVER OVER AN IN-FLIGHT REPAIR. The five-second poll would otherwise
      replace the result list the person is reading with the question they have
      already answered, and re-offer a button for work that is running. */
-  if (SURVIVAL_BUSY) return;
+  if (SURVIVAL_BUSY || SURVIVAL_HELD) return;
   let body = null;
   try {
     const res = await fetch('/api/register', { cache: 'no-store' });
@@ -11224,7 +11239,7 @@ document.addEventListener('click', async (e) => {
         ? 'starts at login, and is running now'
         : 'starts at your next login, but we could not start it just now')
       : (r.because || 'we could not set that one up');
-    return '<li><b>' + esc(r.name) + '</b> — ' + esc(said) + '</li>';
+    return '<p class="dhint"><b>' + esc(r.name) + '</b> — ' + esc(said) + '</p>';
   }).join('');
   /* ⚠️ WHAT WE HAD TO ASSUME, said once and out loud. The model an agent was
      SET to run on lived only in the job that never existed, so what goes in is
@@ -11234,7 +11249,7 @@ document.addEventListener('click', async (e) => {
   const guessed = body.results.filter((r) => r.ok && r.guessed && r.guessed.model).length;
   wrap.innerHTML = '<div class="pj-empty boardfail">'
     + '<p><b>Done.</b> Restarting this computer will bring these back.</p>'
-    + '<ul class="dhint">' + rows + '</ul>'
+    + rows
     + (guessed
       ? '<p class="dhint">' + esc(guessed === 1
         ? 'One of them had no record of which model it was set to run on, so it will start on the default. You can change it on its page.'
@@ -11243,6 +11258,7 @@ document.addEventListener('click', async (e) => {
       : '')
     + '</div>';
   SURVIVAL_BUSY = false;
+  SURVIVAL_HELD = true;
   /* The board can now see them, so ask it again rather than waiting out the
      poll: the whole point of the repair is that they are running. */
   try { await tick(); } catch { /* the poll will get there */ }

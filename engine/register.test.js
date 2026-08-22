@@ -204,3 +204,18 @@ test('no job is written when Claude is not on this computer', () => {
 });
 
 test.after(() => { fs.rmSync(SB, { recursive: true, force: true }); });
+
+test('a machine that has never had an agent is not an unreadable one', () => {
+  /* 🛑 THIS SHIPPED WRONG FOR TEN MINUTES AND WAS FOUND BY RUNNING IT. The
+     profiles directory does not exist until the first profile is written, so
+     every fresh machine answered "we could not read what Kosmos knows about
+     your agents" — the could-not-look versus is-not-there inversion this whole
+     product is written against, on a board with nothing on it to be alarmed
+     about. */
+  reset();
+  fs.rmSync(store.PROFILES, { recursive: true, force: true });
+  const s = register.survey();
+  assert.equal(s.ok, true);
+  assert.deepEqual(s.agents, []);
+  assert.deepEqual(s.missing, []);
+});

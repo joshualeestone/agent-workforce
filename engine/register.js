@@ -39,7 +39,16 @@ const store = require('./store');
 /** Names Kosmos has written a profile for: its own record that an agent exists. */
 function known() {
   let files;
-  try { files = fs.readdirSync(store.PROFILES); } catch { return { ok: false, names: [] }; }
+  try { files = fs.readdirSync(store.PROFILES); } catch (err) {
+    /* ⚠️ "NOTHING HAS EVER BEEN WRITTEN" IS NOT "WE COULD NOT LOOK", and this
+       module would have shipped saying the second on every fresh machine: the
+       directory does not exist until the first profile is written. That is the
+       exact distinction the rest of this product is built on, inverted, in the
+       one place where the wrong answer is a permanent alarming sentence on a
+       board that has no agents to be alarmed about. */
+    if (err && err.code === 'ENOENT') return { ok: true, names: [] };
+    return { ok: false, names: [] };
+  }
   const names = files
     .filter((f) => f.endsWith('.json'))
     .map((f) => f.slice(0, -'.json'.length))

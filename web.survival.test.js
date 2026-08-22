@@ -26,10 +26,10 @@ function paint(reply, { onAgents = true } = {}) {
     return { ok: true, json: async () => reply };
   };
   const fn = new Function(
-    'document', 'fetch', 'esc', 'onAgentsTab', 'SURVIVAL_BUSY',
+    'document', 'fetch', 'esc', 'onAgentsTab', 'SURVIVAL_BUSY', 'SURVIVAL_HELD',
     page.lift(SCRIPT, 'survivalSay') + '\n' + page.lift(SCRIPT, 'paintSurvival')
     + '\nreturn paintSurvival();',
-  )(doc, fetchStub, (x) => String(x), () => onAgents, false);
+  )(doc, fetchStub, (x) => String(x), () => onAgents, false, false);
   return fn.then(() => wrap);
 }
 
@@ -72,7 +72,7 @@ test('a failed look leaves the screen alone rather than clearing it', async () =
   for (const bad of ['down', 'throws', { ok: false, because: 'we could not read it' }, null, { ok: true }]) {
     const wrap = { hidden: false, innerHTML: 'STANDING' };
     const doc = { getElementById: () => wrap };
-    await new Function('document', 'fetch', 'esc', 'onAgentsTab', 'SURVIVAL_BUSY',
+    await new Function('document', 'fetch', 'esc', 'onAgentsTab', 'SURVIVAL_BUSY', 'SURVIVAL_HELD',
       page.lift(SCRIPT, 'survivalSay') + '\n' + page.lift(SCRIPT, 'paintSurvival') + '\nreturn paintSurvival();')(
       doc,
       async () => {
@@ -80,7 +80,7 @@ test('a failed look leaves the screen alone rather than clearing it', async () =
         if (bad === 'down') return { ok: false, json: async () => ({}) };
         return { ok: true, json: async () => bad };
       },
-      (x) => String(x), () => true, false,
+      (x) => String(x), () => true, false, false,
     );
     assert.equal(wrap.innerHTML, 'STANDING', `a ${JSON.stringify(bad)} answer wiped the panel`);
   }
