@@ -4185,7 +4185,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     </section>
 
     <section class="dbox">
-      <h3 class="dlab">Your Claude account</h3>
+      <h3 class="dlab">Your Claude accounts</h3>
       <div id="set-account"><p class="dhint">Checking the connection…</p></div>
       <!-- 🛑 "One account for now. Connecting another is not built yet." WAS
            HERE, under a greyed-out button, and it was wrong on this machine
@@ -9982,12 +9982,16 @@ async function paintAccountPicker(a) {
   /* ⚠️ "We cannot tell" is a THIRD state and gets its own sentence. An agent
      Kosmos did not start has no startup file of ours to read, and saying "the
      default account" about it would be answering for a stranger's session. */
+  /* ⚠️ ONE QUESTION, ONE ANSWER, AND NO FALLBACK. `acct` is null exactly when
+     the engine could not read this agent's launch file, and the only honest
+     thing to say then is that we cannot tell. The version that fell back to
+     "your first account" for any agent of ours rendered that sentence about an
+     agent Kosmos never started -- a confident claim about somebody else's
+     session, from a screen guessing at what a null meant. */
   now.innerHTML = acct
     ? 'Signed in as <b>' + esc(acct.email || acct.label || acct.dir) + '</b>'
-      + (acct.isDefault ? ' (your first account)' : '')
-    : (a && a.isNamedOurs
-      ? 'Signed in as <b>your first account</b>'
-      : 'We cannot tell which account this one uses.');
+      + (acct.isDefault ? ' <span class="acct-tag">your first account</span>' : '')
+    : 'We cannot tell which account this one uses, so we cannot move it.';
 
   /* Only accounts whose history is the shared one. The engine refuses the rest
      and says why; the picker does not offer them at all, because an option that
@@ -9999,9 +10003,14 @@ async function paintAccountPicker(a) {
   ).join('');
   if (sel.innerHTML !== html) sel.innerHTML = html;
 
-  const ours = !!(a && a.isNamedOurs);
+  /* Gated on the SAME fact the sentence above is gated on: whether we could
+     read this agent's job. `isNamedOurs` was the wrong gate -- it is true for
+     agents whose launch file we have never seen, so the control offered a move
+     the engine would then refuse. An option that always fails is worse than an
+     option that is not there. */
+  const ours = !!acct;
   /* One movable account means there is nowhere to move TO, and a working
-     dropdown with one entry that is where you already are is a control that
+     dropdown whose only entry is where you already are is a control that
      cannot do anything. */
   const somewhere = movable.length > 1;
   sel.disabled = !ours || !somewhere;

@@ -728,6 +728,14 @@ const server = http.createServer((req, res) => {
          handful of directories, and doing it thirteen times a tick to answer
          the same question is waste the five-second poll would pay forever. */
       const known = (() => { try { return accounts.list(); } catch { return []; } })();
+      /* 🛑 `null` HERE MEANS ONE THING ONLY: we could not read this agent's
+         launch file, so we do not know. It does NOT mean the default account.
+         The first version let the SCREEN decide, by falling back to "your
+         first account" whenever this was null and the pane was ours -- and the
+         rendered page then said "Signed in as your first account" about an
+         agent whose launch file Kosmos has never seen. Truthiness standing in
+         for validity, again: `isNamedOurs` answers "is this our agent", never
+         "did we write its job". */
       const accountOf = (name) => {
         const job = create.readJob(name);
         if (!job) return null;
