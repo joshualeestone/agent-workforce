@@ -4335,8 +4335,17 @@ test('the return-step live region is static markup with its announcement attribu
   const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   assert.match(raw, /<div id="fr-return-row" role="status" aria-live="polite"><\/div>/,
     'the return-step live region must exist in the STATIC markup, before anything fills it');
-  assert.match(raw, /<div id="fr-return-dock" role="status" aria-live="polite"><\/div>/,
-    'the dock is a live region too: its instruction changes with the answer, and the correction must be heard');
+  assert.match(raw, /<div id="fr-return-msg" role="status" aria-live="polite"><\/div>/,
+    'the reveal button\u2019s refusal must land in a live region, or a screen-reader user never hears it');
+  /* ⚠️ AND THE DOCK LINE IS NOT ON THIS STEP ANY MORE. It moved to the last
+     step on 2026-08-22: you drag something to your Dock because you expect to
+     want it again, and before a person has used the app they do not know that
+     yet. Pinned in the static markup because the id it used to live under was
+     RENAMED in the same change, so a revert that restored the old paint would
+     find no element and fail silently rather than loudly. */
+  assert.match(raw, /<div id="fr-fleet-dock"><\/div>/,
+    'the last step lost the element the way-back line is painted into');
+  assert.ok(!/fr-return-dock/.test(raw), 'the renamed region left a stale id behind');
 });
 
 test('the degraded machine answer publishes the ENGINE\u2019S could-not-look row', () => {
@@ -4650,6 +4659,39 @@ test('an unrecognised subscription answer never renders as "you have none"', () 
     'nothing renders the negative any more, so the assertions above prove nothing');
 });
 
+test('the way back is on the last step, on every ending a person can get', () => {
+  /**
+   * 🔑 THE LINE MOVED HERE FROM STEP 1 on 2026-08-22, and the reason is the
+   * whole test: you drag something to your Dock because you expect to want it
+   * again, and nobody knows that on the screen telling them the install
+   * finished. Two written rulings placed it at the end, and the comment
+   * defending the front position cited one of them as sanctioning the move,
+   * which it does not.
+   *
+   * 🛑 ALL THREE ENDINGS, and that is the part a single-path test would miss.
+   * `frPaintFleet` has three branches and every one of them RETURNS EARLY, so
+   * a line written inside any branch reaches that ending only. Which ending a
+   * person gets is decided by what the engine found on their machine, so the
+   * two they do not get are invisible to whoever tested it.
+   */
+  const DOCK = /Drag Kosmos onto the Dock, the strip of icons/;
+  const endings = {
+    adopt: { path: 'adopt', fleetCount: 13, fleetNames: [] },
+    create: { path: 'create', fleetCount: 0, fleetNames: [] },
+    unknown: { path: 'unknown', fleetCount: null, fleetNames: [] },
+  };
+  for (const [name, FR] of Object.entries(endings)) {
+    const got = firstRunHarness('frPaintFleet', { FR });
+    assert.match(got.els['fr-fleet-dock'].innerHTML, DOCK,
+      'the ' + name + ' ending never tells the person how to get back');
+  }
+  /* It names no folder, so it is true whatever the app-location look found,
+     which is why it can sit on a step that never performs that look. */
+  const one = firstRunHarness('frPaintFleet', { FR: endings.create });
+  assert.ok(!/Applications|folder/i.test(one.els['fr-fleet-dock'].innerHTML),
+    'the way-back line named a location this step never checked');
+});
+
 test('the fleet screen renders every path, and a broken payload lands on "we could not see"', () => {
   const adopt = firstRunHarness('frPaintFleet', {
     FR: { path: 'adopt', fleetCount: 13, fleetNames: ['Splinter', 'Angel'] },
@@ -4778,7 +4820,8 @@ test('the return step paints a look in progress, then the engine answer, and cou
     await h.done;
     assert.match(h.els['fr-return-row'].innerHTML, new RegExp(row.title));
     assert.match(h.els['fr-return-row'].innerHTML, new RegExp('fr-check ' + row.state));
-    assert.match(h.els['fr-return-dock'].innerHTML, dockRe);
+    assert.ok(!new RegExp(dockRe.source).test(h.els['fr-return-msg'].innerHTML),
+      'the way-back line came back to the first step, where a person has no motive for it yet');
     assert.ok(!/Checking where the Kosmos icon is/.test(h.els['fr-return-row'].innerHTML),
       'the placeholder survived the fetch');
   }
@@ -4794,8 +4837,8 @@ test('the return step paints a look in progress, then the engine answer, and cou
   await broken.done;
   assert.match(broken.els['fr-return-row'].innerHTML, /could not check where the Kosmos icon is right now/);
   assert.match(broken.els['fr-return-row'].innerHTML, /fr-check unknown/);
-  assert.match(broken.els['fr-return-dock'].innerHTML, /Drag Kosmos onto the Dock, the strip of icons/,
-    'the failure path lost the ruled dock line');
+  assert.ok(!/Drag Kosmos onto the Dock, the strip of icons/.test(broken.els['fr-return-msg'].innerHTML),
+    'the way-back line came back to the first step on the failure path');
 
   // A payload WITHOUT the appLocation field (an old server, a shape drift)
   // lands on could-not-ask too, never on the placeholder forever.
@@ -4818,7 +4861,7 @@ test('the return step paints a look in progress, then the engine answer, and cou
   await blank.done;
   assert.match(blank.els['fr-return-row'].innerHTML, /right now/,
     'a contentless ok payload rendered as a confident blank tick');
-  assert.ok(!/out of that folder/.test(blank.els['fr-return-dock'].innerHTML),
+  assert.ok(!/out of that folder/.test(blank.els['fr-return-msg'].innerHTML),
     'the dock pointed at a folder no row named');
 
   // A wire row claiming the LOCAL state renders as unknown, never as a
@@ -4875,7 +4918,6 @@ test('the return step: entries share one in-flight look, and a stale look cannot
   // without touching the pane (both write the same answer here, so the
   // observable pin is: the answer landed exactly, and the dock matches it).
   assert.match(t5.els['fr-return-row'].innerHTML, /You will find it in your Applications folder/);
-  assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos onto the Dock, the strip of icons/);
 
   // Second scenario: entries 3 and 4 SHARE one look (asserted by call
   // count), the shared look fails, and both continuations paint the same
@@ -4892,8 +4934,7 @@ test('the return step: entries share one in-flight look, and a stale look cannot
   await e3; await e4;
   assert.match(t5.els['fr-return-row'].innerHTML, /right now/,
     'the failure path did not paint could-not-ask');
-  assert.match(t5.els['fr-return-dock'].innerHTML, /Drag Kosmos onto the Dock, the strip of icons/,
-    'the failure repaint lost the ruled dock line');
+
 
   // ⚠️ THE GUARD'S JOB, and the scenarios that red when the guard lines are
   // deleted (round 5 proved the shared-look scenarios above pass without
@@ -4915,14 +4956,12 @@ test('the return step: entries share one in-flight look, and a stale look cannot
   const e6 = fn();
   assert.equal(t5.calls(), 4);
   const before6 = t5.els['fr-return-row'].innerHTML;
-  const dock6 = t5.els['fr-return-dock'].innerHTML;
   t5.leave();
   t5.resolve({ ok: false });
   await e6;
   assert.equal(t5.els['fr-return-row'].innerHTML, before6,
     'a look FAILING after the person left the step repainted the pane');
-  assert.equal(t5.els['fr-return-dock'].innerHTML, dock6,
-    'the stale failure rewrote the dock of a pane the person left');
+
 });
 
 test('the fork step does not promise a working agent over a check screen that disagreed', () => {

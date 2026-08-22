@@ -3662,6 +3662,22 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            them, and there is no progress bar here because there is no work. -->
       <div class="fr-pane" id="fr-pane-6" hidden>
         <div id="fr-fleet"></div>
+        <!-- ⚠️ THE WAY BACK, AND IT IS THE LAST STEP ON PURPOSE. It opened the
+             flow until 2026-08-22, which put an instruction in front of a
+             person before they had the motive for it: you drag something to
+             your Dock because you expect to want it again, and before they
+             have used it they do not know that yet. Two written rulings placed
+             it here (the orientation spec's Placement heading, and the PIN's
+             ordering ending on "getting back") and the comment justifying the
+             front position cited the spec as sanctioning the move, which it
+             does not.
+             🔑 The screen it sat on is NOT wrong to open the flow. Step 1
+             answers "did that work", which is the only question somebody has
+             coming out of a Terminal, and it is about the INSTALL. This line
+             is about RETURNING. They are two jobs, and only one of them
+             survives being moved, so the split is what resolved the placement
+             rather than either screen winning (Mona Lisa, 2026-08-22). -->
+        <div id="fr-fleet-dock"></div>
       </div>
 
       <!-- 1. Success. ⚠️ The one thing the install said only into
@@ -3681,11 +3697,15 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
         <div id="fr-return">
           <div id="fr-return-intro"></div>
           <div id="fr-return-row" role="status" aria-live="polite"></div>
-          <!-- The dock is a live region too: the reveal button's failure
-               sentences land here (frRevealSay), and a screen-reader user
-               who fired that click would otherwise never hear the refusal --
-               the same SC 4.1.3 call as the check row above. -->
-          <div id="fr-return-dock" role="status" aria-live="polite"></div>
+          <!-- A live region: the reveal button's failure sentences land here
+               (frRevealSay), and a screen-reader user who fired that click
+               would otherwise never hear the refusal -- the same SC 4.1.3 call
+               as the check row above.
+               ⚠️ IT USED TO CARRY THE DOCK LINE AND IS RENAMED BECAUSE IT NO
+               LONGER DOES. The line moved to the last step (see frPaintFleet),
+               and an id still saying `dock` would have every later reader
+               looking for it here. -->
+          <div id="fr-return-msg" role="status" aria-live="polite"></div>
         </div>
       </div>
 
@@ -17509,7 +17529,7 @@ function frConnPaintProgress(progress) {
    Failure lands in ONE message line with the route's sentence -- replaced,
    never stacked, so repeated failed clicks do not pile paragraphs. */
 function frRevealSay(html) {
-  const dock = document.getElementById('fr-return-dock');
+  const dock = document.getElementById('fr-return-msg');
   let m = dock.querySelector('.fr-msg');
   // Clearing REMOVES the node: an empty paragraph parked in a live region
   // is one more thing for the next reader (human or machine) to reason
@@ -17642,6 +17662,16 @@ function frPaintFleet() {
   const box = document.getElementById('fr-fleet');
   const path = (FR && FR.path) || 'unknown';
   const title = document.getElementById('fr-title');
+
+  /* ⚠️ PAINTED BEFORE THE BRANCHES, because all three of them return early.
+     Written inside one of them it would reach that ending only, and the
+     ending a person gets is decided by what the engine found on their
+     machine, so the miss would be invisible to whoever tested it. The pack
+     copy is unchanged from when this line opened the flow: it names no
+     folder, so it is true in every app-location state and needs no variants. */
+  document.getElementById('fr-fleet-dock').innerHTML =
+    '<p><b>Keep it one click away.</b> Drag Kosmos onto the Dock, the strip '
+    + 'of icons along the edge of your screen.</p>';
 
   const count = FR && FR.fleetCount;
 
@@ -17809,18 +17839,16 @@ async function frPaintReturn() {
   // The Success screen's frame (spec screen 1): the check row and the dock
   // line ARE the body; no separate intro paragraph is drawn in the pack
   // (the container is cleared below so a repaint cannot stack).
-  // The spec's ruled dock line (pack copy, unchanged): it names no folder,
-  // so it is true in every app-location state and needs no variants.
-  const drag = () => '<p><b>Keep it one click away.</b> Drag Kosmos onto the '
-    + 'Dock, the strip of icons along the edge of your screen.</p>';
   const introEl = document.getElementById('fr-return-intro');
   const rowEl = document.getElementById('fr-return-row');
-  const dockEl = document.getElementById('fr-return-dock');
+  const msgEl = document.getElementById('fr-return-msg');
   introEl.innerHTML = '';
   // ⚠️ Painted BEFORE the fetch as CHECKING -- a look in progress, which is
   // what is true at that moment, and a LOCAL state the wire cannot claim.
   rowEl.innerHTML = frCheckRow({ state: 'checking', title: 'Checking where the Kosmos icon is', detail: 'One moment.' }, { allowLocal: true });
-  dockEl.innerHTML = drag();
+  // Cleared, not painted: a stale refusal from a previous visit must not
+  // survive a repaint of the row it was about.
+  msgEl.innerHTML = '';
   try {
     if (!FR_MACHINE_LOOK) {
       FR_MACHINE_LOOK = fetch('/api/machine', { cache: 'no-store' })
@@ -17850,21 +17878,21 @@ async function frPaintReturn() {
       + (found.state === 'ok'
         ? '<div class="fr-revealrow"><button type="button" id="fr-reveal">Show me where it is</button></div>'
         : '');
-    dockEl.innerHTML = drag();
+    /* The message line clears with the row it belongs to: a refusal from a
+       previous look must not sit under a fresh answer. */
+    msgEl.innerHTML = '';
   } catch {
     if (gen !== FR_RETURN_GEN) return;
     // We could not ASK -- a different fact from the engine's own could-not-
     // check, and worded differently on purpose: the harness tells the fetched
-    // answer, the placeholder, and this fallback apart by their words. The
-    // DOCK moves with the row: a folder-pointing instruction must never
-    // outlive the answer that named the folder.
+    // answer, the placeholder, and this fallback apart by their words.
     rowEl.innerHTML = frCheckRow({
       state: 'unknown',
       title: 'We could not check where the Kosmos icon is right now',
       detail: 'Nothing is wrong. Type Kosmos into Spotlight, the magnifying glass at the top '
         + 'right of your screen, and it will find it.',
     });
-    dockEl.innerHTML = drag();
+    msgEl.innerHTML = '';
   }
 }
 
