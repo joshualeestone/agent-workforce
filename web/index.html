@@ -727,6 +727,10 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    ring AND the loudest colour, working is a quarter, idle is absent. Read the
    view in greyscale and it still works. */
 .orgwrap { margin-top: 8px; }
+/* Centred under the chart, per Josh. The chart itself is centred in the page,
+   so a line hugging the left edge reads as belonging to the page rather than
+   to the drawing it is about. */
+#orgnote { text-align: center; margin: 6px 0 0; }
 .orgmap { position: relative; margin: 0 auto; }
 .wires { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hub {
@@ -7273,7 +7277,15 @@ function paintOrg() {
   note.textContent = unplaced > 0
     ? 'One or more agents could not be placed, so they are not drawn.'
     : (!anyManaged
-      ? 'Nobody reports to anyone yet, so everyone sits on the same ring. You can change that on any agent\'s page.'
+      /* 🔑 JOSH'S OWN WORDS, 2026-08-22, replacing two sentences of mine: "I
+         don't know that we need that much text. Let's say centered something
+         like 'assign agents to each other to create a hierarchy'".
+         ⚠️ WHAT THE LONGER VERSION WAS DOING was explaining the CAUSE (nobody
+         reports to anyone, so everyone is on one ring) before naming the
+         action. Under a picture that already shows one ring, the cause is on
+         screen and only the action is missing. His version is shorter because
+         it drops the half the drawing already says. */
+      ? 'Assign agents to each other to create a hierarchy.'
       : '');
 }
 
