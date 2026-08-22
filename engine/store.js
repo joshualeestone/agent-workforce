@@ -64,13 +64,73 @@ function avatarPath(name) {
   return null;
 }
 
+/**
+ * What an image ACTUALLY is, read from its first bytes.
+ *
+ * 🛑 THE TYPE USED TO COME FROM THE BROWSER AND THAT FAILED BOTH WAYS. The page
+ * sends `file.type`, which a browser derives from the FILENAME, so a perfectly
+ * good PNG with no extension or one the OS does not recognise arrives with an
+ * empty content-type and was refused: "unsupported image type: unknown", on a
+ * file that would have rendered fine. That is the whole of #12, and it is what
+ * makes #181 look broken the first time somebody sets their own picture.
+ *
+ * 🔑 AND IT IS THE SAME RULE AS EVERY OTHER TRUST DECISION IN HERE: prefer the
+ * thing over a claim about the thing. The bytes cannot be wrong about what they
+ * are; a header supplied by the caller can be wrong in either direction, and
+ * one of those directions is refusing something valid while the other is
+ * accepting something that is not an image at all.
+ *
+ * ⚠️ SIGNATURES ONLY, NOT A DECODER. This says "these bytes begin like a PNG",
+ * which is exactly enough to choose a file extension and to refuse a text file
+ * claiming to be one. It does not say the image is well formed, and it is not
+ * trying to: a truncated PNG is still a PNG, and the page showing a broken
+ * image is a better outcome than this file pretending to validate one.
+ *
+ * @returns {string|null} one of the ALLOWED_IMAGES keys, or null
+ */
+function imageTypeOf(buffer) {
+  if (!buffer || !buffer.length) return null;
+  const b = buffer;
+  /* ⚠️ EACH FORMAT IS GUARDED BY THE LENGTH IT ACTUALLY NEEDS. A blanket
+     minimum of 12 (WEBP's, the longest) refused an 8-byte PNG signature, which
+     is a real thing to be handed: the suite's own fixtures are exactly that,
+     and a truncated upload is too. Refusing it is not wrong about the file, it
+     is wrong about WHY, and "that has to be a PNG" is a bad sentence to show
+     somebody holding a PNG. */
+  // PNG: the 8-byte signature, which includes the CRLF/EOF pair that exists to
+  // catch exactly the transfer corruption we would otherwise store.
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47
+      && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return 'image/png';
+  // JPEG: SOI, then any marker.
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  // GIF87a / GIF89a.
+  if (b.length >= 6 && (b.slice(0, 6).toString('latin1') === 'GIF87a' || b.slice(0, 6).toString('latin1') === 'GIF89a')) return 'image/gif';
+  // WEBP is a RIFF container: "RIFF" then four size bytes then "WEBP". The
+  // size bytes are skipped rather than checked, because a wrong length is a
+  // broken file rather than a different format.
+  if (b.length >= 12 && b.slice(0, 4).toString('latin1') === 'RIFF' && b.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  return null;
+}
+
 function saveAvatar(name, contentType, buffer) {
-  const ext = ALLOWED_IMAGES[contentType];
-  // Refusing an unknown type beats saving something the page then cannot
-  // render, which would look like the upload silently failed.
-  if (!ext) throw new Error(`unsupported image type: ${contentType || 'unknown'}`);
   if (!buffer || !buffer.length) throw new Error('empty file');
+  /* ⚠️ EMPTY AND OVERSIZE FIRST, and the order is the message. Sniffing a 6MB
+     PNG says "not an image" only if you sniff junk; sniffing FIRST would tell
+     somebody with a large photo that it is not a PNG, which is false and sends
+     them looking for the wrong problem. */
   if (buffer.length > 5 * 1024 * 1024) throw new Error('image is larger than 5MB');
+  /* 🔑 THE BYTES DECIDE, and `contentType` is now only a hint for the sentence.
+     It used to decide, which refused a valid PNG whose browser-guessed type
+     was empty and accepted anything at all that claimed to be one. */
+  const sniffed = imageTypeOf(buffer);
+  const ext = ALLOWED_IMAGES[sniffed];
+  if (!ext) {
+    /* The message names what we got where we can, because "unsupported image
+       type: unknown" tells somebody nothing about what to do next. */
+    throw new Error(contentType && !ALLOWED_IMAGES[contentType]
+      ? `that has to be a PNG, JPEG, WebP or GIF, and this looks like ${contentType}`
+      : 'that has to be a PNG, JPEG, WebP or GIF');
+  }
 
   const key = safeKey(name);
   ensure(AVATARS);
@@ -132,4 +192,4 @@ function writeProfile(name, patch) {
  * it. A symbol whose only justification is symmetry is a symbol somebody will
  * eventually use for the deletion this feature exists not to do.
  */
-module.exports = { ROOT, AVATARS, PROFILES, safeKey, ALLOWED_IMAGES, avatarPath, saveAvatar, removeAvatar, readProfile, writeProfile };
+module.exports = { ROOT, AVATARS, PROFILES, safeKey, ALLOWED_IMAGES, imageTypeOf, avatarPath, saveAvatar, removeAvatar, readProfile, writeProfile };
