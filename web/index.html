@@ -15449,9 +15449,31 @@ function frPaintConnect(st) {
       detail: (st && st.because) || 'It stopped without saying why.',
     })
     + ((st && st.tail) ? '<pre class="fr-conn-tail">' + esc(st.tail) + '</pre>' : '')
-    + '<div class="fr-note">Nothing is broken by this. You can try again, or connect without '
-    + 'Kosmos: open Terminal, type <b>claude</b>, and follow its sign-in. Then come back '
-    + 'and press Try again to check.</div>';
+    /**
+     * 🛑 THE WAY OUT IS OFFERED ONLY WHEN THERE IS SOMETHING TO RUN (#205).
+     * This note used to be concatenated for EVERY stuck cause, and three of the
+     * five mean the program it names was never installed — the download failed,
+     * the binary is not where it should be, or the install step (which is also
+     * the PATH step) did not finish. So the screen where somebody is most stuck
+     * told them to type a command that answers `command not found`.
+     *
+     * ⚠️ `canRunClaude` IS ASKED OF THE DISK BY THE ENGINE, not inferred from
+     * which cause fired. Branching on the cause would infer the binary's
+     * existence from the code path we happened to take, and be wrong for a
+     * download that succeeded before something else broke.
+     *
+     * 📌 AND THE FIRST SENTENCE SURVIVES EITHER WAY. "Nothing is broken by this"
+     * is true whether or not there is a fallback, and it is the sentence doing
+     * the most work for somebody stuck on step 3 of six.
+     */
+    + '<div class="fr-note">Nothing is broken by this. You can try again'
+    + ((st && st.canRunClaude)
+      ? ', or connect without Kosmos: open Terminal, type <b>claude</b>, and follow its '
+        + 'sign-in. Then come back and press Try again to check.'
+      /* Nothing to run, so nothing is suggested. Continue anyway is drawn below
+         and is the honest way forward from here. */
+      : ', or carry on and connect later from Settings.')
+    + '</div>';
     frActions({ label: 'Try again', go: () => frConnectStart() }, { label: 'Continue anyway', go: () => frGo(4) });
     return;
   }

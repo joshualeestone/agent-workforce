@@ -504,3 +504,52 @@ test('start, poll, cancel: the flow is drivable through the routes alone', async
     connect.resetForTests();
   }
 });
+
+test('the stuck screen offers the Terminal way out only when there is something to run', () => {
+  /**
+   * 🛑 #205. This note was concatenated for EVERY stuck cause, and three of the
+   * five mean the program it names was never installed: the download failed, the
+   * binary is not where it should be, or the install step — which is also the
+   * PATH step — did not finish. **So the screen where somebody is most stuck
+   * told them to open a Terminal and type a command that answers `command not
+   * found`.**
+   *
+   * ⚠️ A STRANGER WALKS THIS PATH TONIGHT. Josh is demoing to people who will
+   * install it themselves, so a dead end on step 3 of six is a first impression
+   * rather than a screenshot.
+   *
+   * 📌 THE FLAG IS ASKED OF THE DISK BY THE ENGINE, never inferred from which
+   * cause fired — branching on the cause would derive the binary's existence
+   * from the code path we happened to take.
+   */
+  /* This file has `pageFunction` (a callable) but no source-slicer; the
+     assertions here are about the SHAPE of the branch rather than its output,
+     and rendering it would need most of the first-run DOM stubbed. Sliced the
+     same brace-matched way, anchored with the paren so a longer-named sibling
+     cannot capture it. */
+  const raw = fs.readFileSync(path.join(__dirname, 'web', 'index.html'), 'utf8');
+  const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const at = script.indexOf('function frPaintConnect(');
+  assert.ok(at > -1, 'frPaintConnect vanished from the page');
+  let depth = 0; let end = -1;
+  for (let k = script.indexOf('{', at); k < script.length; k += 1) {
+    if (script[k] === '{') depth += 1;
+    else if (script[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+  }
+  const src = script.slice(at, end);
+
+  assert.match(src, /st && st\.canRunClaude/,
+    'the note is unconditional again, so a person with nothing installed is told to run it');
+
+  /* Both arms present, and only the offered one names the command. */
+  assert.match(src, /open Terminal, type <b>claude<\/b>/,
+    'the way out vanished entirely, including for the cases where it works');
+  assert.match(src, /carry on and connect later from Settings/,
+    'the no-binary case has no way forward at all, which is where it started');
+
+  /* 🔑 THE SENTENCE THAT MUST SURVIVE BOTH ARMS. "Nothing is broken by this" is
+     true whether or not there is a fallback, and it is doing the most work for
+     somebody stuck part way through setup. */
+  assert.match(src, /Nothing is broken by this\. You can try again'/,
+    'the reassurance was moved inside a branch, so one of the two paths loses it');
+});
