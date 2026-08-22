@@ -5186,6 +5186,16 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
      what stays here is what has no tile home -- unknowns, unknown memory
      limits, and the part-of-the-fleet-is-missing clause. Empty hides. -->
 <div class="summary" id="summary">Loading…</div>
+<!-- ⚠️ WHICH OF YOUR AGENTS SURVIVE A RESTART, which had no answer anywhere on
+     this screen. An agent with a login job and one without draw the same card,
+     so the only way to find out was to restart the computer. Josh did, on
+     2026-08-22, and one of his sixteen came back.
+
+     Above the cards rather than beside them: it is a fact about the whole
+     fleet, and it is the one thing on this screen that a person cannot
+     discover by looking at it. Absent entirely when every agent has a job,
+     which is the ordinary case and must not carry a banner. -->
+<div id="restart-wrap" hidden></div>
 <div class="cards" id="grid"></div>
 <div class="alist" id="alist" hidden></div>
 <!-- ⚠️ THE ORG VIEW (#137), built from kosmos-org-view-2026-08-19.html. That
@@ -6897,7 +6907,7 @@ async function tick() {
     // grid is legitimately hidden on the agents tab whenever the list layout
     // is active, so `grid.hidden` stopped meaning "not on the agents tab".
     // `onAgentsTab()` reads boardbar, which tracks the tab and nothing else.
-    if (onAgentsTab()) paintRemoved();
+    if (onAgentsTab()) { paintRemoved(); paintSurvival(); }
   } catch (err) {
     // ⚠️ Recorded and REPAINTED, not just written into `#grid`. The picker in
     // the add-a-project flow reads these globals, that flow hides `#grid`, and
@@ -7019,7 +7029,11 @@ function showTab(tab) {
     // Projects, describing a list those screens do not show.
     const msg = document.getElementById('removed-msg');
     if (msg) msg.textContent = '';
-  } else paintRemoved();
+    /* Same reason: it describes the agents screen and must not stand under
+       Projects or Settings. */
+    const rw = document.getElementById('restart-wrap');
+    if (rw) rw.hidden = true;
+  } else { paintRemoved(); paintSurvival(); }
   PANELS.forEach((p) => { document.getElementById('panel-' + p).hidden = (p !== tab); });
   // ⚠️ Re-read on every arrival rather than once at boot. A project's folder can
   // be moved or deleted while this page sits open, and its members' states
@@ -11118,6 +11132,121 @@ function removedUnreadable() {
   const msg = document.getElementById('removed-msg');
   if (msg && !msg.textContent) msg.textContent = REMOVED_UNREADABLE_SAY;
 }
+
+/**
+ * Which of your agents come back when you restart the computer.
+ *
+ * 🛑 THE PRODUCT KNEW THIS AND DID NOT SAY IT. An agent with a login job and
+ * one without are identical on this board: same card, same dot, same
+ * everything. The difference appears once, at the next login, and by then the
+ * session that was holding the unregistered one up is gone. Josh restarted on
+ * 2026-08-22 and one of his sixteen agents came back.
+ *
+ * ⚠️ IT IS A STATE WITH A REMEDY, not a notice, so there is no dismiss. Closing
+ * it would change nothing about the machine and the sentence would still be
+ * true tomorrow — the same reason the update-reload line has one action and no
+ * Later. It goes away by being fixed.
+ *
+ * ⚠️ AND IT NAMES THEM. "12 agents" is a number a person cannot act on; the
+ * list is what lets them notice that the one they care about is or is not in
+ * it, before pressing anything.
+ */
+let SURVIVAL_BUSY = false;
+function survivalSay(n) {
+  /* Singular and plural written out rather than assembled, because "1 agents"
+     is exactly the seam this screen keeps being caught on. */
+  return n === 1
+    ? 'One of your agents will not come back if you restart this computer.'
+    : n + ' of your agents will not come back if you restart this computer.';
+}
+async function paintSurvival() {
+  const wrap = document.getElementById('restart-wrap');
+  if (!wrap) return;
+  /* ⚠️ NEVER OVER AN IN-FLIGHT REPAIR. The five-second poll would otherwise
+     replace the result list the person is reading with the question they have
+     already answered, and re-offer a button for work that is running. */
+  if (SURVIVAL_BUSY) return;
+  let body = null;
+  try {
+    const res = await fetch('/api/register', { cache: 'no-store' });
+    /* ⚠️ A failed look leaves the screen alone rather than writing "everything
+       is fine". This whole panel exists because a silence read as an all-clear,
+       and a 500 whose JSON body parses is exactly how that happens. */
+    if (!res.ok) return;
+    body = await res.json().catch(() => null);
+  } catch { return; }
+  if (!body || body.ok !== true || !Array.isArray(body.missing)) return;
+  if (!onAgentsTab()) { wrap.hidden = true; return; }
+  if (!body.missing.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
+  const names = body.missing.map((n) => esc(n)).join(', ');
+  wrap.hidden = false;
+  wrap.innerHTML = '<div class="pj-empty boardfail">'
+    + '<p><b>' + esc(survivalSay(body.missing.length)) + '</b><br>'
+    + 'Nothing on this computer starts them when you log in, so they last only '
+    + 'as long as the session they are running in. Their folders and everything '
+    + 'they remember are untouched either way.</p>'
+    + '<p class="dhint">' + names + '</p>'
+    + '<button class="btn" type="button" data-survival-fix>Set them to start at login</button>'
+    + '</div>';
+}
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-survival-fix]');
+  if (!btn) return;
+  const wrap = document.getElementById('restart-wrap');
+  SURVIVAL_BUSY = true;
+  btn.disabled = true;
+  btn.textContent = 'Setting them up…';
+  let body = null;
+  try {
+    const res = await fetch('/api/register', { method: 'POST' });
+    body = await res.json().catch(() => null);
+  } catch { body = null; }
+  if (!body || body.ok !== true || !Array.isArray(body.results)) {
+    btn.disabled = false;
+    btn.textContent = 'Set them to start at login';
+    const say = document.createElement('p');
+    say.className = 'dhint';
+    say.setAttribute('role', 'alert');
+    say.textContent = (body && body.because)
+      ? body.because
+      : 'That did not go through, and nothing was changed. Try again.';
+    btn.parentNode.appendChild(say);
+    SURVIVAL_BUSY = false;
+    return;
+  }
+  /* ⚠️ PER AGENT, never a total. "12 set up" over a run where three could not
+     be started is the shape of sentence this product keeps removing: the ones
+     that did not start are exactly the ones somebody will go looking for. */
+  const rows = body.results.map((r) => {
+    const said = r.ok
+      ? (r.started
+        ? 'starts at login, and is running now'
+        : 'starts at your next login, but we could not start it just now')
+      : (r.because || 'we could not set that one up');
+    return '<li><b>' + esc(r.name) + '</b> — ' + esc(said) + '</li>';
+  }).join('');
+  /* ⚠️ WHAT WE HAD TO ASSUME, said once and out loud. The model an agent was
+     SET to run on lived only in the job that never existed, so what goes in is
+     what it last ran as — and where even that could not be read, Claude's own
+     default. A person whose agent quietly changes model would have no way to
+     find out why. */
+  const guessed = body.results.filter((r) => r.ok && r.guessed && r.guessed.model).length;
+  wrap.innerHTML = '<div class="pj-empty boardfail">'
+    + '<p><b>Done.</b> Restarting this computer will bring these back.</p>'
+    + '<ul class="dhint">' + rows + '</ul>'
+    + (guessed
+      ? '<p class="dhint">' + esc(guessed === 1
+        ? 'One of them had no record of which model it was set to run on, so it will start on the default. You can change it on its page.'
+        : guessed + ' of them had no record of which model they were set to run on, so they will start on the default. You can change that on their pages.')
+        + '</p>'
+      : '')
+    + '</div>';
+  SURVIVAL_BUSY = false;
+  /* The board can now see them, so ask it again rather than waiting out the
+     poll: the whole point of the repair is that they are running. */
+  try { await tick(); } catch { /* the poll will get there */ }
+});
 
 async function paintRemoved() {
   const wrap = document.getElementById('removed-wrap');

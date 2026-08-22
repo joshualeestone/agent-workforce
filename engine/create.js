@@ -714,6 +714,99 @@ function binPaths(opts) {
 }
 
 /**
+ * Give an agent that already exists the launchd job it never got.
+ *
+ * 🛑 THIS EXISTS BECAUSE FIFTEEN OF JOSH'S SIXTEEN AGENTS HAD NO JOB. Measured
+ * on his machine on 2026-08-22, after the first real reboot: sixteen folders in
+ * `~/work/workers`, one plist, one session. An agent whose session is the only
+ * thing holding it up is not installed, it is merely running — and nothing
+ * anywhere said so, because a registered agent and an unregistered one draw the
+ * same card. He found out by restarting.
+ *
+ * ⚠️ IT WRITES THE SAME FILE `createAgent` WRITES, THROUGH THE SAME `plistFor`,
+ * and that is the point of it living here rather than in a repair module of its
+ * own. A second writer of this format is the defect this file's header names as
+ * its worst habit: it would drift from `plistFor` the first time an argument is
+ * added, and the drift would only show up at somebody's next login.
+ *
+ * ⚠️ WHAT IT CANNOT RECOVER, said rather than papered over. The account and the
+ * model live only in the plist, so an agent that never had one has no record of
+ * either. The model is taken from what the agent LAST RAN AS when the caller
+ * can read it, which is a live reading rather than a stored choice, and the
+ * account falls back to the default. Both travel back in the result so the
+ * caller can say so instead of implying we knew.
+ *
+ * ⚠️ IT NEVER OVERWRITES AN EXISTING JOB. A person who edited theirs by hand,
+ * or an agent whose job is merely disabled (which is what `remove` does, and it
+ * deletes nothing), must not have it silently rewritten from defaults we had to
+ * guess at.
+ */
+function installJob(name, opts) {
+  const clean = String(name == null ? '' : name);
+  if (!NAME_RE.test(clean)) {
+    return { ok: false, because: 'that is not a name this product can build a job from' };
+  }
+  if (fs.existsSync(plistPath(clean))) {
+    return { ok: false, already: true, because: 'it already has one' };
+  }
+  if (!fs.existsSync(workerDir(clean))) {
+    return { ok: false, because: 'there is no folder for it on this computer' };
+  }
+  const { claudeBin, tmuxBin } = binPaths(opts);
+  if (unusablePath(claudeBin) || unusablePath(tmuxBin)) {
+    return { ok: false, because: 'the paths this computer gave us for Claude and tmux cannot be used safely' };
+  }
+  if (!DRY_RUN && !fs.existsSync(claudeBin)) {
+    return { ok: false, because: 'we could not find Claude on this computer, so a job made now would never start' };
+  }
+  const installed = DRY_RUN ? { ok: true } : installSupervisor();
+  if (!installed.ok) {
+    return { ok: false, because: 'the startup script is missing from this installation, so the job would fail every time it ran' };
+  }
+  const modelArg = (opts && typeof opts.model === 'string' && opts.model.trim()) ? opts.model.trim() : null;
+  const configDir = (opts && typeof opts.configDir === 'string' && opts.configDir) ? opts.configDir : null;
+  try {
+    if (!DRY_RUN) {
+      fs.mkdirSync(AGENTS_DIR, { recursive: true });
+      fs.writeFileSync(plistPath(clean), plistFor(clean, claudeBin, tmuxBin, modelArg, configDir), 'utf8');
+    }
+  } catch {
+    return { ok: false, because: 'we could not write the job file' };
+  }
+  /* ⚠️ enable BEFORE bootstrap. `remove` sticks by writing a per-user `disable`
+     override keyed on the LABEL, and that override outlives the plist — so
+     bootstrapping into a standing disable succeeds and starts nothing, which
+     would report a repaired agent that never comes up. The uninstaller
+     documents the same ordering for the same reason. */
+  let started = false;
+  try {
+    run('/bin/launchctl', ['enable', `gui/${process.getuid()}/${serviceLabel(clean)}`]);
+  } catch { /* a name that was never disabled has nothing to enable */ }
+  try {
+    const r = run('/bin/launchctl', ['bootstrap', `gui/${process.getuid()}`, plistPath(clean)]);
+    started = Boolean(r && r.ok !== false);
+  } catch { started = false; }
+  /* ⚠️ THE JOB STAYS EITHER WAY, and this is the one place that differs from
+     creation's rollback. A failed bootstrap during creation leaves nothing a
+     person owns; here the agent already exists, and the file on disk is what
+     makes it come back at the NEXT login even if it could not be started now.
+     Removing it would throw away the fix to keep the report tidy. */
+  return {
+    ok: true,
+    started,
+    model: modelArg,
+    /* What we had to assume rather than read, for the caller to say out loud. */
+    guessed: {
+      model: modelArg ? null : 'we do not know which model it was set to run on, so it will start on the default',
+      account: configDir ? null : 'it will run on your main Claude account',
+    },
+    because: started
+      ? 'set up to start at every login, and started now'
+      : 'set up to start at your next login, but we could not start it just now',
+  };
+}
+
+/**
  * Make an agent, and report honestly about how far it got.
  *
  * Returns `{ outcome, because, steps }`. `steps` records each thing attempted
@@ -1465,7 +1558,12 @@ function createAgent(opts) {
 
 module.exports = {
   MODELS,
+  /* ⚠️ Exported as the ONE machine-name rule. `slugFor` only lowercases — it
+     is a converter, not a gate — so anything asking "is this a name we can
+     act on" has to reach this, or it grows a weaker second copy. */
+  NAME_RE,
   setModel,
+  installJob,
   setAccount,
   readJob,
   createAgent,

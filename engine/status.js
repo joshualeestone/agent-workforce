@@ -2340,6 +2340,12 @@ module.exports = {
   isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,
   setPaneSource, setPaneCapture, tmuxSaidNoServer, shDetail,
   PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS,
+  /* ⚠️ EXPORTED for the restart-survival repair, which has to put the model an
+     agent LAST RAN AS into a job that never recorded a choice. Exported rather
+     than copied for the reason `countAgents` is: a private second reader of a
+     transcript is the most-shipped defect in this codebase, and the two would
+     disagree the first time the synthetic-row rule below moves. */
+  readModel,
   // ⚠️ EXPORTED so `engine/chat.js` can show the person the part of the screen
   // that produced the NEEDS_YOU verdict. It is exported rather than copied for
   // the reason `countAgents` is: a private second copy is two derivations of

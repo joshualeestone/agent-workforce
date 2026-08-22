@@ -39,6 +39,7 @@ const updates = require('./engine/update');
 const { version } = require('./package.json');
 const store = require('./engine/store');
 const create = require('./engine/create');
+const register = require('./engine/register');
 const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const you = require('./engine/you');
@@ -2621,6 +2622,36 @@ const server = http.createServer((req, res) => {
     } catch (err) {
       sendJson(res, 500, { error: String((err && err.message) || 'we could not read the record') });
     }
+    return;
+  }
+  /* --- which agents survive a restart ------------------------------------- */
+  /* 🛑 THE QUESTION HAD NO ANSWER ANYWHERE. An agent with a login job and one
+     without draw exactly the same card, so the only way to find out which of
+     yours come back was to restart the computer. Josh did, on 2026-08-22, and
+     one of his sixteen came back. */
+  if (pathname === '/api/register' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, register.survey()); }
+    catch { sendJson(res, 500, { error: 'we could not check which of your agents start on their own' }); }
+    return;
+  }
+  /* ⚠️ POST, because it writes launchd jobs and starts processes. And it takes
+     NO BODY: there is nothing to choose here, and the set it acts on is exactly
+     the set the GET above reports, so the two can never describe different
+     work. A body would let a caller name an agent the survey refused. */
+  if (pathname === '/api/register' && req.method === 'POST') {
+    try {
+      /* The model each one LAST RAN AS, which is the only surviving record of
+         it: the model an agent was SET to run on lived in the job that does not
+         exist. A reading we cannot make travels as nothing, and that agent
+         comes back on Claude's own default rather than not coming back. */
+      const out = register.repair({
+        modelFor: (name) => {
+          try { const m = status.readModel(name); return (m && m.model) || null; }
+          catch { return null; }
+        },
+      });
+      sendJson(res, out.ok ? 200 : 500, out);
+    } catch { sendJson(res, 500, { error: 'we could not set your agents to start on their own' }); }
     return;
   }
   /* --- engineering mode (whether the raw session is shown) ---------------- */

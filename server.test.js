@@ -3960,8 +3960,18 @@ test('the browser-layer fixes on this branch cannot be undone silently', () => {
     // leaked one keystroke onto the board behind the backdrop.
     [/document\.activeElement === order\[order\.length - 1\]/, 'the focus trap wraps at the wrong end and leaks a keystroke behind the modal'],
     // The removed list is part of the board, so it refreshes with it.
-    [/if \(onAgentsTab\(\)\) paintRemoved\(\)/,
-     'the removed list no longer refreshes on the poll, so its count goes stale'],
+    /* ⚠️ RE-ANCHORED, not loosened. It pinned the literal one-statement form
+       `if (onAgentsTab()) paintRemoved()`, so adding a SECOND poll-driven paint
+       beside it broke a check about the first one — the pin fired on a
+       legitimate edit and said the removed list had stopped refreshing, which
+       was never true. What it is for is the GUARD and the CALL together, in
+       either order and whatever else joins them. */
+    [/onAgentsTab\(\)[^\n]*paintRemoved\(\)/,
+     'the removed list no longer refreshes on the poll behind the tab guard, so its count goes stale'],
+    // Same poll, same guard: the restart-survival panel is a fact about the
+    // whole fleet and goes stale the moment the fleet changes.
+    [/onAgentsTab\(\)[^\n]*paintSurvival\(\)/,
+     'the restart-survival panel no longer refreshes on the poll, so it can stand after a repair'],
 
     /* ---- project chat, this branch ---------------------------------------
        ⚠️ Round 13 measured that every one of these reverts with all 707

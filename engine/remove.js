@@ -174,6 +174,22 @@ function writeRemoved(list) {
   fs.renameSync(tmp, REMOVED_FILE);
 }
 
+/**
+ * The removed names, keeping "we could not read the list" as its own answer.
+ *
+ * ⚠️ `readRemoved` fails OPEN, which is right for the board (hiding agents for
+ * a reason nobody can inspect is worse than showing too many) and wrong for
+ * anything that ACTS. Registering a login job for an agent somebody removed
+ * would put it back on the board and start it, which is the single thing
+ * removal promises will not happen — so a caller that is about to act gets the
+ * failure rather than an empty list, and can refuse.
+ */
+function removedNames() {
+  const got = readRemovedForWrite();
+  if (got === UNREADABLE) return { ok: false, names: [] };
+  return { ok: true, names: got.map((r) => r.name) };
+}
+
 /** Is this agent currently removed from Kosmos? */
 function isRemoved(name) {
   const clean = create.cleanName(name);
@@ -1256,6 +1272,7 @@ module.exports = {
   remove,
   restore,
   isRemoved,
+  removedNames,
   removedAgents,
   jobFor,
   setRunner,
