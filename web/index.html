@@ -8020,8 +8020,22 @@ function bakedVersion() {
 function paintBuildLine(version) {
   const el = document.getElementById('build');
   if (!el) return;
-  const v = version || bakedVersion();
-  el.innerHTML = '<b>BETA</b> · version ' + esc(v || 'unknown');
+  /* 🛑 THE BAKED ONE WINS, and the first version of this had it backwards.
+     `version` is the poll, which is what the SERVER is running; `bakedVersion()`
+     is what this PAGE is. The question a version line answers is "what am I
+     looking at", and only the baked value knows that. Preferring the server's
+     is how Josh's line read 0.2.75 while he was looking at an older build, with
+     the number that would have told him the truth sitting right there as the
+     fallback (#271, Mona Lisa).
+     ⚠️ AND WHEN THEY DISAGREE, THE DISAGREEMENT IS THE MOST USEFUL THING ON THE
+     SCREEN. It means the page is stale and a reload fixes it, which is not
+     guessable from either number alone. Silently picking one hides the only
+     state worth reporting. */
+  const baked = bakedVersion();
+  const shown = baked || version;
+  const stale = baked && version && baked !== version;
+  el.innerHTML = '<b>BETA</b> · version ' + esc(shown || 'unknown')
+    + (stale ? ' · <b>reload for ' + esc(version) + '</b>' : '');
 }
 
 let BOARD_SEEN = false;

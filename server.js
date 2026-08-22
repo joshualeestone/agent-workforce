@@ -4014,7 +4014,18 @@ const server = http.createServer((req, res) => {
       res.end('could not read the page');
       return;
     }
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    /* 🛑 `no-store`, THE SAME AS EVERY JSON ROUTE, and its absence was invisible
+       by construction. This sent no cache header, no ETag and no
+       last-modified, which does not mean "do not cache" -- it means the
+       browser decides, and browsers keep HTML.
+       ⚠️ THE WHOLE APP IS ONE FILE, so a cached page is cached markup, CSS and
+       script together. An update lands, the installer restarts the server on
+       the new bundle, the version line reports the new number, and the person
+       goes on looking at the PREVIOUS build with no signal anywhere. Josh hit
+       exactly that: 0.2.75 on the line and the previous page on screen.
+       📌 It costs a re-read of one local file per load, which is the price of
+       an update actually arriving. (#271, Mona Lisa.) */
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     res.end(buf);
   });
 });
