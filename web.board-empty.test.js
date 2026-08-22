@@ -43,9 +43,12 @@ function lift(name) {
    restated here: a copy of the copy would go stale the day somebody edits the
    page, which is exactly the failure this file is about. */
 function boardEmpty(state) {
+  /* `esc` is lifted rather than stubbed: the failure box puts the raw reason
+     on screen, and a stub would let an escaping bug through the one branch
+     that renders a value this code did not write. */
   // eslint-disable-next-line no-new-func
   return new Function('BOARD_SEEN', 'BOARD_LOOK_FAILED',
-    lift('boardEmpty') + '\nreturn boardEmpty();')(state.seen, state.failed);
+    lift('esc') + '\n' + lift('boardEmpty') + '\nreturn boardEmpty();')(state.seen, state.failed);
 }
 
 const LOOKING = { seen: false, failed: null };
@@ -80,6 +83,11 @@ test('a look that FAILED refuses to call the board empty', () => {
   assert.ok(!/No agents yet/.test(html), 'a failed look rendered as an empty board');
   assert.ok(!/An agent is a worker/.test(html), 'a failed look offered the onboarding copy');
   assert.match(html, /data-board-retry/, 'the failure offers no way to ask again');
+  assert.match(html, /tmux is not answering/, 'the box does not say what did not answer');
+  /* The reason is a value this code did not write, so it is escaped. A raw
+     one would be the only unescaped path on the board. */
+  const evil = boardEmpty({ seen: true, failed: '<img src=x onerror=1>' });
+  assert.ok(!/<img/.test(evil), 'the failure reason reaches the page unescaped');
 });
 
 test('the three states are three different screens, not one with wording swapped', () => {

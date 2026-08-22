@@ -6657,9 +6657,15 @@ async function tick() {
     checked.className = 'checked stamp stale';
     checked.innerHTML = '<span>Agent status</span><b>could not refresh</b>';
     // Both containers: whichever layout is on screen must carry the failure.
-    const boardErr =
-      '<div class="err"><b>We cannot read the agents right now.</b><br>' +
-      'This board is not saying they are fine, it is saying we cannot see them. (' + esc(err.message) + ')</div>';
+    /* 🛑 THROUGH `boardEmpty()`, NOT A SECOND STRING WRITTEN HERE. This used
+       to build its own `.err` box, which meant the board had TWO answers to
+       "what does an empty board say" living in two places -- and the one in
+       `boardEmpty()` was DEAD, because this line always overwrote the grid
+       before anybody could reach it. Found by rendering it: the failure state
+       drew the box from here while the tests exercised the other one, so a
+       check on the unreachable branch could not have failed in production.
+       One decider. The raw reason rides the box, as it did before. */
+    const boardErr = boardEmpty();
     document.getElementById('grid').innerHTML = boardErr;
     document.getElementById('alist').innerHTML = boardErr;
     /* ⚠️ AND THE FAILURE REACHES THE THIRD VIEW TOO. Left alone it would keep
@@ -7730,7 +7736,8 @@ function boardEmpty() {
     return '<div class="pj-empty boardfail">'
       + '<p><b>We cannot read your agents right now.</b><br>'
       + 'This is not the same as having none. Something on this computer did '
-      + 'not answer, so we are not telling you the board is empty.</p>'
+      + 'not answer, so we are not telling you the board is empty. ('
+      + esc(BOARD_LOOK_FAILED) + ')</p>'
       + '<button class="btn" type="button" data-board-retry>Try again</button>'
       + '</div>';
   }
