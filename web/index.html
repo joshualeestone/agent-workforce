@@ -1774,6 +1774,13 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    dashed border is the shape of a slot waiting to be filled; "we could not
    read this" is not an empty slot, it is an unanswered question. */
 .pj-empty.boardfail { border-style: solid; border-color: var(--border-strong); }
+/* The commitments a restart would end. Not a bullet list: these are sentences
+   an agent wrote about its own work, and bullets make them read as options. */
+.rst-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.rst-list li { font-size: .9375rem; line-height: 1.5; color: var(--k-ink);
+  padding: 8px 0 8px 12px; border-left: 2px solid var(--k-rule); }
+.rst-list li + li { margin-top: 6px; }
+.rst-list:empty { display: none; }
 .pj-folder-state { font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-top: 2px; }
 .pj-folder-state.bad { color: var(--label); padding-left: var(--space-4); border-left: 2px solid var(--warn-ink); }
 .pj-members { display: flex; flex-direction: column; gap: var(--space-3); }
@@ -3542,6 +3549,40 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <button class="btn danger-btn" id="hist-del" type="button">Delete it</button>
     </div>
     <div class="fmsg" id="hist-msg" role="alert" aria-live="assertive"></div>
+  </div>
+</div>
+
+<!-- 🛑 RESTART CONFIRMS, AND THE CONFIRMATION IS THE REASON commitments.js
+     EXISTS. Its own opening line: restarting an agent kills whatever it had in
+     flight, and the fresh session reports a confident all-clear. Its purpose
+     line is blunter: "The point of this file is not to hold a list. It is to
+     make the restart confirmation incapable of lying."
+
+     ⚠️ THAT CONFIRMATION HAD NEVER BEEN DRAWN. `server.js` attaches a
+     commitment block to every agent and its comment says why, "it is that
+     value the restart confirmation needs" and "the restart dialog reads
+     these", and the page did not mention `commitments` anywhere. Engine and
+     route built for a screen nobody drew, which is the third time tonight.
+
+     🔑 ITS OWN DIALOG RATHER THAN `#rm-modal`, for that modal's own stated
+     reason: it carries removal's wording and its danger button. A restart is
+     not a removal. The machinery is the same on purpose (backdrop and Escape
+     both mean keep, focus opens on the harmless answer, two-button trap),
+     because a person should not have to learn two dialogs. -->
+<div class="rm-back" id="rst-modal" hidden>
+  <div class="rm-box" role="alertdialog" aria-modal="true"
+       aria-labelledby="rst-title" aria-describedby="rst-small">
+    <h2 class="rm-title" id="rst-title"></h2>
+    <p class="rm-small" id="rst-small"></p>
+    <!-- The list is a separate element from the sentence: it is present in two
+         of the three states and absent in the third, and an empty <ul> left in
+         the box draws a gap that reads as something failing to load. -->
+    <ul class="rst-list" id="rst-list" hidden></ul>
+    <div class="rm-acts">
+      <button class="btn" id="rst-keep" type="button">Leave it running</button>
+      <button class="btn" id="rst-go" type="button">Restart it</button>
+    </div>
+    <div class="fmsg" id="rst-msg" role="alert" aria-live="assertive"></div>
   </div>
 </div>
 
@@ -11135,14 +11176,136 @@ function noteFor(btn) {
   return named || (btn.parentNode && btn.parentNode.querySelector('.instr-restart-note'));
 }
 
-document.addEventListener('click', async (e) => {
+/**
+ * What a restart would cost, in the agent's own words, and the three answers.
+ *
+ * 🛑 "NOTHING TO LOSE" IS ONLY HONEST WHEN THE AGENT SAID SO RECENTLY.
+ * `commitments.js` is explicit about this and it is the whole design: the
+ * record decays after thirty minutes rather than persisting, because the agent
+ * has been running since it last spoke, so an old empty list is not a claim
+ * about now. `clear` is EARNED. `unknown` covers never-reported, stale,
+ * future-dated and untied, and rendering any of those as "nothing pending"
+ * would be the confident all-clear the whole file exists to prevent.
+ *
+ * ⚠️ AND `unknown` STILL CARRIES A LIST sometimes. A stale record keeps its
+ * commitments deliberately: "these three were pending 40 minutes ago" is far
+ * more useful at 3am than an empty array, as long as the state says we cannot
+ * vouch for it. So the list is shown and the sentence does the disclaiming.
+ */
+function restartCost(shown, rec) {
+  /* ⚠️ THE SHAPE IS CHECKED, NOT JUST THE WORD. `state: 'clear'` arriving on a
+     record whose `commitments` is not an array is a record we do not
+     understand, and believing the word while ignoring the shape is how a
+     truthy field becomes an answer. The one claim in this dialog that must
+     never be made loosely is "nothing pending", so it is the one that requires
+     the record to be well formed. Everything else falls to unknown, which is
+     the safe direction here: a person who is told we cannot tell loses a few
+     seconds, and a person told there is nothing pending loses work. */
+  const wellFormed = Boolean(rec) && Array.isArray(rec.commitments);
+  const list = wellFormed ? rec.commitments : [];
+  const state = wellFormed && typeof rec.state === 'string' ? rec.state : 'unknown';
+  if (state === 'holding' && list.length) {
+    return {
+      small: shown + ' says it is part way through '
+        + (list.length === 1 ? 'one thing' : list.length + ' things')
+        + '. Restarting ends them, and it will not pick them up again.',
+      list,
+    };
+  }
+  if (state === 'clear' && list.length === 0) {
+    return { small: shown + ' says it is not part way through anything.', list: [] };
+  }
+  /* The engine's own sentence for why it cannot vouch, never one written here:
+     it distinguishes never-reported from stale from untied, and those are
+     different facts a person weighs differently. */
+  const because = (rec && rec.because) || 'we have not heard from it';
+  return {
+    small: 'We cannot tell what ' + shown + ' is part way through, because '
+      + because + '. Restarting ends anything it had in flight.',
+    list,
+  };
+}
+
+let RST_FOR = null;      // the button that opened it, so the receipt lands there
+let RST_RETURN = null;   // focus goes back where it came from
+
+function openRestartModal(btn, name) {
+  const card = (LAST || []).find((a) => a && a.sessionName === name) || CURRENT;
+  const shown = (card && (card.name || card.displayName)) || name;
+  const cost = restartCost(shown, card && card.commitments);
+  document.getElementById('rst-title').textContent = 'Restart ' + shown + '?';
+  document.getElementById('rst-small').textContent = cost.small;
+  const ul = document.getElementById('rst-list');
+  ul.innerHTML = cost.list.map((c) => '<li>' + esc(typeof c === 'string' ? c : (c && c.text) || '') + '</li>').join('');
+  ul.hidden = cost.list.length === 0;
+  document.getElementById('rst-msg').textContent = '';
+  const go = document.getElementById('rst-go');
+  go.disabled = false;
+  go.textContent = 'Restart ' + shown;
+  RST_FOR = btn;
+  RST_RETURN = btn;
+  document.getElementById('rst-modal').hidden = false;
+  /* ⚠️ LEAVING IT RUNNING TAKES FOCUS, the same rule as the removal dialog:
+     Enter or space on an unaimed modal must land on the harmless answer. */
+  document.getElementById('rst-keep').focus();
+}
+
+function closeRestartModal() {
+  document.getElementById('rst-modal').hidden = true;
+  RST_FOR = null;
+  if (RST_RETURN && RST_RETURN.focus) RST_RETURN.focus();
+  RST_RETURN = null;
+}
+
+document.getElementById('rst-keep').addEventListener('click', closeRestartModal);
+/* Backdrop and Escape both mean leave it running. Every accidental dismissal
+   lands on the harmless answer, which is what makes the dialog safe to be
+   loud. */
+document.getElementById('rst-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'rst-modal') closeRestartModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('rst-modal').hidden) closeRestartModal();
+});
+/* Focus stays in the dialog while it is open, and the ends are the buttons that
+   can actually TAKE focus: a disabled one is not in the tab order, and treating
+   it as an end leaks a Tab to the board behind an `aria-modal` that promises
+   otherwise. Both facts are the removal dialog's, learned there first. */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const box = document.getElementById('rst-modal');
+  if (box.hidden) return;
+  const reachable = [document.getElementById('rst-keep'), document.getElementById('rst-go')]
+    .filter((el) => !el.disabled);
+  if (!reachable.length) return;
+  const order = e.shiftKey ? reachable.slice().reverse() : reachable;
+  const inside = box.contains(document.activeElement);
+  if (!inside || document.activeElement === order[order.length - 1]) {
+    e.preventDefault();
+    order[0].focus();
+  }
+});
+
+/* 🔑 BOTH ENTRY POINTS CONFIRM. The stale-instructions notice and the panel
+   control lose the same thing, so a dialog on one of them only would mean the
+   older path stayed able to end an agent's in-flight work silently. */
+document.addEventListener('click', (e) => {
   const btn = e.target.closest && e.target.closest('[data-restart-agent]');
   if (!btn) return;
   const name = btn.dataset.restartAgent;
   if (!name) return;
-  btn.disabled = true;
-  const was = btn.textContent;
-  btn.textContent = 'Restarting…';
+  openRestartModal(btn, name);
+});
+
+document.getElementById('rst-go').addEventListener('click', async () => {
+  const btn = RST_FOR;
+  const name = btn && btn.dataset.restartAgent;
+  if (!name) return;
+  const go = document.getElementById('rst-go');
+  go.disabled = true;
+  const wasGo = go.textContent;
+  go.textContent = 'Restarting…';
   try {
     const res = await fetch('/api/agent/' + encodeURIComponent(name) + '/restart', { method: 'POST' });
     const out = await res.json().catch(() => null);
@@ -11150,16 +11313,20 @@ document.addEventListener('click', async (e) => {
       /* The engine's own sentence, which distinguishes "we could not close its
          window" from "launchd refused" -- different facts a person acts on
          differently. */
-      btn.textContent = was;
-      btn.disabled = false;
-      /* ⚠️ BY ID WHEN THE BUTTON NAMES ONE. The sibling lookup below is right
+      go.textContent = wasGo;
+      go.disabled = false;
+      /* 🛑 THE REFUSAL STAYS IN THE DIALOG rather than closing onto the page
+         behind it. `remove.js` refuses a restart with a sentence that names
+         the reason and the remedy, and closing first would put that sentence
+         on a surface the person has already looked away from.
+         ⚠️ BY ID WHEN THE BUTTON NAMES ONE. The sibling lookup below is right
          for the stale notice, where the button and its note share a parent; it
          finds NOTHING for the detail-page control, whose button sits inside a
          `.frow`. A failure that lands nowhere is worse here than on the notice,
          because that box disappears on success and this one does not, so
          silence is the same picture as either outcome. */
-      const note = noteFor(btn);
-      if (note) note.textContent = (out && (out.because || out.error)) || 'We could not restart it.';
+      document.getElementById('rst-msg').textContent =
+        (out && (out.because || out.error)) || 'We could not restart it.';
       return;
     }
     /* ⚠️ NO SUCCESS SENTENCE ON THE NOTICE, AND ONE ON THE PANEL, which is the
@@ -11171,12 +11338,13 @@ document.addEventListener('click', async (e) => {
        owed wherever the screen does not provide one by changing. */
     const done = noteFor(btn);
     if (done) done.textContent = 'Restarted. It starts fresh, so it will look idle until you say something to it.';
-    btn.textContent = was;
-    btn.disabled = false;
+    go.textContent = wasGo;
+    closeRestartModal();
     await tick();
   } catch {
-    btn.textContent = was;
-    btn.disabled = false;
+    go.textContent = wasGo;
+    go.disabled = false;
+    document.getElementById('rst-msg').textContent = 'We could not reach Kosmos to restart it.';
   }
 });
 
