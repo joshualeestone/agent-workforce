@@ -140,4 +140,11 @@ test('the consequence is named before the click, not after it', () => {
   assert.ok(hintAt < btnAt, 'the consequence is stated after the button rather than before it');
   assert.match(block, /instructions and its files are untouched/,
     'the sentence names what is lost without naming what is kept');
+  /* ⚠️ MEMORY ALONE READS AS CONTEXT. What a person actually loses is anything
+     the agent agreed to and has not done, which they read as "the thing I
+     asked it to do". The clause is general and claims nothing about whether
+     there IS anything pending, which is the dialog's job; it exists so the
+     hint and the dialog use one vocabulary (Mona Lisa, #259). */
+  assert.match(block, /anything it was part way through ends/,
+    'the hint names only memory, which reads as losing context rather than losing work');
 });
