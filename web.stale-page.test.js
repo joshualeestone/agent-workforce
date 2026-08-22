@@ -34,7 +34,7 @@ function built(baked, polled) {
   };
   // eslint-disable-next-line no-new-func
   new Function('document', 'esc', 'POLLED',
-    page.lift(SCRIPT, 'bakedVersion') + '\n' + page.lift(SCRIPT, 'paintBuildLine')
+    page.liftAll(SCRIPT, ['bakedVersion', 'pageIsStale', 'paintBuildLine'])
     + '\npaintBuildLine(POLLED);')(doc, (x) => String(x), polled);
   return html;
 }

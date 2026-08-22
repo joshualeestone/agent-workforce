@@ -754,7 +754,12 @@ function installJob(name, opts) {
   }
   const { claudeBin, tmuxBin } = binPaths(opts);
   if (unusablePath(claudeBin) || unusablePath(tmuxBin)) {
-    return { ok: false, because: 'the paths this computer gave us for Claude and tmux cannot be used safely' };
+    return { ok: false, /* ⚠️ NEITHER BINARY IS NAMED, and `tmux` least of all (Mona Lisa). A person
+       who installed Kosmos has no reason to have heard the word, and it cost a
+       real diagnostic step this morning: Josh was sent `tmux ls` and got
+       command not found, because Kosmos ships its own copy and never touches
+       the machine's. Their action is identical either way. */
+      because: 'we could not use the programs Kosmos runs agents with, so nothing was changed' };
   }
   if (!DRY_RUN && !fs.existsSync(claudeBin)) {
     return { ok: false, because: 'we could not find Claude on this computer, so a job made now would never start' };
