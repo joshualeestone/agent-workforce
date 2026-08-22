@@ -2226,6 +2226,23 @@ svg { display: block; }
 .panel p.shint { margin: 6px 0 0; font-size: .8125rem; line-height: 1.45;
                  color: var(--k-ink-2); }
 .shint { margin: 6px 0 0; font-size: .8125rem; line-height: 1.45; color: var(--k-ink-2); }
+
+/* The create form's "More models" disclosure (#202).
+   ⚠️ ON EXISTING TOKENS ONLY. Every colour here is a var that already has a
+   dark value, so `tools/sync-forced-theme.js` has nothing to generate and the
+   forced-theme picker cannot fall out of step with the media query. A literal
+   colour in this block would need a matching rule in two other places. */
+.smore { margin: 10px 0 0; font-size: .8125rem; }
+.smore > summary { cursor: pointer; color: var(--k-ink-2); line-height: 1.45;
+                   border-radius: 6px; padding: 2px 4px; margin-left: -4px;
+                   width: fit-content; }
+.smore > summary:hover { color: var(--k-ink); }
+/* A focus ring on the summary, because it IS the control and a disclosure
+   somebody can reach by keyboard but cannot see focused fails AA (2.4.7). */
+.smore > summary:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
+.smore ul { list-style: none; margin: 6px 0 0; padding: 0 0 0 4px; }
+.smore li { color: var(--k-ink-2); line-height: 1.7; }
+.smore-t { margin: 10px 0 0 4px; color: var(--k-ink-2); font-weight: 600; }
 code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          background: color-mix(in srgb, var(--k-ink) 7%, transparent); }
 
@@ -3889,6 +3906,38 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <div class="frow">
         <select id="create-model"></select>
       </div>
+      <!-- ⚠️ THIS SENTENCE WAS BLOCKED AND THE BLOCK WENT STALE. It was held
+           back because the agent's own page had no model control, so a promise
+           made here was one the next screen contradicted. That page now carries
+           a model picker with a Change button and the route behind it, so the
+           sentence is simply true. -->
+      <p class="shint">You can change this later.</p>
+      <!-- 🔑 CLOSED DISCLOSURE RATHER THAN GREYED ROWS, and the difference is
+           the point. Greyed options invite a click and then refuse, which is
+           the treatment this product does not give anything a person might
+           reach for. A closed disclosure says there is more here without
+           offering anything that cannot be taken.
+
+           ⚠️ ONE OF THESE LINES HAS A TIMER ON IT. The list describes what an
+           agent can be CREATED on, which is not the same as what the engine can
+           read: a session reader for another provider can land well before
+           creation does. Whoever wires a second provider into the create path
+           updates this list in the same change, because the failure direction
+           here is understating the product on the screen where somebody is
+           choosing. -->
+      <details class="smore">
+        <summary>More models</summary>
+        <ul>
+          <li>Gemini, Google &middot; coming soon</li>
+          <li>GPT, OpenAI &middot; coming soon</li>
+        </ul>
+        <p class="smore-t">Runs on this computer</p>
+        <ul>
+          <li>Llama, Meta &middot; coming soon</li>
+          <li>Qwen, Alibaba &middot; coming soon</li>
+          <li>Mistral &middot; coming soon</li>
+        </ul>
+      </details>
     </div>
 
     <!-- ⚠️ HIDDEN WHEN THERE IS ONLY ONE ACCOUNT, which is most machines. A
