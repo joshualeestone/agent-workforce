@@ -1931,8 +1931,17 @@ if mkdir -p "$_launch_dir" 2>/dev/null && cat > "$_board_plist.new" <<PLIST
   <key>AssociatedBundleIdentifiers</key>
   <array><string>com.chaoskosmos.kosmos</string></array>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>$(_xmlq "$KOSMOS_HOME/logs/login.log")</string>
-  <key>StandardErrorPath</key><string>$(_xmlq "$KOSMOS_HOME/logs/login.log")</string>
+  <!-- 🔑 THE SAME FILE THE BOARD ITSELF WRITES TO, and it was a second one.
+       `kosmos start` sends the server's own output to logs/board.log; this job
+       captures the narration of the SCRIPT that starts it. Two destinations,
+       nothing on the machine saying which, and the person debugging is the
+       least likely to know: Josh tailed board.log on 2026-08-22 looking for the
+       reason his board could not read his agents, found six startup lines and
+       no error, and reasonably read that as "it is not logging anything".
+       ⚠️ Both append, so one file carries the start and what the start did, in
+       order. That ordering is the thing a second file destroys. -->
+  <key>StandardOutPath</key><string>$(_xmlq "$KOSMOS_HOME/logs/board.log")</string>
+  <key>StandardErrorPath</key><string>$(_xmlq "$KOSMOS_HOME/logs/board.log")</string>
 </dict>
 </plist>
 PLIST

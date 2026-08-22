@@ -85,6 +85,13 @@ test('the job carries what launchd does not set', () => {
   assert.match(block, /<key>LANG<\/key><string>en_US\.UTF-8<\/string>/);
   assert.match(block, /<key>PATH<\/key>/);
   assert.match(block, /<key>KOSMOS_PORT<\/key>/);
+  /* 🔑 ONE LOG FILE, and there were two. `kosmos start` sends the server's own
+     output to board.log; this job captures the narration of the script that
+     starts it, and it went to a second file nothing named. Josh tailed board.log
+     on 2026-08-22 looking for why his board could not read his agents, found six
+     startup lines and no error, and reasonably read that as not logging. */
+  assert.match(block, /StandardOutPath[^\n]*logs\/board\.log/);
+  assert.ok(!/login\.log/.test(block), 'the login job writes to a second log file again');
   /* ⚠️ RunAtLoad and deliberately no KeepAlive: `kosmos start` daemonises and
      exits, so KeepAlive would relaunch it the moment it returned. */
   assert.match(block, /<key>RunAtLoad<\/key><true\/>/);
