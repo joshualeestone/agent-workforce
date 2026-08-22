@@ -30,6 +30,13 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+/* ⚠️ THE REASONS A PERSON READS ARE SHARED WITH THE CLAUDE PATH, never written
+   here. A reason is about the AGENT, not about the runtime underneath it, so
+   both providers say the same sentence about the same condition -- and nobody
+   can tell which provider an agent runs on from an error message. See
+   NO_READING's own note in status.js. (Mona Lisa's principle for the whole
+   OpenAI phase.) */
+const { NO_READING } = require('./status');
 
 /** Overridable so tests never read the operator's real Codex history. */
 const HOME = () => process.env.AGENT_WORKFORCE_CODEX_HOME
@@ -111,10 +118,10 @@ function forWorkdir(dir) {
  */
 function read(dir) {
   const found = forWorkdir(dir);
-  if (!found) return { found: false, because: 'Codex has not recorded a session in that folder' };
+  if (!found) return { found: false, because: NO_READING.NO_TRANSCRIPT };
   let lines = [];
   try { lines = fs.readFileSync(found.file, 'utf8').split('\n'); } catch {
-    return { found: false, because: 'we could not read that session' };
+    return { found: false, because: NO_READING.UNREADABLE };
   }
   let contextWindow = null;
   let lastAt = null;

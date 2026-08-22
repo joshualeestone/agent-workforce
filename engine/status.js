@@ -70,6 +70,26 @@ function configRoots() {
 
 // How the value was arrived at. The UI renders low-confidence values
 // differently, and never renders `none` as a real number.
+/**
+ * The sentences a person reads when we cannot see what an agent has been doing.
+ *
+ * 🔑 ONE SET, SHARED BY EVERY PROVIDER, and that is the point rather than tidiness.
+ * A reason is about the AGENT, not about the runtime underneath it: "we cannot
+ * find a transcript for it" is equally true of a Claude agent and a Codex one,
+ * in the same words. The moment the two paths phrase it differently, the board
+ * speaks two dialects about one fact and a person can tell which provider an
+ * agent runs on from an ERROR MESSAGE.
+ *
+ * ⚠️ AND NO PRODUCT NAME BELONGS IN THEM. Somebody chose a provider on one
+ * screen an hour ago; they did not sign up to learn what Codex calls its files.
+ * The Claude path has never said "Claude" here either, and that was not an
+ * accident. (Mona Lisa, on the OpenAI phase: the principle, not a copy nit.)
+ */
+const NO_READING = {
+  NO_TRANSCRIPT: 'we cannot find a transcript for it',
+  UNREADABLE: 'could not read the transcript',
+};
+
 const CONFIDENCE = {
   STRUCTURED: 'structured', // read from a file written for this purpose
   SCRAPED: 'scraped',       // read off a terminal pane; may be UI chrome
@@ -1681,7 +1701,7 @@ function readContext(agentName, model, exactSession) {
                because: 'it has not done anything yet' };
     }
     return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false,
-             because: 'we cannot find a transcript for it' };
+             because: NO_READING.NO_TRANSCRIPT };
   }
   const { text, whole } = tailBytes(file);
   // ⚠️ `text === null` AND `text === ''` ARE NOT THE SAME ANSWER, and `if
@@ -1690,7 +1710,7 @@ function readContext(agentName, model, exactSession) {
   // transcript is in the instant Claude Code opens it. So the newest agent on
   // the machine was reported as one we could not read.
   if (text === null) {
-    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: 'could not read the transcript' };
+    return { tokens: null, percent: null, confidence: CONFIDENCE.NONE, notYet: false, because: NO_READING.UNREADABLE };
   }
   if (text === '') {
     // ⚠️ AN EMPTY FILE IS NOT EVIDENCE THE AGENT IS NEW. It is evidence about
@@ -2314,6 +2334,7 @@ function countAgents(agents, unreadableLines) {
 // reporting from the wrong session. One derivation, shared, rather than a
 // second copy that can drift.
 module.exports = {
+  NO_READING,
   countAgents, snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs,
   rank, paneOrder, modelDisplayName, readIdentity, transcriptFor,
   isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,

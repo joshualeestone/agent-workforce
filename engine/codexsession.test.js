@@ -95,7 +95,8 @@ test('a folder Codex has never run in is NOT an error', () => {
   /* ⚠️ The distinction the Claude reader learned the hard way: "has not started
      yet" and "something is wrong" are different facts, and a brand-new agent
      sitting at its prompt must not be told its session could not be read. */
-  assert.match(r.because, /has not recorded a session/);
+  assert.equal(r.because, require('./status').NO_READING.NO_TRANSCRIPT,
+    'the Codex path invented its own words for a condition the Claude path already names');
 });
 
 test('the newest session wins when a folder has several', () => {
@@ -140,4 +141,32 @@ test('a file that is not a session_meta at all is skipped, not guessed at', () =
     JSON.stringify({ type: 'event_msg', payload: {} }) + '\n');
   // The newest-first scan meets this one first and must not crash or claim it.
   assert.equal(codex.read(WORKDIR).found, true);
+});
+
+test('both providers say the SAME sentence about the same condition', () => {
+  /**
+   * 🔑 A PERSON MUST NOT BE ABLE TO TELL WHICH PROVIDER AN AGENT RUNS ON FROM
+   * AN ERROR MESSAGE. The reasons are about the AGENT, not the runtime, and the
+   * moment the two paths phrase one condition differently the board speaks two
+   * dialects about one fact. (Mona Lisa's principle for the whole OpenAI phase,
+   * not a copy nit.)
+   *
+   * ⚠️ ASSERTED AS A SHARED SOURCE rather than by comparing two string
+   * literals, because two literals that happen to match today drift the first
+   * time somebody edits one of them -- which is exactly the failure this is
+   * for.
+   */
+  const status = require('./status');
+  const src = fs.readFileSync(nodePath.join(__dirname, 'codexsession.js'), 'utf8');
+  assert.ok(src.includes("require('./status')"), 'the Codex path stopped sharing the reasons');
+  for (const key of Object.keys(status.NO_READING)) {
+    assert.ok(src.includes('NO_READING.' + key), 'NO_READING.' + key + ' is no longer used by the Codex path');
+  }
+  /* 🛑 AND NO PRODUCT NAME IN A REASON. Somebody chose a provider on one screen
+     an hour ago; they did not sign up to learn what Codex calls its files. */
+  const reasons = [...src.matchAll(/because: '([^']+)'/g)].map((m) => m[1]);
+  for (const r of reasons) {
+    assert.ok(!/codex|claude|openai|anthropic/i.test(r),
+      'a reason names the runtime: ' + JSON.stringify(r));
+  }
 });
