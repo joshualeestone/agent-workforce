@@ -2065,11 +2065,22 @@ const server = http.createServer((req, res) => {
                  reply written by an agent would have rendered as the person's
                  own words. Absent `from` still means the operator, which is
                  what every file already on disk carries. */
+              /* 🛑 `project` IS THE SLUG AND `projectName` IS THE NAME, on
+                 EVERY row shape. This one used to put `pr.name` in `project`,
+                 so the same field name carried two different things inside one
+                 payload: the slug on post and valve rows, the name here. It
+                 rendered correctly and nothing was wrong on screen. It is the
+                 shape that produces a wrong-room sentence the day somebody
+                 reads one row's `project` and assumes the other's meaning, and
+                 that day arrives when a person is looking at a conversation
+                 trying to work out which room it came from. Both ride now, and
+                 the pair matches the split `messages.js` and the post row
+                 already use. */
               rows.push({
                 kind: m.from ? 'message' : 'operator',
                 from: m.from || null,
                 to: m.from ? null : name,
-                at: m.at, text: m.text, project: pr.name,
+                at: m.at, text: m.text, project: pr.id, projectName: pr.name,
                 state: (m.delivery && m.delivery.state) || null,
                 because: (m.delivery && m.delivery.because) || null,
               });

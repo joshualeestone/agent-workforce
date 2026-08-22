@@ -6066,7 +6066,21 @@ test('the conversation route merges the project threads and the a2a record into 
     assert.ok(colleagueAt < operatorAt && operatorAt < valveAt,
       'the merge is not in time order: ' + kinds.join(' '));
     const op = data.rows[operatorAt];
-    assert.equal(op.project, 'Convo Proof', 'the operator row lost which project it was said on');
+    /* ⚠️ BOTH FIELDS, AND THE SPLIT IS THE POINT. `project` used to hold the
+       NAME on this row shape and the SLUG on post and valve rows, in one
+       payload. Nothing rendered wrong; it is the shape that produces a
+       wrong-room sentence the day somebody reads one row's `project` and
+       assumes the other's meaning, on the screen whose whole job is telling
+       you which room a message came from. */
+    assert.equal(op.projectName, 'Convo Proof', 'the operator row lost the project NAME a person reads');
+    assert.ok(op.project && op.project !== 'Convo Proof',
+      'the operator row still carries the name in the id field: ' + op.project);
+    /* And the sibling rows agree, so the pair means one thing everywhere. */
+    const postRow = data.rows.find((r) => r.kind === 'post');
+    if (postRow) {
+      assert.ok(!postRow.project || postRow.project !== postRow.projectName,
+        'a post row carries the name in its id field too, so the split is not real');
+    }
     assert.ok(data.total >= 3, 'the total does not carry what the tail may have dropped');
   } finally {
     try { fs.rmSync(messagesEngine.LOG, { force: true }); } catch { /* clean */ }
