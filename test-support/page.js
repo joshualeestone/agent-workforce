@@ -67,8 +67,15 @@ function lift(script, name) {
      records: a sibling whose name merely STARTS with the wanted one silently
      captures the extractor. The trailing paren is what makes `tick` not match
      `tickLine`. */
-  const at = script.indexOf('function ' + name + '(');
+  let at = script.indexOf('function ' + name + '(');
   assert.ok(at > -1, name + ' vanished from the page');
+  /* 🛑 `async` IS PART OF THE DECLARATION AND WAS BEING SLICED OFF. The anchor
+     is `function <name>(`, so lifting an async page function returned a plain
+     one — and `new Function` then threw "await is only valid in async
+     functions", which reads like a mistake in the TEST rather than in the
+     extractor. Every await-using function on this page is unliftable until
+     this line exists. */
+  if (script.slice(Math.max(0, at - 6), at) === 'async ') at -= 6;
 
   let parens = 0; let bodyAt = -1;
   for (let k = script.indexOf('(', at); k < script.length; k += 1) {
