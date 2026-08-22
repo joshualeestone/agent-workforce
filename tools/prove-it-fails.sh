@@ -35,13 +35,33 @@ fi
 
 # Which files the expression touches is not knowable, so the whole tree is
 # restored — safe precisely because the tree was clean a moment ago.
+#
+# ⚠️ THE FILE LIST INCLUDES SHELL, AND IT DID NOT UNTIL 2026-08-22. It globbed
+# `*.js` and `*.html` only, so `install/setup.sh` — the file a stranger's whole
+# first impression runs through — was UNPROVABLE. Every mutation aimed at it
+# reported "the mutation did not apply", which reads as a badly written
+# expression rather than as a hole in the tool, and the two guards written for
+# it that night were covered by tests that READ the file with nothing ever
+# showing they could fail.
+# 📌 `install/kosmos` is named explicitly because it carries no extension: the
+# launcher is shell, it holds one of the three copies of the default port, and
+# a glob by suffix cannot see it. A list that misses a file silently is the
+# same defect one level up.
+#
+# 🛑 AND A MUTATION IN SHELL CANNOT BE PROVED BY THE NODE SUITE. `yarn test`
+# never executes setup.sh; what covers it is `tools/test-install.sh`, which
+# really installs. So a shell mutation must name that file as its test target,
+# and it takes minutes rather than seconds. The tool does not enforce which
+# runner you point it at — it cannot know — but the trap is worth stating: a
+# shell break "proved" against a node test file goes green for the same reason
+# the mutation used to not apply at all.
 before="$(git rev-parse HEAD)"
 echo "── $LABEL"
 node -e "
 const fs = require('node:fs');
 const paths = process.argv.slice(1);
 for (const f of paths) { let s = fs.readFileSync(f, 'utf8'); const was = s; ${EXPR}; if (s !== was) fs.writeFileSync(f, s); }
-" $(git ls-files '*.js' '*.html' | tr '\n' ' ') 2>/dev/null
+" $(git ls-files '*.js' '*.html' '*.sh' 'install/kosmos' | tr '\n' ' ') 2>/dev/null
 
 if git diff --quiet; then
   echo "    ⚠️  THE MUTATION DID NOT APPLY — nothing changed, so nothing was proven."
