@@ -69,6 +69,36 @@ if git diff --quiet; then
 fi
 git diff --stat | tail -1 | sed 's/^/    changed: /'
 
+# 🛑 A SHELL MUTATION CANNOT BE PROVED BY THE NODE SUITE, and this refuses
+# rather than leaving it to a person to remember. `yarn test` never executes
+# install/setup.sh or install/kosmos: it reads them, at most. So a break in
+# shell "proved" against a .test.js file goes GREEN for the same reason the
+# mutation used to not apply at all — the runner never touched the changed
+# bytes — and a green run is read as "the guard held", which is the exact
+# inversion this tool exists to prevent.
+#
+# ⚠️ REFUSAL RATHER THAN A WARNING. A warning printed above a green result is
+# read as a green result; the whole point of this tool is that its output is
+# trusted. Splinter's line when the glob was widened: the enforcement was "a
+# person knowing", which is the thing we had spent the evening replacing.
+#
+# 📌 It restores first, so a refusal never leaves the tree broken.
+_changed_shell="$(git diff --name-only | grep -E '\.sh$|^install/kosmos$' || true)"
+case "$TESTFILE" in
+  *.test.js)
+    if [ -n "$_changed_shell" ]; then
+      echo "    🛑 THIS MUTATION CHANGED SHELL, AND $TESTFILE CANNOT EXECUTE IT."
+      echo "$_changed_shell" | sed 's/^/       changed: /'
+      echo "       yarn test never runs these files, so a green result here would"
+      echo "       mean the runner did not touch the break, not that a guard held."
+      echo "       Point it at tools/test-install.sh (minutes, it really installs)."
+      git checkout -q -- .
+      echo "    restored"
+      exit 1
+    fi
+    ;;
+esac
+
 # 🛑 THREE OUTCOMES, AND THE THIRD IS THE ONE THIS TOOL GOT WRONG FIRST.
 # Pointed at a test file that does not exist, the original printed "restored"
 # and nothing else — indistinguishable from "the mutation fired no test". The
