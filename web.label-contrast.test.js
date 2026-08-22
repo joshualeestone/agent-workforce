@@ -125,3 +125,44 @@ test('label-3 still recedes, which is the reason it exists', () => {
   assert.ok(r2 > r3 * 1.4,
     'label-3 (' + r3.toFixed(2) + ') has crept up to label-2 (' + r2.toFixed(2) + '), so the level stopped meaning anything');
 });
+
+/**
+ * The Settings status glyphs, which are decorative and still have to be seen.
+ *
+ * 🛑 THE ARIA WAS THE DEFECT AND THE RATIO WAS THE SYMPTOM. Every row's title
+ * states its own state in words, so the tick carries nothing the sentence does
+ * not, and exposing it made a screen reader say the glyph and then the sentence
+ * meaning the same thing. It is `aria-hidden` now, which is what makes the 3:1
+ * graphical floor the right one rather than the 4.5 text floor.
+ *
+ * ⚠️ AND THE FIX IS LIGHT-ONLY, WHICH IS THE PART WORTH GUARDING. On the tint
+ * over white the brand gold is 2.78; at 85% it is 3.74. On the same tint over
+ * the dark surface the brand gold is already 4.67 and that same 85% value is
+ * 3.47. One colour cannot serve both grounds, and shipping the light fix
+ * globally would have been a regression wearing an accessibility fix's clothes.
+ * A test that checked only light would have passed on exactly that mistake.
+ */
+test('the Settings status glyph clears 3:1 in BOTH themes, on the ground each sits on', () => {
+  const tick = { light: colour('#9c741b'), dark: colour('#b88920') };
+  const tint = { r: 184, g: 137, b: 32, a: 0.13 };
+  const ground = { light: over(tint, hex('#ffffff')), dark: over(tint, hex('#17191c')) };
+
+  for (const theme of ['light', 'dark']) {
+    const r = ratio(tick[theme], ground[theme]);
+    assert.ok(r >= 3, theme + ' status glyph is ' + r.toFixed(2) + ', below the 3:1 floor for a graphical indicator');
+  }
+  /* 🔑 THE CROSS-CHECK THAT CATCHES THE GLOBAL FIX. Each theme's value must be
+     the better one FOR ITS OWN GROUND, or somebody has applied one everywhere. */
+  assert.ok(ratio(tick.light, ground.light) > ratio(tick.dark, ground.light),
+    'the dark glyph colour reads better on the LIGHT ground, so the two are the wrong way round');
+  assert.ok(ratio(tick.dark, ground.dark) > ratio(tick.light, ground.dark),
+    'the light glyph colour reads better on the DARK ground, so the light fix was applied globally');
+
+  /* Both declarations are really in the page, so the numbers above are about
+     the product rather than about this file. */
+  assert.match(PAGE, /\.chk\.ok \.chk-m[^}]*color:\s*#9c741b/, 'the light glyph colour is not declared');
+  assert.match(PAGE, /@media \(prefers-color-scheme: dark\)[^}]*\{[^]*?\.chk\.ok \.chk-m[^}]*var\(--gold-deep\)/,
+    'the dark restoration is gone, so dark inherits the light darkening');
+  assert.match(PAGE, /class="chk-m" aria-hidden="true"/,
+    'the glyph is exposed again, so it is announced beside a sentence that already says it');
+});

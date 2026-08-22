@@ -1111,9 +1111,25 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .chk + .chk { border-top: 1px solid var(--k-rule); }
 .chk-m { width: 26px; height: 26px; border-radius: 8px; flex: 0 0 26px; display: grid; place-items: center;
          font-size: .875rem; font-weight: 700; border: 1px solid var(--k-rule); }
-.chk.ok .chk-m   { background: rgba(184,137,32,.13); border-color: rgba(184,137,32,.4); color: var(--gold-deep); }
-.chk.att .chk-m  { background: rgba(184,137,32,.13); border-color: rgba(184,137,32,.45); color: var(--gold-deep); }
+/* ⚠️ A DARKER GOLD IN LIGHT ONLY, and the "only" is the whole care. On the 13%
+   gold tint over white the brand gold measures 2.78, which misses even the 3:1
+   floor a status glyph would need; at 85% it is 3.74. In DARK the same colour
+   sits on that tint over #17191c and already measures 4.67, and darkening it
+   there would take it DOWN to 3.47. One value cannot serve both grounds, and
+   applying the light fix globally would have been a regression dressed as an
+   accessibility fix. The dark block below puts the brand gold back.
+   📌 Scoped to `.chk-m` rather than moved at the token: `--gold-deep` is brand
+   and this is one use of it. */
+.chk.ok .chk-m   { background: rgba(184,137,32,.13); border-color: rgba(184,137,32,.4); color: #9c741b; }
+.chk.att .chk-m  { background: rgba(184,137,32,.13); border-color: rgba(184,137,32,.45); color: #9c741b; }
 .chk.unk .chk-m  { background: rgba(20,22,26,.04); color: var(--k-ink-2); }
+
+/* The brand gold comes back in dark, where the light darkening would hurt.
+   Measured: brand gold on the tint over #17191c is 4.67; the light value
+   #9c741b is 3.47 there. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chk.ok .chk-m, :root:not([data-theme="light"]) .chk.att .chk-m { color: var(--gold-deep); }
+}
 .chk-t { font-size: 1rem; font-weight: 600; margin-bottom: 2px; }
 .chk-d { font-size: .9375rem; color: var(--k-ink-2); line-height: 1.5; }
 .setrow { display: flex; align-items: flex-start; justify-content: space-between;
@@ -2869,6 +2885,8 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
 :root[data-theme="dark"] .onode.attn::after { border-color: #ff8c82; border-bottom-color: transparent; }
 :root[data-theme="dark"] .onode.work::after { border-color: transparent; border-top-color: #6fd3a0; }
 :root[data-theme="dark"] .onode .face { background: #3a3d42; }
+
+:root[data-theme="dark"] .chk.ok .chk-m, :root[data-theme="dark"] .chk.att .chk-m { color: var(--gold-deep); }
 
 :root[data-theme="dark"] .msg-av { background: rgba(245,245,244,.10); }
 
@@ -7015,7 +7033,18 @@ const CHK_MARK = { ok: '✓', attention: '!', unknown: '?' };
 function chkRow(c, extraHtml) {
   const cls = CHK_CLASS[c.state] || 'unk';
   const mark = CHK_MARK[c.state] || '?';
-  return '<div class="chk ' + cls + '"><div class="chk-m">' + mark + '</div><div>'
+  /* 🛑 `aria-hidden`, AND THAT IS THE REAL DEFECT ON THIS ROW rather than the
+     contrast. Every title states its own state in words: "This Mac does not go
+     to sleep", "This Mac keeps working plugged in, and sleeps on battery", "We
+     could not tell whether this Mac goes to sleep". So the glyph carries
+     nothing the sentence does not, and exposing it makes a screen reader say
+     the tick and then the sentence that means the same thing.
+     ⚠️ THIS IS THE MAKING-AN-AGENT TICK INVERTED. There the glyph is the only
+     thing separating a step that worked from one that failed, so it is hidden
+     and a spoken word carries the state. Here the spoken words already exist
+     and the glyph was exposed anyway. Same rule, opposite error. (Mona Lisa,
+     who read what each glyph sits beside rather than measuring it.) */
+  return '<div class="chk ' + cls + '"><div class="chk-m" aria-hidden="true">' + mark + '</div><div>'
     + '<div class="chk-t">' + esc(c.title) + '</div>'
     + '<div class="chk-d">' + esc(c.detail) + '</div>'
     + (extraHtml || '')
