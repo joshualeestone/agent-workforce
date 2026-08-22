@@ -124,10 +124,17 @@ async function rolesFrom(page) {
     check(`[${role.key}] the last step is the one on screen`, seen.onStep2);
     check(`[${role.key}] the limit is visible there`, seen.shown && seen.text === role.caution,
       JSON.stringify(String(seen.text).slice(0, 56)));
-    /* Above the button, not below it: below is after the decision. */
+    /* Above the button, not below it: below is after the decision.
+       ⚠️ IT REQUIRES THE SENTENCE TO BE THERE FIRST, and that is not belt and
+       braces: a hidden paragraph reports a bottom of 0, which is above
+       everything, so with the paint removed this line passed while the check
+       above it failed. An ordering assertion about an element that is not on
+       screen is not a weaker assertion, it is a different one that is always
+       true. */
     check(`[${role.key}] it is above the button that creates the agent`,
-      seen.limitBottom !== null && seen.buttonTop !== null && seen.limitBottom <= seen.buttonTop,
-      `limit ends ${Math.round(seen.limitBottom)}, button starts ${Math.round(seen.buttonTop)}`);
+      seen.shown && seen.limitBottom !== null && seen.buttonTop !== null
+        && seen.limitBottom <= seen.buttonTop,
+      `shown=${seen.shown} limit ends ${Math.round(seen.limitBottom)}, button starts ${Math.round(seen.buttonTop)}`);
   }
 
   /* --- and it is hidden, not blank, for a role with no limit -------------- */
