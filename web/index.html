@@ -3396,6 +3396,25 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
      verifiable tonight. "Back" and not "Close", because a dismiss button
      reading "Close" beside "Mark as done" is two closings with one word. -->
 
+<!-- ⚠️ ITS OWN DIALOG RATHER THAN THE REMOVAL ONE. `#rm-modal` carries
+     `RM_FOR` and is about an agent; borrowing it would mean one dialog with two
+     meanings and a shared state variable that has to be right about which. The
+     SHAPE is copied because the rules it encodes are right for any
+     cannot-be-undone act: both buttons name the act rather than saying Yes and
+     No, and the keeping one takes focus so an unaimed Enter is harmless. -->
+<div class="rm-back" id="hist-modal" hidden>
+  <div class="rm-box" role="alertdialog" aria-modal="true"
+       aria-labelledby="hist-title" aria-describedby="hist-small">
+    <h2 class="rm-title" id="hist-title">Delete your history?</h2>
+    <p class="rm-small" id="hist-small"></p>
+    <div class="rm-acts">
+      <button class="btn" id="hist-keep" type="button">Keep it</button>
+      <button class="btn danger-btn" id="hist-del" type="button">Delete it</button>
+    </div>
+    <div class="fmsg" id="hist-msg" role="alert" aria-live="assertive"></div>
+  </div>
+</div>
+
 <div class="rm-back" id="rm-modal" hidden>
   <div class="rm-box" role="alertdialog" aria-modal="true"
        aria-labelledby="rm-title" aria-describedby="rm-small">
@@ -4633,14 +4652,22 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   <div class="dremove">
     <div>
       <b>Delete your history</b>
+      <!-- ⚠️ THE COPY NAMES WHAT GOES AND WHAT STAYS, and the second half is
+           the load-bearing one: somebody deleting "history" cannot be expected
+           to guess where the line is, and the words that were here ("the record
+           of what your agents have done") could reasonably be read as including
+           the transcripts, which are Claude Code's and which this must never
+           touch. The scope lives in engine/forget.js; this says it in a
+           person's words and the counts below are read from there. -->
       <p class="dhint" style="margin:4px 0 0;max-width:60ch;">
-        Removes the record of what your agents have done on this computer.
-        Their folders, their instructions and your projects are untouched.
+        Deletes every conversation, and what each agent last reported it was
+        working on. Your projects, your tasks, your agents and everything they
+        have written are untouched.
         <b>This one cannot be undone</b>, unlike removing an agent.
       </p>
-      <p class="dhint" style="margin:6px 0 0;"><b>Not built yet.</b></p>
+      <p class="dhint" id="hist-count" style="margin:6px 0 0;"></p>
     </div>
-    <button class="btn-quiet" type="button" disabled>Delete history…</button>
+    <button class="btn-quiet" type="button" id="hist-go">Delete history&hellip;</button>
   </div>
 </section>
 <!-- ⚠️ ONE FACT ABOUT THE MACHINE, ABOVE THE FLEET, not a badge on thirteen
@@ -4697,10 +4724,14 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
      difference: it still carries `.acut` and the heat wash Josh pitched). The
      radial half is ported verbatim; nothing about a card is taken from it. -->
 <div class="orgwrap" id="orgview" hidden>
-  <div class="orgmap" id="orgmap">
-    <svg class="wires" id="orgwires" aria-hidden="true"></svg>
-    <div id="orgnodes"></div>
-  </div>
+  <!-- ⚠️ EMPTY ON PURPOSE. `paintOrg` writes this element's ENTIRE contents,
+       so any child placed here is destroyed by the first render and never
+       returns. The version that shipped in 0.2.44 seeded an `#orgwires` and an
+       `#orgnodes` here: the svg appeared to survive only because the generated
+       markup re-declares that id (two declarations of one id, which is its own
+       defect), and `#orgnodes` simply ceased to exist -- taking the failed-poll
+       guard down with it, since that guard cleared it by id. -->
+  <div class="orgmap" id="orgmap"></div>
   <p class="dhint" id="orgnote" role="status"></p>
 </div>
 
@@ -6365,8 +6396,18 @@ async function tick() {
        drawing the last good diagram beside a header saying we cannot read the
        agents -- a picture of a fleet this poll just failed to see, which is
        the exact claim-without-backing the two lines above exist to prevent. */
-    document.getElementById('orgnodes').innerHTML = '';
-    document.getElementById('orgwires').innerHTML = '';
+    /* 🛑 CLEAR THE CONTAINER THE RENDERER OWNS, not the children it happens to
+       produce. This cleared `#orgnodes` and `#orgwires` by id -- and `paintOrg`
+       replaces `#orgmap`'s whole contents, so after the first render
+       `#orgnodes` was null and this line THREW. Everything below it never ran:
+       the stale diagram stayed on screen, the note stayed empty, and ORG_HTML
+       kept its old value so the next good paint short-circuited too. The guard
+       failed in exactly the way its own comment says it exists to prevent.
+       Found and measured by Mona Lisa in a headless reduction.
+       🔑 Same shape as the `.tkpart` cancel an hour ago: a rule that is only
+       correct while something else keeps producing a particular element. The
+       fix is to depend on the thing that is static and always there. */
+    document.getElementById('orgmap').innerHTML = '';
     ORG_HTML = null;
     document.getElementById('orgnote').textContent =
       'We cannot read the agents right now, so this is not drawn. It is not saying there are none.';
@@ -6568,6 +6609,7 @@ async function paintSettings() {
     // The card keeps its last honest paint; the poll repaints it.
   }
   await paintAccounts();
+  await refreshHistory();
   await paintLimits();
   await refreshEngMode();
 }
@@ -7083,8 +7125,8 @@ function paintOrg() {
        This product's own rule, on a screen that would otherwise draw a lone
        hub and look complete. */
     note.textContent = BOARD_SEEN ? 'No agents on this computer yet.' : 'Looking…';
-    document.getElementById('orgnodes').innerHTML = '';
-    document.getElementById('orgwires').innerHTML = '';
+    // Same correction as the failure path: the container, never its children.
+    document.getElementById('orgmap').innerHTML = '';
     ORG_HTML = null;
     return;
   }
@@ -7166,9 +7208,33 @@ function paintOrg() {
     if (again) again.focus();
   }
   const unplaced = agents.length - placed.size;
+  /**
+   * The flat-fleet line (Mona Lisa, after #137 shipped). Everybody's first org
+   * chart is a wheel of spokes, because nobody has answered the question yet,
+   * and the view had no words for that state in the build OR in the drawing.
+   *
+   * ⚠️ THE SHOW RULE IS WRITTEN SO IT CAN FAIL, not as an intention:
+   *   SHOW   at least one agent AND not one of them has a reportsTo
+   *   HIDE   the moment any agent has one, and it does not come back unless
+   *          every one is cleared again
+   *   NEVER  with no agents at all -- the board's own empty state owns that
+   *          screen, and two empty states on one view is exactly the busy-ness
+   *          Settings was cut down to avoid.
+   * The at-least-one clause is the one that earns its keep: without it the line
+   * greets somebody on a fresh install who has no agents and therefore no
+   * possible use for it.
+   *
+   * 🔑 "You can change that" rather than "set up your team": a flat fleet is a
+   * legitimate way to run this, and the line must not read as a chore list. It
+   * echoes the field's own label so the words match the control.
+   */
+  const anyManaged = agents.some((a) => a && a.profile && typeof a.profile.reportsTo === 'string'
+    && a.profile.reportsTo.trim());
   note.textContent = unplaced > 0
     ? 'One or more agents could not be placed, so they are not drawn.'
-    : '';
+    : (!anyManaged
+      ? 'Nobody reports to anyone yet, so everyone sits on the same ring. You can change that on any agent\'s page.'
+      : '');
 }
 
 document.getElementById('orgmap').addEventListener('click', (e) => {
@@ -9698,6 +9764,96 @@ async function loadRemoval(sessionName, { fromPoll = false } = {}) {
 // Whether the poll has withdrawn this panel because its agent left the board.
 // Tracked so the branch that withdraws it can be undone when the agent returns.
 let PANEL_WITHDRAWN = false;
+
+/* ---- Delete your history ------------------------------------------------
+   The last control in Settings that did nothing. It said "Not built yet" under
+   a greyed-out button, which is the shape the updates switch was in earlier
+   tonight: honest about being dead, and still a control.
+
+   🛑 THE COUNTS COME FROM THE ENGINE AND THE SENTENCE IS BUILT FROM THEM. A
+   dialog for an act with no undo must not describe its own scope in its own
+   words -- if the two ever disagree, the screen is the one a person believed. */
+let HIST_RETURN = null;
+function histSay(sum) {
+  if (!sum || sum.readable === false) return null;
+  const bits = sum.parts.filter((p) => p.count > 0).map((p) => p.count + ' ' + p.label);
+  return bits.length ? bits.join(' and ') : null;
+}
+async function refreshHistory() {
+  const line = document.getElementById('hist-count');
+  const btn = document.getElementById('hist-go');
+  if (!line || !btn) return;
+  let sum = null;
+  try {
+    const r = await fetch('/api/history', { cache: 'no-store' });
+    if (r.ok) sum = await r.json();
+  } catch { sum = null; }
+  if (!sum || sum.readable === false) {
+    /* ⚠️ A COUNT WE COULD NOT TAKE IS NOT ZERO, and the difference decides
+       whether the button is offered at all. "This will remove nothing" over an
+       unreadable store is the worst sentence this feature could say, and a
+       delete offered without being able to describe what it deletes is worse
+       than one that is briefly unavailable. */
+    line.textContent = 'We could not read your history just now, so this is not offered.';
+    btn.disabled = true;
+    return;
+  }
+  const said = histSay(sum);
+  line.textContent = said ? 'Right now: ' + said + '.' : 'There is nothing here to delete yet.';
+  btn.disabled = sum.total === 0;
+  HIST_SUM = sum;
+}
+let HIST_SUM = null;
+function openHistModal() {
+  const said = histSay(HIST_SUM);
+  document.getElementById('hist-small').textContent = said
+    ? 'This deletes ' + said + '. Your projects, tasks and agents are untouched. It cannot be undone.'
+    : 'Your projects, tasks and agents are untouched. It cannot be undone.';
+  document.getElementById('hist-msg').textContent = '';
+  document.getElementById('hist-del').disabled = false;
+  HIST_RETURN = document.activeElement;
+  document.getElementById('hist-modal').hidden = false;
+  // Keeping takes focus, the removal dialog's rule: an unaimed Enter on a
+  // cannot-be-undone dialog must land on the harmless button.
+  document.getElementById('hist-keep').focus();
+}
+function closeHistModal() {
+  document.getElementById('hist-modal').hidden = true;
+  const back = HIST_RETURN && document.contains(HIST_RETURN) ? HIST_RETURN : document.getElementById('hist-go');
+  if (back && back.focus) back.focus();
+}
+document.getElementById('hist-go').addEventListener('click', openHistModal);
+document.getElementById('hist-keep').addEventListener('click', closeHistModal);
+document.getElementById('hist-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'hist-modal') closeHistModal();
+});
+document.getElementById('hist-del').addEventListener('click', async () => {
+  const btn = document.getElementById('hist-del');
+  const msg = document.getElementById('hist-msg');
+  btn.disabled = true;
+  msg.textContent = 'Deleting…';
+  try {
+    const res = await fetch('/api/history', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' },
+      // The word the route requires. Not security -- anything that can reach
+      // this port can send it -- but a guarantee the caller MEANT this act.
+      body: JSON.stringify({ confirm: 'delete' }),
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) { msg.textContent = (out && out.error) || 'we could not delete it'; btn.disabled = false; return; }
+    closeHistModal();
+    await refreshHistory();
+    /* ⚠️ THE OPEN CONVERSATION SURFACES ARE NOW SHOWING SOMETHING THAT NO
+       LONGER EXISTS. The threads are painted from their own fetches on their
+       own clocks, so without this a person deletes their history and goes on
+       reading it until they navigate. */
+    if (typeof loadThread === 'function') { try { loadThread(); } catch { /* not open */ } }
+    if (typeof loadRoom === 'function') { try { loadRoom(); } catch { /* not open */ } }
+  } catch {
+    msg.textContent = 'we could not delete it';
+    btn.disabled = false;
+  }
+});
 
 let RM_FOR = null;      // which agent the open modal is about
 let RM_RETURN = null;   // what to focus when it closes
@@ -12873,6 +13029,7 @@ document.getElementById('nt-go').addEventListener('click', async () => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!document.getElementById('nt-modal').hidden) closeNewTask();
+  else if (!document.getElementById('hist-modal').hidden) closeHistModal();
   /* ⚠️ THE TASK PAGE IS NOT AN ESCAPE TARGET ANY MORE, and that is the point
      of the change rather than an omission. Escape dismisses a thing that
      covers your work; it does not navigate. Leaving it wired would make a

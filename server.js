@@ -45,6 +45,7 @@ const you = require('./engine/you');
 const limits = require('./engine/limits');
 const engmode = require('./engine/engmode');
 const accounts = require('./engine/accounts');
+const forget = require('./engine/forget');
 const autoupdate = require('./engine/autoupdate');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
@@ -1274,6 +1275,41 @@ const server = http.createServer((req, res) => {
    * screen: the page must not be able to disagree with the engine about which
    * accounts are safe to move somebody onto.
    */
+  /* What "Delete your history" would remove, so the screen can say it before
+     it asks. The counts come from the engine, never from the page: a control
+     with no undo must not describe its own scope in its own words. */
+  if (pathname === '/api/history' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, forget.summary()); }
+    catch { sendJson(res, 500, { error: 'we could not look at your history' }); }
+    return;
+  }
+  /**
+   * And the act.
+   *
+   * 🛑 A BODY IS REQUIRED AND IT HAS TO SAY THE WORD. This is the only
+   * irreversible route in the product, and a bare POST is one stray fetch, one
+   * replayed request, or one over-eager client away from deleting somebody's
+   * conversations. The confirm token is not security -- anything that can reach
+   * this port can send it -- it is a guarantee that the caller MEANT this
+   * specific act rather than arrived here by accident.
+   */
+  if (pathname === '/api/history' && req.method === 'DELETE') {
+    readBody(req)
+      .then((raw) => {
+        let body = null;
+        try { body = JSON.parse(raw || 'null'); } catch { body = null; }
+        if (!body || body.confirm !== 'delete') {
+          sendJson(res, 400, { error: 'that request did not confirm the deletion' });
+          return;
+        }
+        const out = forget.forget();
+        if (!out.ok) { sendJson(res, 500, { error: out.because }); return; }
+        sendJson(res, 200, out);
+      })
+      .catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
+    return;
+  }
+
   if (pathname === '/api/accounts' && (req.method === 'GET' || req.method === 'HEAD')) {
     try { sendJson(res, 200, { accounts: accounts.list() }); }
     catch { sendJson(res, 500, { error: 'we could not read the accounts on this computer' }); }

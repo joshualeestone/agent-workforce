@@ -2631,7 +2631,14 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
        tick could not see -- the same claim-without-backing, in the medium
        that admits it least. It is seeded with a last-success picture for the
        same presence-before-absence reason as the tiles. */
-    orgnodes: el(''), orgwires: el(''),
+    /* 🛑 `orgmap`, NOT `orgnodes`. The 0.2.44 guard cleared two CHILDREN that
+       `paintOrg` replaces wholesale, so after the first render one of them was
+       null and the guard threw on its own first line -- the stale diagram
+       stayed up, the note stayed empty, and the repaint guard kept a value that
+       short-circuited the next good paint. This stub only had the ids the guard
+       named, so it could not see that. It now carries the element the renderer
+       actually owns, which is the one that always exists. */
+    orgmap: el(''),
     orgnote: { textContent: '', hidden: false, innerHTML: '' },
     'st-agents': el('14'), 'st-working': el('9'), 'st-idle': el('4'), 'st-attn': el('1'),
     'st-attn-tile': { textContent: '', hidden: false, innerHTML: '' },
@@ -2644,8 +2651,8 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
   const end = script.indexOf('\n', write) + 1;
   assert.ok(from > -1 && write > from && write < end,
     'the failure-path tile blanking fell outside the extracted slice');
-  els.orgnodes.innerHTML = '<button class="onode" data-agent="april"></button>';
-  els.orgwires.innerHTML = '<line/>';
+  els.orgmap.innerHTML = '<svg class="wires"></svg><div class="hub">You</div>'
+    + '<button class="onode" data-agent="april"></button>';
   const checked = { className: '', innerHTML: '' };
   // eslint-disable-next-line no-new-func
   new Function('document', 'checked', 'esc', 'err', script.slice(from, end))(
@@ -2666,9 +2673,8 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
     'the residual summary still asserts last-tick counts beside the failure card');
   assert.equal(els.summary.hidden, true,
     'a blanked summary must also hide, not sit as an empty line under the tiles');
-  assert.equal(els.orgnodes.innerHTML, '',
+  assert.equal(els.orgmap.innerHTML, '',
     'the org view still draws the last fleet it saw beside "we cannot see them"');
-  assert.equal(els.orgwires.innerHTML, '', 'its wires outlived the nodes they connect');
   assert.match(els.orgnote.textContent, /not saying there are none/,
     'an emptied diagram with no sentence reads as "you have no agents"');
 });

@@ -160,7 +160,18 @@ function paneSession(paneId) {
 function resolveSender(fromPane, roster) {
   const pane = String(fromPane == null ? '' : fromPane).trim();
   if (!pane) {
-    return { ok: false, because: 'we cannot tell which agent is sending this: the sender is taken from TMUX_PANE, and it is not set here. Run it inside the session that agent runs in.' };
+    /* ⚠️ REWORDED RATHER THAN EXEMPTED FROM THE TERMINOLOGY RULE, and the
+       reason is that the "only an agent reads this" premise has a hole. The
+       operator path short-circuits at `operator === true` and never reaches
+       here, which is true -- but `kosmos post` is a COMMAND, and a person who
+       copies it out of an agent's instructions and runs it in their own
+       terminal lands on exactly this sentence. Rare is not never, and the
+       person it reaches is the one least equipped for the jargon.
+       🔑 SO IT SERVES BOTH READERS IN ORDER: the plain instruction first,
+       which is all a person needs to act, and the variable name last in
+       parentheses, which is the actionable fact for an agent debugging it.
+       Neither reader has to read the other's half to get unstuck. */
+    return { ok: false, because: 'we cannot tell which agent is sending this. Run it from inside the window that agent is running in (the sender is read from TMUX_PANE, which is not set here).' };
   }
   // A pane id is %N; a session:w.p target is also accepted, and a bare
   // session name prefix-matches in tmux (aim leo, hit leo-discord) --
