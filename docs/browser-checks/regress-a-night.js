@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Everything the night of 2026-08-21 added, drawn together on one build.
+ * Everything two nights of releases added, drawn together on one build.
  *
  * ⚠️ WHY THIS EXISTS SEPARATELY FROM THE OTHER CHECKS HERE. Each of those pins
  * one surface. This one pins that twenty-one releases still COMPOSE: the three
@@ -117,6 +117,102 @@ function seed() {
     chk(tk.tops[0] === 0 && tk.tops[1] === 1 && tk.addTop === 0,
       theme + ': the rule sits between parts and not above the Add row',
       JSON.stringify(tk.tops) + ' add ' + tk.addTop);
+
+    /* ══ the night of 2026-08-22, fifteen more releases ══════════════════
+       Added for the same reason as everything above: each of these was
+       verified when it shipped and then had hours of other work land on top of
+       it. What is pinned here is that they still COMPOSE on one build, not that
+       they work, which their own tests already say. */
+
+    /* The restart control (#259) and its confirmation (#144's remedy path).
+       On the panel, above Remove, outside the danger block.
+       ⚠️ BACK TO THE AGENTS TAB AND THE GRID FIRST, in that order. The checks
+       above leave the page on a task, and the layout loop leaves the agents
+       view on `org`, which draws no `.acard` at all. Each of those made a click
+       here time out for thirty seconds and read as the control being missing
+       rather than as the wrong screen being open, which is the same
+       could-not-look-reported-as-a-finding this file exists to avoid. */
+    await pg.evaluate(() => showTab('agents'));
+    await pg.waitForTimeout(700);
+    await pg.click('.viewtoggle[data-scope="agents"] [data-layout="grid"]');
+    await pg.waitForTimeout(600);
+    await pg.locator('.acard .namego').first().click();
+    await pg.waitForTimeout(1600);
+    const rst = await pg.evaluate(() => {
+      const box = document.getElementById('d-restart-agent');
+      const rm = document.getElementById('d-remove-agent');
+      return {
+        shown: box && !box.hidden,
+        aboveRemove: box && rm && box.getBoundingClientRect().top < rm.getBoundingClientRect().top,
+        hint: box && box.querySelector('.fhint').textContent,
+        /* The lede is painted per agent now (#198), so it must not be the
+           generic once a panel is open. */
+        lede: (document.getElementById('d-instr-lede') || {}).textContent || '',
+        saves: [...document.querySelectorAll('#d-instr-save, #d-save')].map((b) => b.getAttribute('aria-label')),
+      };
+    });
+    chk(rst.shown && rst.aboveRemove, theme + ': restart is on the panel, above Remove');
+    chk(/anything it was part way through ends/.test(rst.hint),
+      theme + ': the restart hint names the work, not only the memory');
+    chk(/the only thing that survives a restart/.test(rst.lede),
+      theme + ': the instructions lede states the consequence', rst.lede.slice(0, 40));
+    chk(!/^What this agent is for/.test(rst.lede), theme + ': the lede names the agent');
+    /* 🔑 TWO SAVES, TWO NAMES. A screen reader heard one word for both. */
+    chk(new Set(rst.saves.filter(Boolean)).size === 2,
+      theme + ': the two Save buttons answer to different names', JSON.stringify(rst.saves));
+
+    await pg.click('#d-restart-start');
+    await pg.waitForTimeout(600);
+    const dlg = await pg.evaluate(() => {
+      const m = document.getElementById('rst-modal');
+      const box = m.querySelector('.rm-box');
+      return { open: !m.hidden, h: Math.round(box.getBoundingClientRect().height),
+        title: document.getElementById('rst-title').textContent,
+        small: document.getElementById('rst-small').textContent,
+        focused: document.activeElement && document.activeElement.id };
+    });
+    chk(dlg.open && dlg.h > 100, theme + ': the restart confirmation opens and is drawn', String(dlg.h));
+    chk(/^Restart /.test(dlg.title), theme + ': it names the agent', dlg.title);
+    /* Only `clear` may say nothing is pending, and this board's agents have
+       never reported, so the dialog must NOT claim they are clear. */
+    chk(!/is not part way through anything/.test(dlg.small),
+      theme + ': an unreported agent is not called clear', dlg.small.slice(0, 60));
+    chk(dlg.focused === 'rst-keep', theme + ': it opens on the harmless answer', String(dlg.focused));
+    await pg.keyboard.press('Escape');
+    await pg.waitForTimeout(300);
+    chk(await pg.evaluate(() => document.getElementById('rst-modal').hidden),
+      theme + ': Escape leaves it running');
+
+    /* The create form: the model hint and the disclosure (#202), and the tell
+       box reading the standing answer (#258). */
+    /* Back to the board: the detail panel is still open from the block above,
+       and `#new-agent` lives on the board behind it. Third time in this file a
+       click has needed the previous screen closed first, which is what happens
+       when checks share one page in sequence. */
+    await pg.evaluate(() => showTab('agents'));
+    await pg.waitForTimeout(700);
+    await pg.click('#new-agent');
+    await pg.waitForTimeout(400);
+    await pg.click('#pick-pm');
+    await pg.click('#role-next');
+    await pg.waitForTimeout(700);
+    const create = await pg.evaluate(() => {
+      const d = document.querySelector('#cstep-name .smore');
+      const tell = document.getElementById('create-tell');
+      return { hint: (document.querySelector('#cstep-name p.shint') || {}).textContent,
+        disclosureClosed: d ? d.open === false : null,
+        models: d ? d.querySelectorAll('li').length : 0,
+        tellDisabled: tell.disabled, tellChecked: tell.checked,
+        note: (document.getElementById('create-tell-note') || {}).textContent };
+    });
+    chk(/You can change this later/.test(create.hint || ''), theme + ': the model hint is there');
+    chk(create.disclosureClosed === true && create.models === 5,
+      theme + ': five more models, behind a closed disclosure', JSON.stringify(create));
+    /* The setting is on by default on a fresh board, so the box is usable and
+       says nothing. What must never happen is checked-and-disabled, or a note
+       with the box enabled. */
+    chk(create.tellChecked !== create.tellDisabled,
+      theme + ': the tell box agrees with itself', JSON.stringify([create.tellChecked, create.tellDisabled]));
 
     chk(errs.length === 0, theme + ': no console errors', errs.slice(0, 2).join(' | '));
     await pg.close();
