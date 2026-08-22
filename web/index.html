@@ -4002,11 +4002,24 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          can be read as telling the local app, which it obviously already
          knows. Mona Lisa and I raised that separately and it is Josh's to rule;
          until he does, his exact words ship and the change is one edit. -->
+    <!-- ⚠️ NOT `checked` IN THE MARKUP, WHICH IT WAS UNTIL 2026-08-22 (#258).
+         Sending is TWO gates: this box for one agent, and the standing answer
+         in Settings. A box hard-coded to checked showed a person consenting to
+         something the second gate was about to refuse, so the screen offered an
+         action that would silently not happen. That is the state this form
+         already refuses three fields up, where Reports to disappears rather
+         than offering a choice nobody can make.
+         🔑 The difference is that reports-to is a choice that is IMPOSSIBLE and
+         this one is already ANSWERED, so the row stays and says so rather than
+         vanishing: a row that disappears teaches nothing, and somebody who
+         turned this off in Settings is exactly the person who benefits from
+         seeing that it took. (Mona Lisa's lean, and mine.) -->
     <div class="field" id="create-tell-wrap">
       <label class="tellrow" for="create-tell">
-        <input type="checkbox" id="create-tell" checked>
+        <input type="checkbox" id="create-tell">
         <span>Let Kosmos know you created an agent</span>
       </label>
+      <div class="fhint" id="create-tell-note"></div>
     </div>
 
     <div class="field" id="create-reports-wrap" hidden>
@@ -7128,6 +7141,42 @@ function tellPaint(r) {
     ? 'We could not read this setting just now.'
     : (r.ok === false ? 'We could not read this setting, so nothing is sent.' : '');
 }
+/**
+ * The create page's copy of the standing answer (#258).
+ *
+ * ⚠️ THREE STATES, AND THE THIRD IS NOT "ON". `tellPaint` beside this already
+ * says why: `null` means we have not read it, which is not off, and the
+ * setting's own message for that case is that nothing is sent. So an
+ * unreadable preference disables the box here too, because the engine will
+ * refuse on `!pref.on` either way and a checked box would be describing a send
+ * that cannot happen.
+ *
+ * 🔑 IT NEVER WRITES THE SETTING. Unchecking here is about this one agent;
+ * the standing answer is changed in Settings and nowhere else.
+ */
+function createTellPaint(r) {
+  const box = document.getElementById('create-tell');
+  const note = document.getElementById('create-tell-note');
+  const unread = !r;
+  const on = !unread && r.on === true;
+  box.disabled = !on;
+  box.checked = on;
+  note.textContent = on ? ''
+    : (unread
+      ? 'We could not read this setting, so nothing is sent.'
+      : 'Turned off in Settings.');
+}
+
+async function refreshCreateTell() {
+  /* Painted as unreadable FIRST, then upgraded. The old markup was checked
+     before any read had happened, which is the same defect one moment
+     earlier: a claim about a setting nobody had looked at. */
+  createTellPaint(null);
+  try {
+    createTellPaint(await (await fetch('/api/ping-setting')).json());
+  } catch { createTellPaint(null); }
+}
+
 async function refreshTell() {
   const mine = ++TELL_EPOCH;
   try {
@@ -7756,16 +7805,19 @@ function boardEmpty() {
     + '<p><b>No agents yet.</b><br>An agent is a worker you put on a job. It '
     + 'runs on this computer and keeps going while you get on with something '
     + 'else.</p>'
-    /* ⚠️ `.btn`, NOT the spec's `.btn-gold`, and this is a deliberate departure
-       rather than a miss. `.btn-gold` has no rule anywhere in this app: an
-       existing comment beside the chat composer already records that it and
-       `.inp` are pack classes the build never adopted, and shipping it here
-       would render a plain button while the code claimed a gold one. The
-       app's gold primary is `.btn.uprime`. Plain is also what the sibling
-       empty state uses ("No projects yet" -> "Add a project"), and two empty
-       states on two screens must not weight their one action differently.
-       Raised with Mona Lisa rather than silently swapped. */
-    + '<button class="btn" type="button" data-board-new>Create your first agent</button>'
+    /* 🔑 `.btn.uprime.big` IS the pack's `.btn-gold`, measured rather than
+       assumed: same font-size (1.0625rem), same padding (.9em 1.75em), same
+       radius (10px), same colour (#e3b341). Two names for one button, which is
+       why shipping the pack's literal class would have rendered a PLAIN button
+       while the code claimed a gold one -- `.btn-gold` has no rule anywhere in
+       this app, and a comment beside the chat composer already records that it
+       and `.inp` were never adopted.
+       ⚠️ Gold carries brand and the primary action, never status, and an empty
+       state's single action is the purest primary in the app because nothing
+       else on the screen competes with it. The projects empty state below is
+       matched upward to this for the same reason, rather than this one being
+       matched down to it. (Mona Lisa measured both, 2026-08-22.) */
+    + '<button class="btn uprime big" type="button" data-board-new>Create your first agent</button>'
     + '</div>';
 }
 // Ordering guard for the folder browser, the same shape `PJ_GEN` gives the
@@ -11677,6 +11729,9 @@ function openCreate() {
   cstep('role');
   showTab('create');
   loadRoles();
+  /* Read on every open, not once on boot: the standing answer can be changed
+     in Settings between two visits to this form. */
+  refreshCreateTell();
 }
 
 document.getElementById('new-agent').addEventListener('click', openCreate);
@@ -12852,7 +12907,10 @@ function paintProjects() {
     setIfChanged(list, '<div class="pj-empty">'
       + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
       + 'and put an agent on it.</p>'
-      + '<button class="btn" id="pj-new-empty" type="button">Add a project</button>'
+      /* Matched to the agents empty state (2026-08-22): the two are the same
+         shape doing the same job, and weighting their one action differently
+         taught two mental models on two screens. The pack draws gold for both. */
+      + '<button class="btn uprime big" id="pj-new-empty" type="button">Add a project</button>'
       + '</div>');
     return;
   }

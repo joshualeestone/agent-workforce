@@ -70,6 +70,13 @@ test('a look that ANSWERED with nothing says so, and offers the one action', () 
   assert.match(html, /An agent is a worker you put on a job/,
     'the screen where somebody meets the word does not define it');
   assert.match(html, /data-board-new/, 'the empty board offers no way off it');
+  /* 🔑 THE BUILD'S NAME FOR THE PACK'S GOLD PRIMARY, which is `.btn.uprime.big`
+     and not `.btn-gold`: the latter has no rule in this app, so shipping it
+     renders a plain button while the markup claims a gold one. Asserted with
+     the CSS beside it, because the class name alone is only a claim. */
+  assert.match(html, /class="btn uprime big"/, 'the one action lost its gold primary');
+  assert.match(PAGE, /\.btn\.uprime\.big\s*{[^}]*font-size:\s*1\.0625rem/,
+    'the class the button asks for has no rule, so it renders plain');
   assert.ok(!/Looking for your agents/.test(html));
 });
 
@@ -88,6 +95,21 @@ test('a look that FAILED refuses to call the board empty', () => {
      one would be the only unescaped path on the board. */
   const evil = boardEmpty({ seen: true, failed: '<img src=x onerror=1>' });
   assert.ok(!/<img/.test(evil), 'the failure reason reaches the page unescaped');
+});
+
+test('both empty states weight their one action the same', () => {
+  /* Two screens with the same shape doing the same job taught two mental
+     models when one used a plain button and the other gold. */
+  /* ⚠️ ANCHORED ON THE BUTTON'S OWN ID, not on a character window after the
+     heading. The first version sliced 400 characters from "No projects yet"
+     and failed because a comment sat between the two, which reads exactly like
+     the class being wrong. A window is a guess about layout; the id is the
+     thing. */
+  const at = SCRIPT.indexOf("id=\"pj-new-empty\"");
+  assert.ok(at > -1, 'the projects empty-state button lost its id, so this test found nothing');
+  const line = SCRIPT.slice(SCRIPT.lastIndexOf('<button', at), at + 40);
+  assert.match(line, /class="btn uprime big"/,
+    'the projects empty state weights its action differently from the agents one: ' + line);
 });
 
 test('the three states are three different screens, not one with wording swapped', () => {
