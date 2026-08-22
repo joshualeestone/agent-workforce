@@ -161,8 +161,18 @@ test('the Settings status glyph clears 3:1 in BOTH themes, on the ground each si
   /* Both declarations are really in the page, so the numbers above are about
      the product rather than about this file. */
   assert.match(PAGE, /\.chk\.ok \.chk-m[^}]*color:\s*#9c741b/, 'the light glyph colour is not declared');
-  assert.match(PAGE, /@media \(prefers-color-scheme: dark\)[^}]*\{[^]*?\.chk\.ok \.chk-m[^}]*var\(--gold-deep\)/,
-    'the dark restoration is gone, so dark inherits the light darkening');
+  /* ⚠️ BOTH DARK RULES, BY THEIR OWN SELECTORS. The first version anchored on
+     `@media (prefers-color-scheme: dark)` and then matched lazily across the
+     whole file, so it was satisfied by the FORCED-theme rule six hundred lines
+     further down and passed with the media rule broken. A lazy match after an
+     anchor is not an anchor. There are two dark rules because
+     `sync-forced-theme.js` generates the `[data-theme="dark"]` twin, and both
+     have to say the same thing or the picker and the system setting disagree. */
+  for (const sel of ['\\:root\\:not\\(\\[data-theme="light"\\]\\) \\.chk\\.ok \\.chk-m',
+    '\\:root\\[data-theme="dark"\\] \\.chk\\.ok \\.chk-m']) {
+    const re = new RegExp(sel.replace(/\\\\/g, '\\') + '[^}]*var\\(--gold-deep\\)');
+    assert.match(PAGE, re, 'a dark rule for the glyph is missing or no longer restores the brand gold: ' + sel);
+  }
   assert.match(PAGE, /class="chk-m" aria-hidden="true"/,
     'the glyph is exposed again, so it is announced beside a sentence that already says it');
 });
