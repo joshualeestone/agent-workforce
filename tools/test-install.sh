@@ -160,6 +160,15 @@ seed_residue() { # $1 = full residue path, $2 = the KOSMOS_HOME it bakes
 echo "== install (piped into sh, local sources, port $PORT) =="
 RC=0; cat "$SETUP" | sh > "$SB/install.log" 2>&1 || RC=$?
 chk "install exits 0" "[ $RC -eq 0 ]"
+# 🔑 THE UPGRADE PATH, ASSERTED HERE AND NOT ONLY AFTER THE UNINSTALL. An
+# update re-runs THIS installer over an existing install (engine/update.js
+# fetches /setup and runs it), so "install does not touch the person's data" is
+# the upgrade promise, and it is the one nobody tests because the machine you
+# build on already has data and you would notice. Checked at both ends so a
+# failure names the right actor: the post-uninstall comparison alone would
+# report an install that ate the data as an uninstall bug.
+chk "installing over an existing home leaves user data byte for byte" \
+  "[ \"\$(cd \"$SB/data\" && find . -type f -exec shasum {} \\; | sort)\" = \"\$DATA_FINGERPRINT\" ]"
 chk "board answers" "curl -s -m 2 -o /dev/null http://127.0.0.1:$PORT/"
 chk "command works through the symlink" "\"$SB/bin/kosmos\" status | grep -q running"
 chk "app bundle created" "[ -x \"$SB/apps/Kosmos.app/Contents/MacOS/Kosmos\" ]"
