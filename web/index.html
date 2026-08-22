@@ -602,6 +602,10 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
             z-index: 60; text-align: center; }
 .upd-back .upd-msg { color: #fff; font-size: 15px; line-height: 1.5; max-width: 26rem; padding: var(--space-8); }
 .upd-back .upd-msg b { display: block; font-size: 17px; margin-bottom: 6px; }
+/* The mark sits above the words and is sized like the pack's: the canvas is
+   drawn at 2x and displayed at half, so it stays crisp on this screen. */
+.upd-back .upd-msg { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; }
+.upd-back .upd-k { width: 88px; height: 103px; display: block; }
 /* The pack's header: a three-column sticky grid (left group | centred nav
    | right group) on the warm ground, gold underline on the selected tab.
    The pull-out tracks the app's own stage padding (--space-8), per the
@@ -5365,8 +5369,24 @@ document.getElementById('uc-go').addEventListener('click', async () => {
   renderUpdateToast(null);
   const back = document.createElement('div');
   back.className = 'upd-back';
-  back.innerHTML = '<div class="upd-msg" role="alert" tabindex="-1"><b>Updating.</b> Your agents keep working.</div>';
+  /**
+   * 🔑 THE MARK, BECAUSE A BLACK WASH AND A WORD IS NOT A SIGNAL. Josh,
+   * 2026-08-21: *"right now it just goes to a black screen, a 50% black overlay
+   * or whatever, and just says Updating. There is not any sort of visual
+   * indication that it's updating."* He sits through this on every build.
+   *
+   * ⚠️ THE PACK'S LOADER AND NOT A SPINNER OF OUR OWN: its loop assembles the
+   * K, holds, and opens back out, so it never fills toward completion. A bar or
+   * a ring that fills would claim to know how far along an update is, on the one
+   * screen that cannot know — the same claim this app refuses everywhere else.
+   */
+  back.innerHTML = '<div class="upd-msg" role="alert" tabindex="-1">'
+    + '<canvas class="upd-k" width="176" height="206" role="img" aria-label="Updating"></canvas>'
+    + '<b>Updating.</b> Your agents keep working.</div>';
   document.body.appendChild(back);
+  /* After it is in the document: the loader measures the canvas, and a detached
+     one has no layout to measure. */
+  startKLoader(back.querySelector('.upd-k'));
   // Same rule as the first-run overlay: everything behind it goes inert, so
   // the keyboard cannot operate the dying board through the backdrop. No
   // un-inert path is needed; every exit from this state is a reload.
@@ -9500,6 +9520,112 @@ document.getElementById('d-save').addEventListener('click', async () => {
 ========================================================================== */
 
 let ROLES = null;          // the menu, fetched once
+  /* ---- the K loader, ported from the pack ------------------------------
+     🔑 PORTED, NOT REWRITTEN, and the pack's own note below says why: its loop
+     never fills toward completion. That is the only reason a loader is allowed
+     on a screen whose rule is that nothing is asserted on a timer — it says
+     "still working" without implying it knows how far along it is.
+     ⚠️ A FUNCTION TAKING A CANVAS rather than the pack's IIFE bound to
+     `#kload`. Two screens need it (the update overlay, and the making-an-agent
+     step), and the overlay's canvas does not exist until the update starts. One
+     implementation, two mounts — a second copy would drift the first time the
+     mark changes.
+     📌 NOTHING STOPS THE LOOP, deliberately: every exit from the update overlay
+     is a page reload, so the frame callback dies with the document. A stop
+     handle nobody could call would be ceremony.
+  ---- the making-it loader --------------------------------------------
+     The K's own 155 dots, scattered and gathered on a loop. `p` runs 0 to 1
+     and back, so the mark assembles, holds, and falls apart again -- which is
+     the honest shape of "still working" rather than a bar that implies it
+     knows how far along it is. */
+  var K_LOAD = [6,5,2.9,14,4,3.5,22,6,3.2,29,6,2.6,93,5,2.1,100,6,2.9,108,5,2.9,117,5,3.2,5,12,2.8,13,14,3.1,21,12,3.2,29,12,2.8,85,12,2.8,93,13,3.5,101,12,3.6,108,14,2.2,6,21,3.5,13,22,2.4,21,22,3.2,29,21,2.3,77,20,2.8,84,21,3.4,93,21,3.6,102,21,3.4,5,30,3.4,14,29,3.6,22,28,2.5,29,29,3.5,69,29,2.5,76,28,2.8,84,28,2.7,93,30,3.1,4,37,2.5,12,37,2.7,20,36,2.8,29,38,3.4,61,38,2.8,70,37,3.5,77,37,3.5,86,38,2.7,92,36,2.7,5,45,3.5,14,45,3.5,21,45,2.8,30,46,2.9,61,44,2.7,69,44,3.0,77,46,3.6,86,45,2.6,6,53,2.5,14,53,3.4,21,53,3.0,29,53,2.4,53,54,2.8,61,52,3.3,69,53,2.7,77,54,2.2,5,62,2.2,13,62,3.0,21,62,3.0,29,62,2.6,46,61,2.7,54,62,3.5,61,62,3.7,69,61,2.8,5,69,3.0,13,70,2.4,22,69,2.4,29,70,2.6,38,69,2.5,45,69,3.4,54,69,2.9,61,69,2.3,69,70,2.3,5,78,2.6,12,77,3.0,20,77,2.1,30,78,3.1,38,77,3.6,45,77,3.2,53,78,3.4,61,78,2.6,68,76,2.6,6,86,3.7,13,86,2.5,20,86,2.2,29,86,2.9,37,84,2.9,46,85,2.3,54,85,2.8,61,86,2.5,70,85,2.1,76,86,2.2,4,94,3.5,13,92,2.9,22,93,3.6,30,92,2.5,38,93,3.5,52,93,2.6,61,93,2.3,70,93,2.7,77,92,2.2,86,93,2.3,5,101,3.4,13,101,2.9,21,101,3.2,30,101,2.3,62,100,2.3,70,101,2.7,76,101,2.3,84,101,2.8,93,101,2.8,5,109,2.5,13,109,2.7,21,110,3.3,29,110,3.6,69,109,2.8,76,110,3.5,85,109,3.6,93,109,2.5,4,117,2.8,13,117,3.4,22,117,3.4,29,116,2.5,69,117,2.2,77,116,3.2,85,117,2.3,92,117,2.9,101,118,2.5,5,125,2.2,13,126,3.3,22,125,2.3,29,124,2.7,77,124,2.6,84,125,3.2,93,126,2.4,100,125,3.1,110,125,3.0,5,133,3.5,12,133,3.0,21,134,3.3,29,134,2.5,84,133,2.9,93,134,2.2,101,132,3.3,110,133,3.5,4,141,3.6,12,141,3.0,22,142,3.1,29,141,3.3,86,141,2.2,93,142,3.0,102,141,2.8,109,140,3.3,117,141,2.3];
+  function startKLoader(cv) {
+    if (!cv || !cv.getContext) return;
+    var g = cv.getContext('2d');
+    var W = cv.width, H = cv.height;
+    var slow = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    /* ⚠️ WHY THE RESTING STATE IS A RING AND NOT A SCATTER.
+       The first version scattered the dots to `20 + random*44` from centre,
+       which is an ANNULUS -- so its rest state was, precisely, a lumpy gold
+       doughnut with a hole in it. It read as a shape because it WAS a shape,
+       just not one anybody chose. It went unnoticed on the way up, because the
+       dots leave it immediately; on the way down they land back in it and stop,
+       which is the only moment you get a clear look.
+
+       So the rest state is now a deliberate mark instead of leftover geometry:
+       an even ring at a single radius, which is the Kosmos badge. Even angles,
+       not random ones -- randomness at this dot count reads as clumping, and
+       clumping is what made the old one look chewed. Same dots, one circle,
+       swirling into the K and opening back out to the circle. */
+    var CX = W / 2, CY = H / 2, RING = Math.min(W, H) * 0.40;
+
+    var pts = [];
+    var N = K_LOAD.length / 3;
+    for (var i = 0; i < K_LOAD.length; i += 3) {
+      var j = i / 3;
+      pts.push({
+        hx: K_LOAD[i] * (W / 128.28),
+        hy: K_LOAD[i+1] * (H / 150.28),
+        /* Even spacing round the circle, with a jitter far too small to break
+           the ring but enough that it does not look printed. */
+        ang: (j / N) * Math.PI * 2,
+        rr: RING * (0.965 + Math.random() * 0.07),
+        r: Math.max(0.9, K_LOAD[i+2] * (W / 128.28) * 0.8),
+        d: (K_LOAD[i+1] / 150.28) * 0.42 + Math.random() * 0.10,
+        g: i % 5
+      });
+    }
+    var GOLD = ['214,166,46', '227,179,65', '198,154,50', '216,182,90', '184,137,32'];
+    function ease(n) { return n < 0.5 ? 4*n*n*n : 1 - Math.pow(-2*n + 2, 3)/2; }
+
+    /* The swirl. The dot's ORIGIN rotates as it travels, so the path bends into
+       an arc instead of a straight line to the middle. Straight lines at this
+       count look like an implosion; arcs look like the mark gathering. */
+    var SWIRL = 1.15;
+
+    function frame(p, spin) {
+      g.clearRect(0, 0, W, H);
+      for (var b = 0; b < 5; b++) {
+        /* The ring is never invisible -- it is the badge, not a loading state
+           of the badge -- so alpha opens at a readable floor rather than 0. */
+        g.fillStyle = 'rgba(' + GOLD[b] + ',' + (0.42 + 0.45 * p).toFixed(2) + ')';
+        g.beginPath();
+        var any = false;
+        for (var k = 0; k < pts.length; k++) {
+          var d = pts[k];
+          if (d.g !== b) continue;
+          any = true;
+          var t = ease(Math.max(0, Math.min(1, (p - d.d) / 0.58)));
+          var a = d.ang + spin + (1 - t) * SWIRL;
+          var sx = CX + Math.cos(a) * d.rr, sy = CY + Math.sin(a) * d.rr;
+          var x = sx + (d.hx - sx) * t, y = sy + (d.hy - sy) * t;
+          g.moveTo(x + d.r, y);
+          g.arc(x, y, d.r, 0, Math.PI * 2);
+        }
+        if (any) g.fill();
+      }
+    }
+
+    if (slow) { frame(1, 0); return; }
+    var t0 = null;
+    function tick(ts) {
+      if (t0 === null) t0 = ts;
+      var el = ts - t0;
+      var cycle = (el % 4400) / 4400;
+      /* Gather, hold, open back out. The old timing gave the collapse a third
+         of the time the build got, so the mark fell apart three times faster
+         than it came together and snapped to a stop. Opening out is now nearly
+         as long as gathering, which is what makes it read as breathing. */
+      var p = cycle < 0.52 ? cycle / 0.52
+            : cycle < 0.70 ? 1
+            : 1 - (cycle - 0.70) / 0.30;
+      frame(Math.max(0, Math.min(1, p)), el / 5200);
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
 let CREATE_MODELS = [];    // the engine's model list, from the same payload
 
 /**
