@@ -291,3 +291,35 @@ test('the Settings row can say what the chat holds again, and still does not ove
   assert.doesNotMatch(rendered, /chat shows what an agent says/,
     'the row went back to explaining the chat instead of the toggle');
 });
+
+test('the update overlay carries the mark, and the loader never claims progress', () => {
+  /**
+   * 🔑 JOSH, 2026-08-21: *"right now it just goes to a black screen, a 50% black
+   * overlay or whatever, and just says Updating. There is not any sort of visual
+   * indication that it's updating."* He sits through this on every build.
+   *
+   * ⚠️ AND THE CHOICE OF LOADER IS THE POINT. The pack's K assembles, holds and
+   * opens back out; it never fills toward completion. A bar or a ring that
+   * filled would claim to know how far along an update is, on the one screen
+   * that cannot know — the same claim this app refuses everywhere else.
+   *
+   * 📌 A SOURCE READ, said plainly: a canvas animation cannot be asserted from
+   * here. It was verified in a real browser — two samples 1.1s apart came back
+   * with different pixel counts, so it draws and it moves. This pins that the
+   * overlay still MOUNTS it, which is the part that could vanish silently.
+   */
+  assert.match(PAGE, /class="upd-k"/,
+    'the update overlay lost its mark and is a black screen with a word again');
+  assert.match(PAGE, /startKLoader\(back\.querySelector\('\.upd-k'\)\)/,
+    'the canvas is in the overlay but nothing starts it, so it renders blank');
+
+  /* 🛑 ONE IMPLEMENTATION. The making-an-agent screen needs the same mark, and a
+     second copy would drift the first time the brand does. */
+  assert.equal(PAGE.split('var K_LOAD = [').length - 1, 1,
+    'the K geometry has been copied; there are now two marks free to disagree');
+
+  /* ⚠️ AND IT MUST STAY A LOOP RATHER THAN A PROGRESS READING. If somebody ever
+     wires it to a percentage, this is the line that should stop them. */
+  assert.doesNotMatch(String(fn('startKLoader')), /percent|progress|\bpct\b/i,
+    'the loader has been given something to fill toward, which it cannot know');
+});
