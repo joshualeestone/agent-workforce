@@ -88,6 +88,27 @@
 
   --space-2: 4px;  --space-3: 6px;  --space-4: 8px;
   --space-5: 12px; --space-6: 16px; --space-7: 20px; --space-8: 24px;
+  /**
+   * 🔑 THE READING MEASURE, and the maximum that deliberately does NOT exist.
+   *
+   * Full width is three tiers rather than one (Mona Lisa, #286/#287, from
+   * Josh's own reason rather than his sentence: he asked for the room twice
+   * and named COLLECTIONS both times).
+   *
+   *   chrome      spans the window. Page gutter only, no maximum.
+   *   collections span the window, and gain COLUMNS rather than wider cards.
+   *   reading     keeps a measure. Prose, forms and dialog bodies.
+   *
+   * ⚠️ THERE IS NO `--k-page-max`, and its absence is the design decision
+   * rather than an omission. Naming a maximum invites the next person to give
+   * it a value, and that value would silently re-cap every rule referencing
+   * it — which is exactly the state this change is undoing.
+   *
+   * ⚠️ AND NO `--k-gutter` EITHER, though the spec named one: the page gutter
+   * is `--space-8`, `body` already applies it, and a second name for 24px is
+   * two spellings of one value, which is the defect this file keeps finding.
+   */
+  --k-measure: 68ch;
 
   --radius-card: 16px; --radius-control: 10px; --radius-pill: 100px;  /* pack radii */
   /* ⚠️ WHAT A FIELD IS FILLED WITH, DECLARED BY ITS CONTAINER. A field must
@@ -217,8 +238,15 @@ body {
   padding: var(--space-8) var(--space-8) 64px;
 }
 
-header { max-width: 1320px; margin: 0 auto; display: flex; justify-content: space-between; align-items: baseline;
+/* ⚠️ THE SAME SHAPE AS `.apphead header`, WHICH IS THE RULE THAT ACTUALLY
+   WINS: every header in this app is inside `.apphead`, so that override is
+   where the reasoning lives and where a change belongs. This one matches it so
+   the two cannot disagree if a header ever renders outside the sticky bar. */
+header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: baseline;
          gap: var(--space-7); margin-bottom: var(--space-2); }
+header > .headleft  { justify-self: start; }
+header > .tabs      { justify-self: center; }
+header > .headright { justify-self: end; }
 .headright { display: flex; align-items: baseline; gap: var(--space-5); }
 h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 /* The pack's stamp: an uppercase chrome label over a promoted bold line.
@@ -239,7 +267,10 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    after: one line at the settings width. */
 #upd-btn { white-space: nowrap; }
 .upd-line:empty { display: none; }
-  .summary { max-width: 1320px; margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
+  /* ⚠️ A SENTENCE, so it keeps a measure while the chrome around it stops
+     having one. A line of body text the width of a 1760px window loses the
+     eye on the return sweep. */
+  .summary { max-width: var(--k-measure); margin-left: auto; margin-right: auto; font: var(--text-callout) var(--font-ui); color: var(--label-2); margin-bottom: var(--space-7); }
 
   /* ---- the connection notice ---------------------------------------------
      ⚠️ TWO VISUALLY DISTINCT STATES, BECAUSE THEY ARE DIFFERENT CLAIMS, and
@@ -256,7 +287,6 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
      So `unsure` gets the neutral surface, the same one the board already uses
      for "we cannot read this", and only `bad` gets the warn tint. */
   .conn {
-    max-width: 1320px; margin-left: auto; margin-right: auto;
     margin-bottom: var(--space-5);
     padding: var(--space-4) var(--space-5);
     border-radius: 10px; border: 1px solid var(--separator);
@@ -282,7 +312,7 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
    ride k-ink, the SAME token system as their surface (the hold-the-line
    lesson, restated for flipping tokens: mixing --label furniture into a
    k-surface box pairs values from two systems that flip separately). */
-.detail { max-width: 1320px; margin: 0 auto; background: none;
+.detail { background: none;
           border: 0; box-shadow: none; padding: 0; color: var(--k-ink); }
 .dhead { display: flex; gap: 18px; align-items: center; margin-bottom: 30px; }
 .dav-wrap { position: relative; width: 88px; height: 88px; flex: 0 0 88px; }
@@ -681,7 +711,34 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
            margin: calc(-1 * var(--space-8)) calc(-1 * var(--space-8)) var(--space-6);
            padding: var(--space-8) var(--space-8) 0;
            border-bottom: 1px solid var(--k-rule); }
-.apphead header { display: grid; grid-template-columns: auto 1fr auto;
+/**
+ * 🛑 THE TABS CENTRED AGAINST THE GAP, NOT AGAINST THE PAGE. `auto 1fr auto`
+ * gives the tab bar a middle column that is whatever is left between two
+ * clusters of UNEQUAL width, and `.tabs` centres its buttons inside THAT. The
+ * centre of the leftover space is not the centre of the page.
+ *
+ * ⚠️ AND THE OFFSET IS NOT A NUMBER, which is why this is a column change and
+ * not a nudge. Measured by Mona Lisa at 1760px, the tab centre tracks the
+ * width of the status stamp continuously:
+ *
+ *   Refreshed just now          stamp 205   tabs  -86
+ *   Refreshed 12 seconds ago    stamp 247   tabs -107
+ *   could not refresh           stamp 193   tabs  -80
+ *
+ * exactly `-(headright - headleft) / 2`. Any fix expressed as an offset is
+ * right for one status message and wrong for the others, and it is furthest
+ * wrong when the board is stalest.
+ *
+ * 🔑 `1fr auto 1fr` IS THE RULE `.statsrow` ALREADY USES one row down. Two rows
+ * centred by two different rules agree only by accident; adopting the same one
+ * makes them agree by construction, so the stamp can say anything at any
+ * length and the tabs do not move.
+ *
+ * 📌 THE NARROW OVERRIDE BELOW STAYS `auto 1fr`, and it is not an oversight:
+ * at that width `.tabs.closed` is `display: none` and the open state is
+ * absolutely positioned, so there are only ever two children in flow.
+ */
+.apphead header { display: grid; grid-template-columns: 1fr auto 1fr;
                   align-items: center; gap: 24px; padding-bottom: 14px; }
 .apphead .tabs { margin: 0; justify-content: center; }
 .appright { display: flex; align-items: center; gap: 14px; justify-content: flex-end; }
@@ -863,7 +920,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    (a 1fr column each side keeps them centred on the screen), toggle
    pinned right. */
 .statsrow { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
-            gap: 12px; margin: 0 auto 18px; max-width: 1320px; }
+            gap: 12px; margin: 0 0 18px; }
 .statsrow > .stat.action { justify-self: start; }
 .statsrow > .viewtoggle { justify-self: end; }
 .stats { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
@@ -917,12 +974,17 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    renderers reading the same CARD_ST/GLYPH/labels and the same task/model
    derivations -- the words cannot diverge because they are computed once. */
 /* ---- the agents board: the pack's card grammar (stage 3) ---- */
-/* One stage width: the pack draws the cards and the stats row on a shared
-   column, and the header/statsrow/summary here carry the app's 1320px cap.
-   Without the same cap the grid runs past the board chrome on wide
-   monitors (round 5 measured ~276px overhang per side at 1920). */
-.cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
-         max-width: 1320px; margin-left: auto; margin-right: auto; }
+/* 🔑 THE CAP HERE WAS NEVER AN INDEPENDENT DECISION. Its own comment gave the
+   reason: the chrome carried a 1320px cap, and without the same one the grid
+   ran past it (round 5 measured ~276px overhang per side at 1920). The chrome
+   has no cap now, so the reason is gone rather than overruled.
+   ⚠️ ORDER, IF ANYBODY EVER DOES THIS PIECEMEAL: chrome first, collections
+   second. Uncapping the grid while the chrome is still capped reproduces that
+   exact overhang, on the same screens, at the same widths.
+   📌 It already asks for `auto-fill`, so it gains COLUMNS with no other
+   change. A 400px card is not better than a 250px one, there are just fewer
+   of them, which is the opposite of what the room was asked for. */
+.cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr)); }
 /* the read-failure message spans the grid: squeezed into one 15.5rem track
    it is the least readable thing on screen at exactly the moment it is the
    only thing that matters (same rule the projects grid records) */
@@ -1139,8 +1201,16 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    (.stack > .dbox stretches). Cards ride k-surface and k-ink, which flip
    together (the dark-tokens set), so the pairing is right in both
    themes by construction. */
-.dgrid { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr));
-         max-width: 1320px; margin: 0 auto; }
+/* 🛑 THE ONE RULE WHERE REMOVING THE CAP ALONE GIVES THE WRONG ANSWER. Two
+   FIXED columns means uncapping doubles their width instead of adding a
+   third: at 1760px that is two 850px boxes, which is the failure the
+   collections tier exists to prevent (Mona Lisa). So it gains `auto-fill`,
+   the same rule `.cards` already uses.
+   ⚠️ `min(28rem, 100%)` rather than a bare `28rem`: a track floor wider than
+   the viewport overflows it, and the narrow-screen media query below is a
+   second answer to that rather than the only one. */
+.dgrid { display: grid; gap: 18px;
+         grid-template-columns: repeat(auto-fill, minmax(min(28rem, 100%), 1fr)); }
 @media (max-width: 56rem) { .dgrid { grid-template-columns: minmax(0, 1fr); } }
 .dbox { background: var(--k-surface); border: 1px solid var(--k-rule); border-radius: 16px;
         padding: 22px 24px; color: var(--k-ink); }
@@ -1235,13 +1305,11 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   display: flex; align-items: center; justify-content: space-between; gap: 20px;
   flex-wrap: wrap; margin-top: 26px; padding-top: 22px;
   border-top: 1px solid var(--k-rule);
-  max-width: 1320px; margin-left: auto; margin-right: auto;
 }
 .dremove b { font-size: 1rem; }
 
 /* ---- the agents list: the pack's .lrow (stage 4) ---- */
-.alist { display: flex; flex-direction: column; gap: 8px;
-         max-width: 1320px; margin-left: auto; margin-right: auto; }
+.alist { display: flex; flex-direction: column; gap: 8px; }
 .lrow { display: grid; align-items: center; gap: 16px;
         grid-template-columns: 34px minmax(9rem, 1.2fr) minmax(7rem, .7fr) minmax(8rem, 1.4fr) 8.5rem;
         background: var(--k-surface); color: var(--k-ink);
@@ -1312,7 +1380,18 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* Settings and Projects sit on the pack's paper ground: their cards ARE
    the surfaces, so the panel shell would be a white box behind white
    boxes. */
-#panel-settings, #panel-projects { max-width: 1320px; background: none; border: 0; box-shadow: none; padding: 0; }
+/* 🛑 `max-width: none`, NOT THE ABSENCE OF A CAP, and removing the 1320px one
+   alone made these screens NARROWER rather than wider. `.panel` carries
+   `max-width: 720px` for the reading-tier panels (create, detail), and with the
+   1320px override gone that 720px won: settings rendered as a 720px column
+   centred in a 1760px window, at left 520. Measured after the change, which is
+   the only reason it is not shipping.
+   ⚠️ THE SWEEP LOOKED FOR `1320px` AND THIS CAP IS NOT SPELLED THAT WAY. A cap
+   removed by deleting the declaration that names it is only removed if nothing
+   underneath re-imposes one.
+   📌 These are containers: the measure belongs to the prose inside them, not to
+   the panel, which also holds the collections. */
+#panel-settings, #panel-projects { max-width: none; background: none; border: 0; box-shadow: none; padding: 0; }
 /* ⚠️ AND CREATE, for the same reason one line up, which is why this is the
    existing exemption rather than a new idea: the create steps are form fields,
    and the pack puts a form on the paper ground. Wrapping them in the panel
@@ -1326,15 +1405,24 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    📌 LEFT, NOT CENTRED, which is the pack's arrangement and the one open taste
    call in this change: Josh asked for "elements right on the page" and the
    pack puts them left. One word to reverse if he meant centred. */
-/* ⚠️ `margin: 0` LEFT THE FORM OUT OF THE APP COLUMN. `.panel` carries
-   `margin: 0 auto`, and `header` is capped at 1320px and centred — so with the
-   margin zeroed the create form aligned to the BODY padding while every other
-   panel and the tab bar aligned to the centred column. Measured at 1400px:
-   header left 40, create left 24. Identical at =<1320px, which is why every
-   render check passed. The intent was left-aligned WITHIN the column, not
-   left-aligned to the window. */
+/* 🛑 THE TRAP IN THIS CHANGE, AND IT GOES SILENTLY WRONG RATHER THAN VISIBLY.
+   This margin re-derived the 1320px cap by hand to pull the form back into
+   the centred column. With the cap gone the expression evaluates to 0px and
+   the rule becomes a no-op that is still in the file: nothing breaks, so
+   nothing gets noticed. A search for `max-width` does not find it (Mona
+   Lisa). Replaced deliberately rather than deleted or left.
+   🔑 AND THE INCIDENT ITS OLD COMMENT RECORDED IS NOW THE INTENDED STATE. It
+   read: "`margin: 0` left the form out of the app column... the create form
+   aligned to the BODY padding while every other panel and the tab bar aligned
+   to the centred column. Measured at 1400px: header left 40, create left 24."
+   There is no centred column any more. Everything aligns to the body padding,
+   so aligning to it is now correct and the same measurement is the pass
+   rather than the failure. The check below asserts exactly that equality.
+   📌 The 34rem cap stays and IS the reading tier: this is a form. Left rather
+   than centred is the pack's arrangement and Josh's "elements right on the
+   page"; one word to reverse if he meant centred. */
 #panel-create { max-width: 34rem; background: none; border: 0; box-shadow: none; padding: 0;
-                margin: 0 0 0 max(0px, calc((100% - 1320px) / 2)); }
+                margin: 0; }
 /* The paper ground belongs to the LIST view only; the one-project, add,
    and project-settings views (view D territory, not this chunk) keep the
    shell the panel used to give them. */
@@ -1344,11 +1432,11 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   box-shadow: var(--shadow-card); padding: var(--space-8); }
 /* The room page sits on the GROUND like the pack draws it: the three
    pjcols are the cards, and a panel behind them was cards on a card. */
-#pj-one-view { max-width: 1320px; margin: 0 auto; background: none;
+#pj-one-view { background: none;
   border: 0; box-shadow: none; padding: 0; }
 /* The task page sits in the same column as the project it came from: a
    page that changes width when you click into it reads as a different app. */
-#pj-task-view { max-width: 1320px; margin: 0 auto; }
+#pj-task-view { }
 .panel h2 { font: 600 var(--text-title-3) var(--font-ui); margin-bottom: var(--space-5); }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
@@ -1356,7 +1444,7 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* --- projects ---------------------------------------------------------- */
 .panel-wide { max-width: 860px; }
 .pj-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-5); }
-.pj-list { display: flex; flex-direction: column; gap: 14px; max-width: 1320px; margin: 0 auto; }
+.pj-list { display: flex; flex-direction: column; gap: 14px; }
 .pj-arch-wrap { margin-top: var(--space-6); }
 /* ⚠️ `color` is explicit, and it is the fix for a real dark-mode contrast
    failure. A <button> does NOT inherit the page's colour -- it uses the UA's
@@ -2451,8 +2539,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
    the right, hairlines BETWEEN rows only. The old grid-alignment tricks
    died with the old card grid; the .cards grid is full-width, so this is
    an ordinary block under it. */
-.removed-wrap { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--k-rule);
-                max-width: 1320px; margin-left: auto; margin-right: auto; }
+.removed-wrap { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--k-rule); }
 .linkish { background: none; border: 0; padding: 0;
            font: inherit; font-size: .875rem; font-weight: 600;
            color: var(--k-ink-2); text-decoration: underline; cursor: pointer;
