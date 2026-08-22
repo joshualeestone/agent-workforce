@@ -25,13 +25,13 @@ const fs = require('node:fs');
 const nodePath = require('node:path');
 
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-const SCRIPT = PAGE.match(/<script>([\s\S]*?)<\/script>/)[1];
+const page = require('./test-support/page');
+const SCRIPT = page.scriptOf(PAGE);
 
 /* One extractor, in test-support/page.js. There were four copies of this and
    three walked to the first brace after the function NAME, which for a
    destructured parameter is the parameter itself. See that file for why that
    fails quietly rather than loudly. */
-const page = require('./test-support/page');
 const lift = (name) => page.lift(SCRIPT, name);
 
 /* The real painter against stub elements, so what is asserted is what the

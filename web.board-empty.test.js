@@ -24,7 +24,8 @@ const fs = require('node:fs');
 const nodePath = require('node:path');
 
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-const SCRIPT = PAGE.match(/<script>([\s\S]*?)<\/script>/)[1];
+const page = require('./test-support/page');
+const SCRIPT = page.scriptOf(PAGE);
 
 /* Boundary-anchored, for the reason server.test.js records: a sibling whose
    name merely starts with the wanted one silently captures the extractor. */
@@ -32,7 +33,6 @@ const SCRIPT = PAGE.match(/<script>([\s\S]*?)<\/script>/)[1];
    three walked to the first brace after the function NAME, which for a
    destructured parameter is the parameter itself. See that file for why that
    fails quietly rather than loudly. */
-const page = require('./test-support/page');
 const lift = (name) => page.lift(SCRIPT, name);
 
 /* The real function, run against the two globals it reads. Nothing is

@@ -22,7 +22,8 @@ const fs = require('node:fs');
 const nodePath = require('node:path');
 
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
-const SCRIPT = PAGE.match(/<script>([\s\S]*?)<\/script>/)[1];
+const page = require('./test-support/page');
+const SCRIPT = page.scriptOf(PAGE);
 
 /**
  * ⚠️ THE BODY BRACE, NOT THE FIRST ONE. The obvious version starts its walk at
@@ -36,7 +37,6 @@ const SCRIPT = PAGE.match(/<script>([\s\S]*?)<\/script>/)[1];
    three walked to the first brace after the function NAME, which for a
    destructured parameter is the parameter itself. See that file for why that
    fails quietly rather than loudly. */
-const page = require('./test-support/page');
 const lift = (name) => page.lift(SCRIPT, name);
 
 /* CONTROL for the above: a function with a destructured parameter must come

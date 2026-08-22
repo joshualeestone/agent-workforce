@@ -24,11 +24,31 @@
 
 const assert = require('node:assert/strict');
 
-/** The page's one inline script, which is where all of this lives. */
+/**
+ * EVERY inline script in the page, joined.
+ *
+ * 🛑 THE PAGE HAS TWO AND THE OBVIOUS REGEX PICKS ONE. `<script id="theme-boot">`
+ * runs in the head; the app is the bare `<script>` further down. A pattern
+ * matching only a bare tag lands on the app **by the accident that the other one
+ * carries an attribute**, and it would silently take the wrong block the day
+ * somebody adds an attribute to the app's tag or a bare `<script>` above it.
+ *
+ * ⚠️ A GREEDY PATTERN IS WORSE AND THE FAILURE IS THE INTERESTING ONE. Mona Lisa
+ * hit it the same night in her own checker: `<script>([\s\S]*)<\/script>` on a
+ * two-block page captures from the FIRST opening tag to the LAST closing one and
+ * swallows the HTML between, so the extracted text is not JavaScript at all. Hers
+ * reported `RUNTIME FAIL, SyntaxError` rather than reporting that it could not
+ * look, which is the worse of the two ways for a checker to be wrong.
+ *
+ * 🔑 Joining every block removes the choice. A function is liftable wherever it
+ * lives, nothing is skipped, and there is no heuristic about which block is the
+ * "real" one to be wrong about later.
+ */
 function scriptOf(pageText) {
-  const m = String(pageText).match(/<script>([\s\S]*?)<\/script>/);
-  assert.ok(m, 'the page has no inline script, so there is nothing to lift from');
-  return m[1];
+  const blocks = [...String(pageText).matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
+    .map((m) => m[1]);
+  assert.ok(blocks.length, 'the page has no inline script, so there is nothing to lift from');
+  return blocks.join('\n');
 }
 
 /**
