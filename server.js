@@ -277,7 +277,15 @@ function sendJson(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
-const PORT = Number(process.env.PORT || 4317);
+/* ⚠️ ONE OF THREE COPIES OF THIS DEFAULT (here, `install/kosmos`,
+   `install/setup.sh`) and they must move together. Reached only when nothing
+   sets PORT -- the launcher and the app bundle both do -- so a stale value here
+   is invisible until somebody runs the server directly, and then it is a board
+   on a port nothing else expects.
+   📌 16180: 4317 is the OpenTelemetry OTLP/gRPC default and collided with the
+   people most likely to run this. Not in 49152-65535, which is macOS's
+   ephemeral pool: a fixed listener there collides at random. */
+const PORT = Number(process.env.PORT || 16180);
 
 /**
  * The path, with any query string removed.

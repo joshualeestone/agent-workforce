@@ -42,7 +42,16 @@ KOSMOS_HOME="${KOSMOS_HOME:-$(cd "$(dirname "$SELF")/.." && pwd)}"
 
 NODE="$KOSMOS_HOME/runtime/bin/node"
 APP="$KOSMOS_HOME/app/server.js"
-PORT="${KOSMOS_PORT:-4317}"
+# ⚠️ ONE OF THREE COPIES OF THIS DEFAULT, and they must move together: here,
+# `server.js`, and `install/setup.sh`. The installer BAKES the install-time port
+# into the app bundle (`export KOSMOS_PORT=...`), so the icon always agrees with
+# itself -- but somebody typing `kosmos start` in a terminal gets this one, and
+# a stale copy here would start the board on a different port from the one the
+# icon opens.
+# 📌 16180, moved off 4317 because that is the OpenTelemetry OTLP default and
+# collided with exactly this product's audience. See setup.sh for why it is not
+# in 49152-65535.
+PORT="${KOSMOS_PORT:-16180}"
 URL="http://127.0.0.1:$PORT"
 PIDFILE="$KOSMOS_HOME/board.pid"
 LOG_DIR="$KOSMOS_HOME/logs"
