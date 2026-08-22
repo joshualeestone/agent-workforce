@@ -1817,16 +1817,31 @@ if [ "$BOARD_OURS" = "yes" ]; then
   printf '  Open it and it will walk you through connecting your AI account.\n'
   printf '  Your dashboard: http://127.0.0.1:%s\n\n' "$PORT"
 else
-  printf '\n  Kosmos is installed, but could not confirm a board of its own is running on\n'
-  printf '  port %s. Something else may already be using that port (often another\n' "$PORT"
-  printf '  account%ss Kosmos; each account runs its own).\n' "'"
+  # 🛑 THE CAUSE IS NOT ASSERTED ANY MORE, and the old sentence was confidently
+  # wrong for the likeliest stranger. It said "often another account's Kosmos",
+  # which is true on a machine that already runs Kosmos and useless on one that
+  # does not — and 4317 is the OpenTelemetry OTLP/gRPC default, so the people
+  # most likely to hit this are the ones already running agents with a collector.
+  # They would go looking for a second Kosmos that does not exist.
+  # ⚠️ Same discipline as the connect screen: say what was observed (the port is
+  # answering and it is not ours), name the candidates without ranking them, and
+  # let the person recognise their own machine.
+  printf '\n  Kosmos is installed, but something else is already answering on port %s,\n' "$PORT"
+  printf '  so we did not start a board there. It could be another Kosmos (each\n'
+  printf '  account runs its own), or any other program — %s is also the default\n' "$PORT"
+  printf '  port for OpenTelemetry collectors.\n'
   if [ "$APP_MADE" = "yes" ]; then
     printf '  (The Kosmos icon this install created is tied to port %s and will open\n' "$PORT"
     printf '  whichever Kosmos answers there.)\n'
   fi
   printf '  Start yours on a different port, for example:\n'
-  _alt=$((PORT + 1))
-  [ "$_alt" -le 65535 ] || _alt=$((PORT - 1))
+  # 🛑 NOT PORT+1. The default is 4317 and 4318 is the OpenTelemetry OTLP/HTTP
+  # default — so on the machine most likely to have 4317 taken, the escape hatch
+  # pointed straight at the second-most-likely-occupied port on the box. An
+  # escape that lands on the other landmine is worse than no suggestion.
+  # 📌 Stepping well clear of the OTLP range rather than nudging by one.
+  _alt=4417
+  [ "$_alt" = "$PORT" ] && _alt=4418
   printf '    KOSMOS_PORT=%s %s/kosmos start\n' "$_alt" "$BIN_DIR"
   printf '  and it will print your dashboard address.\n\n'
 fi
