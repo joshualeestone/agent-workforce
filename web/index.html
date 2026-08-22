@@ -699,6 +699,78 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* ---- grid / list toggle. One component, each instance NAMES its scope with
    data-scope (the control says what it operates on rather than assuming there
    is only one of it). `.vt` colour is --label-2, the measured AA pair. */
+/* ============ THE ORG VIEW (#137) ============
+   Ported from kosmos-org-view-2026-08-19.html, the radial half of that file
+   verbatim. Josh's sketch: a hub, spokes, and chains that run OUTWARD, so a
+   crowded level extends along its own branch instead of competing for arc
+   length. Every coloured ring is information; the resting state has none.
+
+   ⚠️ ARC LENGTH IS THE SECOND CHANNEL AND IT IS FREE. Colour alone cannot
+   carry state: roughly one man in twelve cannot separate red from green. The
+   fraction of the ring that is drawn encodes the same thing in a channel
+   nobody loses, and it doubles as urgency -- needs-you is nearly the whole
+   ring AND the loudest colour, working is a quarter, idle is absent. Read the
+   view in greyscale and it still works. */
+.orgwrap { margin-top: 8px; }
+.orgmap { position: relative; margin: 0 auto; }
+.wires { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hub {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 104px; height: 104px; border-radius: 50%;
+  background: var(--k-bg); border: 2px solid var(--k-ink);
+  display: grid; place-items: center;
+  font: 600 15px var(--font-ui); color: var(--k-ink);
+}
+.edge { stroke: var(--k-rule); stroke-width: 1.5; }
+.onode {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 44px; height: 44px; cursor: pointer;
+  border: 0; padding: 0; background: none;
+}
+.onode .face {
+  width: 100%; height: 100%; border-radius: 50%; overflow: hidden;
+  /* ⚠️ HALF OPACITY IS THE RESTING STATE, per Josh. It is what lets the rings
+     stay the loudest thing on screen: a 50% face is quieter than a 100%
+     stroke, so state still wins over portraiture. */
+  opacity: .5; transition: opacity .12s ease;
+  background: #cfcdc8; display: grid; place-items: center;
+  font: 600 .875rem var(--font-ui);
+}
+.onode .face img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.onode:hover .face, .onode:focus-visible .face { opacity: 1; }
+.onode:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 4px; border-radius: 50%; }
+/* the state ring, drawn around the face */
+.onode::after {
+  content: ""; position: absolute; inset: -5px; border-radius: 50%;
+  border: 3px solid transparent; pointer-events: none;
+}
+.onode.attn::after { border-color: #b3261e; border-bottom-color: transparent; }
+.onode.work::after { border-color: transparent; border-top-color: #1f7a4d; }
+.onode.unk::after  { border: 3px dashed var(--k-ink-2); opacity: .7; }
+/* ⚠️ idle has no rule at all, on purpose. It is the resting state, and a
+   colour here would put colour on nearly every node nearly always. */
+/* ⚠️ THERE IS NO PERSISTENT SELECTED STATE, and Josh's two notes together are
+   why. Faces dim until moused over, AND clicking one opens that agent's page.
+   So a click LEAVES: nothing stays selected because nothing stays. The solid
+   node with a callout in his sketch is the HOVER state, not a selection --
+   which is better, because the view then has exactly one way of saying "this
+   one", and pointing at it is a preview of going there. */
+.onode .oname, .onode .callout {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  white-space: nowrap; pointer-events: none;
+}
+.onode .oname { top: 52px; font: 600 12px var(--font-ui); color: var(--k-ink-2); }
+.onode .callout {
+  bottom: 56px; background: var(--k-bg); border: 2px solid var(--k-ink);
+  border-radius: 9px; padding: 5px 14px; font: 600 14px var(--font-ui);
+  color: var(--k-ink); opacity: 0; transition: opacity .12s ease;
+}
+.onode:hover .callout, .onode:focus-visible .callout { opacity: 1; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .onode.attn::after { border-color: #ff8c82; border-bottom-color: transparent; }
+  :root:not([data-theme="light"]) .onode.work::after { border-color: transparent; border-top-color: #6fd3a0; }
+  :root:not([data-theme="light"]) .onode .face { background: #3a3d42; }
+}
 .viewtoggle { display: inline-flex; border: 0.5px solid var(--separator);
               border-radius: var(--radius-control); overflow: hidden; background: var(--bg-elevated); }
 .vt { border: 0; background: none; cursor: pointer; padding: 0; width: 38px; height: 30px;
@@ -2690,6 +2762,10 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
 :root[data-theme="dark"] .apphead .tab.on { background: rgba(245,245,244,.08); }
 }
 
+:root[data-theme="dark"] .onode.attn::after { border-color: #ff8c82; border-bottom-color: transparent; }
+:root[data-theme="dark"] .onode.work::after { border-color: transparent; border-top-color: #6fd3a0; }
+:root[data-theme="dark"] .onode .face { background: #3a3d42; }
+
 :root[data-theme="dark"] .msg-av { background: rgba(245,245,244,.10); }
 
 :root[data-theme="dark"] .utoast { --utone: #ff8c82; }
@@ -4602,6 +4678,11 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <button class="vt" type="button" data-layout="list" aria-pressed="false" aria-label="Show agents as a list" title="Show agents as a list">
       <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="1" y="2" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="6.9" width="14" height="2.2" rx="1.1" fill="currentColor"/><rect x="1" y="11.8" width="14" height="2.2" rx="1.1" fill="currentColor"/></svg>
     </button>
+    <!-- The third button (#137). Josh: "a three-button selector at the top
+         right". A hub with spokes, which is the shape of the thing it shows. -->
+    <button class="vt" type="button" data-layout="org" aria-pressed="false" aria-label="Show agents as an org chart" title="Show agents as an org chart">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.6"/><circle cx="2.4" cy="3.2" r="1.5"/><circle cx="13.6" cy="3.6" r="1.5"/><circle cx="12.8" cy="13" r="1.5"/><path d="M6.1 6.4 3.6 4.3M9.9 6.5l2.5-2M9.6 9.7l2.3 2.2"/></svg>
+    </button>
   </div>
 </div>
 <!-- The residual honesty line: the tiles carry total/working/idle/attn;
@@ -4610,6 +4691,18 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
 <div class="summary" id="summary">Loading…</div>
 <div class="cards" id="grid"></div>
 <div class="alist" id="alist" hidden></div>
+<!-- ⚠️ THE ORG VIEW (#137), built from kosmos-org-view-2026-08-19.html. That
+     file is a FORK of the 08-19 pack, so the DIAGRAM in it is live and the
+     three `.acard` elements in it are two days stale (Mona Lisa measured the
+     difference: it still carries `.acut` and the heat wash Josh pitched). The
+     radial half is ported verbatim; nothing about a card is taken from it. -->
+<div class="orgwrap" id="orgview" hidden>
+  <div class="orgmap" id="orgmap">
+    <svg class="wires" id="orgwires" aria-hidden="true"></svg>
+    <div id="orgnodes"></div>
+  </div>
+  <p class="dhint" id="orgnote" role="status"></p>
+</div>
 
 <!-- ⚠️ REMOVED AGENTS ARE NOT LOST, and this is where that becomes true for the
      person rather than only in a file. Removing takes an agent off the board
@@ -6138,6 +6231,14 @@ async function tick() {
     // the same tick -- hidden or not. Painting only the visible layout would
     // hand the toggle a stale copy of whichever view was resting.
     document.getElementById('alist').innerHTML = shown.map(lrow).join('');
+    /* ⚠️ THE THIRD VIEW REPAINTS ON THE SAME TICK, but through its own guard
+       rather than an unconditional innerHTML write. The two above can be
+       rewritten every five seconds because nothing in them holds focus that
+       survives a poll; the org view is a field of buttons somebody tabs
+       through, so it compares before it rebuilds and restores by name. It
+       also skips entirely while hidden, since an absolutely positioned
+       diagram measures zero in a hidden box. */
+    paintOrg();
 
     const c = data.counts;
     // The pack's tiles carry the headline counts, computed from the FULL
@@ -6260,6 +6361,15 @@ async function tick() {
       'This board is not saying they are fine, it is saying we cannot see them. (' + esc(err.message) + ')</div>';
     document.getElementById('grid').innerHTML = boardErr;
     document.getElementById('alist').innerHTML = boardErr;
+    /* ⚠️ AND THE FAILURE REACHES THE THIRD VIEW TOO. Left alone it would keep
+       drawing the last good diagram beside a header saying we cannot read the
+       agents -- a picture of a fleet this poll just failed to see, which is
+       the exact claim-without-backing the two lines above exist to prevent. */
+    document.getElementById('orgnodes').innerHTML = '';
+    document.getElementById('orgwires').innerHTML = '';
+    ORG_HTML = null;
+    document.getElementById('orgnote').textContent =
+      'We cannot read the agents right now, so this is not drawn. It is not saying there are none.';
     /* The tiles are claims too. Left alone they hold last-success numbers
        beside "we cannot see them" -- concrete headline counts asserting a
        fleet this poll just failed to read. "?" is the tile-sized unknown.
@@ -6856,10 +6966,231 @@ document.getElementById('klink').addEventListener('click', () => {
    So the LAYOUT is its own state, visibility is COMPUTED from tab+layout in
    one place, and "are we on the agents tab" gets an explicit reader
    (boardbar tracks the tab and only the tab). */
+/* ---- the org view (#137) ---------------------------------------------
+   The layout: You at the centre, agents with no manager on the first ring,
+   and each agent's reports further OUT along its own branch. Josh's sketch,
+   and it is the reason rings are not fixed distances: a crowded level extends
+   outward instead of competing for arc length.
+
+   ⚠️ THE CROWDED RING IS NOT AN EDGE CASE (Mona Lisa's note, and the one thing
+   she said to fix at drawing time). Everybody's fleet starts with nobody
+   assigned, so "fourteen agents, all on ring one" is the FIRST screen anyone
+   sees. Circumference is finite: fourteen nodes at one radius touch and thirty
+   overlap. So a level that fills spills to a second distance rather than
+   crushing -- same data, same hierarchy, still one level. */
+const ORG_R0 = 150;          // the first ring
+const ORG_STEP = 96;         // how much further out each generation sits
+const ORG_MIN_ARC = 62;      // the arc a 44px node needs to not touch its neighbour
+let ORG_HTML = null;         // the repaint guard's memory
+
+function orgTreeOf(agents) {
+  const byName = new Map(agents.map((a) => [a.sessionName, a]));
+  const reportsTo = (a) => {
+    const to = a && a.profile && typeof a.profile.reportsTo === 'string' ? a.profile.reportsTo : '';
+    /* ⚠️ A MANAGER WHO IS NOT ON THE BOARD IS NO MANAGER. An agent naming
+       somebody who has been removed would otherwise vanish from the diagram
+       entirely, hanging off a node that is not drawn. It goes back to the
+       first ring, which is the truth: nothing above it exists here. */
+    return to && byName.has(to) && to !== a.sessionName ? to : null;
+  };
+  const kids = new Map();
+  for (const a of agents) {
+    const to = reportsTo(a) || '';
+    if (!kids.has(to)) kids.set(to, []);
+    kids.get(to).push(a);
+  }
+  /* 🛑 A CYCLE MUST NOT HANG THE PAGE. Two agents reporting to each other is
+     refused at both write points, but a hand-edited profile file is not, and a
+     walk with no seen-set on this data recurses until the tab dies. Anything
+     already placed is skipped, so a cycle simply draws as far as its first
+     repeat and no further. */
+  const seen = new Set();
+  const out = [];
+  const walk = (parent, depth) => {
+    for (const a of (kids.get(parent) || [])) {
+      if (seen.has(a.sessionName)) continue;
+      seen.add(a.sessionName);
+      out.push({ agent: a, depth, parent: parent || null });
+      walk(a.sessionName, depth + 1);
+    }
+  };
+  walk('', 0);
+  /* Anything a cycle swallowed still belongs on the board: it is drawn at the
+     first ring rather than dropped, because an agent missing from the picture
+     is the one failure a picture cannot admit to. */
+  for (const a of agents) {
+    if (!seen.has(a.sessionName)) { seen.add(a.sessionName); out.push({ agent: a, depth: 0, parent: null }); }
+  }
+  return out;
+}
+
+function orgPlace(nodes) {
+  /* Ring by ring. Within a ring, a node sits at its parent's angle when it has
+     one, so a chain runs outward along its own branch rather than being
+     scattered by index. */
+  const byDepth = new Map();
+  for (const n of nodes) {
+    if (!byDepth.has(n.depth)) byDepth.set(n.depth, []);
+    byDepth.get(n.depth).push(n);
+  }
+  const placed = new Map();
+  let maxR = ORG_R0;
+  for (const depth of [...byDepth.keys()].sort((a, b) => a - b)) {
+    const ring = byDepth.get(depth);
+    const base = ORG_R0 + depth * ORG_STEP;
+    /* The spill: how many fit at this radius before they touch. A ring that
+       needs more than that is split across two distances. */
+    const fit = Math.max(4, Math.floor((2 * Math.PI * base) / ORG_MIN_ARC));
+    const lanes = Math.ceil(ring.length / fit);
+    ring.forEach((n, i) => {
+      const lane = Math.floor(i / fit);
+      const r = base + lane * 58;
+      const inLane = ring.filter((x, j) => Math.floor(j / fit) === lane).length;
+      const idx = i % fit;
+      const parent = n.parent ? placed.get(n.parent) : null;
+      /* Around the parent's own angle when there is one; evenly round the
+         circle when there is not. The half-lane offset stops two lanes lining
+         up spoke-for-spoke, which reads as one ring with gaps. */
+      const spread = parent ? Math.PI / 2.6 : Math.PI * 2;
+      const centre = parent ? parent.ang : -Math.PI / 2;
+      const span = inLane > 1 ? spread : 0;
+      const ang = parent
+        ? centre - span / 2 + (span * idx) / Math.max(1, inLane - 1 || 1)
+        : centre + (Math.PI * 2 * idx) / inLane + (lane * Math.PI) / Math.max(1, inLane);
+      placed.set(n.agent.sessionName, { ang, r, node: n });
+      maxR = Math.max(maxR, r);
+    });
+  }
+  return { placed, maxR };
+}
+
+function paintOrg() {
+  const wrap = document.getElementById('orgview');
+  if (!wrap || wrap.hidden) return;
+  /* ⚠️ THE SAME SLICE THE OTHER TWO LAYOUTS DRAW. `?limit=N` exists so a board
+     can be shrunk for a screenshot, and a third view that ignored it would
+     draw fourteen nodes beside a three-card grid -- two pictures of one fleet
+     disagreeing on the same screen. (The stats tiles deliberately keep
+     counting everything: they answer "how is the fleet", not "how many are
+     drawn". This is a drawing, so it takes the slice.) */
+  const lim = new URLSearchParams(location.search).get('limit');
+  const all = (LAST || []).filter((a) => a && a.sessionName);
+  const agents = lim ? all.slice(0, Number(lim)) : all;
+  const note = document.getElementById('orgnote');
+  if (!agents.length) {
+    /* ⚠️ NOT "nobody reports to anybody": an empty board and a board we have
+       not read yet are different, and BOARD_SEEN is the only thing that knows.
+       This product's own rule, on a screen that would otherwise draw a lone
+       hub and look complete. */
+    note.textContent = BOARD_SEEN ? 'No agents on this computer yet.' : 'Looking…';
+    document.getElementById('orgnodes').innerHTML = '';
+    document.getElementById('orgwires').innerHTML = '';
+    ORG_HTML = null;
+    return;
+  }
+  const { placed, maxR } = orgPlace(orgTreeOf(agents));
+  const pad = 78;
+  const size = Math.round((maxR + pad) * 2);
+  const cx = size / 2;
+  const cy = size / 2;
+
+  /* ⚠️ NAMES AT REST ONLY WHILE THEY FIT, and the pack decides this by
+     example rather than by rule: its median-customer drawing (you and three
+     agents) labels every node, and its six-agent chains drawing labels none,
+     leaving the name to the hover callout. The reason is mechanical -- a
+     12px label is wider than the 44px node it sits under, so at any real
+     density the labels collide with each other long before the nodes do, and
+     a field of overlapping words is less readable than no words at all.
+     🔑 THE NAME IS NEVER ABSENT, only unlabelled: every node carries an
+     aria-label and a callout, so hover and a screen reader both answer. */
+  const nameAtRest = placed.size <= 4;
+  const wires = [];
+  const nodes = [];
+  for (const [name, spot] of placed) {
+    const x = cx + Math.cos(spot.ang) * spot.r;
+    const y = cy + Math.sin(spot.ang) * spot.r;
+    const parent = spot.node.parent ? placed.get(spot.node.parent) : null;
+    const px = parent ? cx + Math.cos(parent.ang) * parent.r : cx;
+    const py = parent ? cy + Math.sin(parent.ang) * parent.r : cy;
+    wires.push('<line x1="' + px.toFixed(1) + '" y1="' + py.toFixed(1) + '" x2="'
+      + x.toFixed(1) + '" y2="' + y.toFixed(1) + '" class="edge"/>');
+    const a = spot.node.agent;
+    /* The state vocabulary is the CARD's, read through the same table the grid
+       and the list read, so the three views cannot disagree about an agent.
+       Only three of the four draw; idle is the resting state and carries none. */
+    const st = cardStOf(a).st;
+    const ring = st === 'attn' ? ' attn' : st === 'working' ? ' work' : st === 'unknown' ? ' unk' : '';
+    const shown = a.name || a.sessionName;
+    const face = a.hasAvatar
+      ? '<img src="/api/agent/' + encodeURIComponent(a.sessionName) + '/avatar" alt="">'
+      : esc(initials(shown));
+    const tint = a.hasAvatar ? '' : ' style="background:' + discTint(shown) + ';color:' + discInk(shown) + '"';
+    nodes.push('<button class="onode' + ring + '" type="button" data-agent="' + esc(a.sessionName) + '"'
+      + ' style="left:' + x.toFixed(1) + 'px;top:' + y.toFixed(1) + 'px"'
+      + ' aria-label="' + esc(shown) + '">'
+      + '<span class="face"' + tint + '>' + face + '</span>'
+      + (nameAtRest ? '<span class="oname">' + esc(shown) + '</span>' : '')
+      + '<span class="callout">' + esc(shown) + '</span></button>');
+  }
+
+  const html = '<svg class="wires" id="orgwires" viewBox="0 0 ' + size + ' ' + size
+    + '" aria-hidden="true">' + wires.join('') + '</svg>'
+    + '<div class="hub" style="left:' + cx + 'px;top:' + cy + 'px">You</div>'
+    + nodes.join('');
+
+  /* 🛑 TIER ONE OF THE REPAINT RULE (Mona Lisa's section 5). Do not rebuild
+     what has not changed. The board polls every five seconds, and a view that
+     rewrote identical nodes twice a minute would throw away the keyboard's
+     place twice a minute for nothing. The common case is then free: an idle
+     repaint touches nothing, so there is nothing to preserve. */
+  if (html === ORG_HTML) return;
+
+  /* 🛑 TIER TWO, and it is the one no screenshot can check. Restore focus by
+     IDENTITY, never by position. A positional restore does not need a bug to
+     misfire, only the list to change -- which is the one thing a live view is
+     for: an agent stops, another appears, and the person tabbed onto the third
+     node still has the third node, which is now a different agent.
+     ⚠️ AND IF THE FOCUSED NODE IS GONE, FOCUS NOTHING. A neighbour is a
+     different agent, and a wrong node is a NAVIGATION: somebody presses Enter,
+     lands on Casey, and has no reason to think they asked for April, because
+     nothing on the screen ever claimed otherwise. */
+  const had = document.activeElement;
+  const hadName = had && had.classList && had.classList.contains('onode') ? had.dataset.agent : null;
+  const map = document.getElementById('orgmap');
+  map.style.width = size + 'px';
+  map.style.height = size + 'px';
+  map.innerHTML = html;
+  ORG_HTML = html;
+  if (hadName) {
+    const again = map.querySelector('.onode[data-agent="' + CSS.escape(hadName) + '"]');
+    if (again) again.focus();
+  }
+  const unplaced = agents.length - placed.size;
+  note.textContent = unplaced > 0
+    ? 'One or more agents could not be placed, so they are not drawn.'
+    : '';
+}
+
+document.getElementById('orgmap').addEventListener('click', (e) => {
+  const n = e.target.closest && e.target.closest('.onode');
+  if (n && n.dataset.agent) openDetail(n.dataset.agent);
+});
+
 let BOARD_LAYOUT = 'grid';
 function boardApplyVisibility(onAgents) {
-  document.getElementById('grid').hidden = !onAgents || BOARD_LAYOUT === 'list';
-  document.getElementById('alist').hidden = !onAgents || BOARD_LAYOUT === 'grid';
+  /* ⚠️ THREE CONTAINERS NOW, AND EACH ASKS FOR ITSELF. The two-container
+     version tested `=== 'list'` and `=== 'grid'`, which are opposites only
+     while there are exactly two layouts: adding a third made "not list" true
+     for the org layout and the grid stayed on underneath it. Naming the layout
+     each container belongs to cannot break when a fourth arrives. */
+  document.getElementById('grid').hidden = !onAgents || BOARD_LAYOUT !== 'grid';
+  document.getElementById('alist').hidden = !onAgents || BOARD_LAYOUT !== 'list';
+  const org = document.getElementById('orgview');
+  const show = onAgents && BOARD_LAYOUT === 'org';
+  org.hidden = !show;
+  /* The diagram is absolutely positioned inside a sized box, so it can only be
+     laid out once it has a width. Painting it while hidden measures zero. */
+  if (show) paintOrg();
 }
 function onAgentsTab() { return !document.getElementById('boardbar').hidden; }
 
@@ -6870,11 +7201,11 @@ const LAYOUTS = {
      owns both element ids, and hidden flips between them with the blanket
      [hidden]{display:none !important} making the flip stick against any
      author display rule. */
-  agents:   { swap: true, flip: 'list', fallback: 'grid' },
+  agents:   { swap: true, flip: 'list', fallback: 'grid', layouts: ['grid', 'list', 'org'] },
   // Grid is the pack's default for projects (view C); the stored choice
   // still wins via the restore path. `flip` NAMES THE LAYOUT THAT GETS
   // THE CLASS (asgrid == grid mode), the default rides `fallback`.
-  projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'grid' },
+  projects: { el: 'pj-list', cls: 'asgrid', flip: 'grid', fallback: 'grid', layouts: ['grid', 'list'] },
 };
 
 function layoutApply(scope, want) {
@@ -6912,7 +7243,12 @@ for (const box of document.querySelectorAll('.viewtoggle')) {
 for (const scope of Object.keys(LAYOUTS)) {
   let saved = null;
   try { saved = localStorage.getItem('kosmos.layout.' + scope); } catch { saved = null; }
-  if (saved !== 'grid' && saved !== 'list') saved = LAYOUTS[scope].fallback;
+  /* ⚠️ THE ALLOWLIST IS PER SCOPE, because they no longer have the same
+     layouts: `org` is an agents-only layout, and a shared list would let a
+     stored "org" put the projects screen into a mode it has no container for.
+     Anything not on this scope's list falls back rather than being guessed. */
+  const allowed = LAYOUTS[scope].layouts;
+  if (!allowed.includes(saved)) saved = LAYOUTS[scope].fallback;
   layoutApply(scope, saved);
 }
 

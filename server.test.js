@@ -2625,6 +2625,14 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
   const el = (t) => ({ textContent: t, hidden: undefined, innerHTML: '' });
   const els = {
     grid: el(''), alist: el(''),
+    /* ⚠️ THE THIRD CONTAINER JOINS THIS STUB RATHER THAN BEING LEFT OUT. The
+       org view (#137) draws the same fleet, so a failed poll that blanks the
+       two lists and leaves the DIAGRAM standing is a picture of a fleet this
+       tick could not see -- the same claim-without-backing, in the medium
+       that admits it least. It is seeded with a last-success picture for the
+       same presence-before-absence reason as the tiles. */
+    orgnodes: el(''), orgwires: el(''),
+    orgnote: { textContent: '', hidden: false, innerHTML: '' },
     'st-agents': el('14'), 'st-working': el('9'), 'st-idle': el('4'), 'st-attn': el('1'),
     'st-attn-tile': { textContent: '', hidden: false, innerHTML: '' },
     // The residual summary is seeded with a last-tick claim too: it sits
@@ -2636,6 +2644,8 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
   const end = script.indexOf('\n', write) + 1;
   assert.ok(from > -1 && write > from && write < end,
     'the failure-path tile blanking fell outside the extracted slice');
+  els.orgnodes.innerHTML = '<button class="onode" data-agent="april"></button>';
+  els.orgwires.innerHTML = '<line/>';
   const checked = { className: '', innerHTML: '' };
   // eslint-disable-next-line no-new-func
   new Function('document', 'checked', 'esc', 'err', script.slice(from, end))(
@@ -2656,6 +2666,11 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
     'the residual summary still asserts last-tick counts beside the failure card');
   assert.equal(els.summary.hidden, true,
     'a blanked summary must also hide, not sit as an empty line under the tiles');
+  assert.equal(els.orgnodes.innerHTML, '',
+    'the org view still draws the last fleet it saw beside "we cannot see them"');
+  assert.equal(els.orgwires.innerHTML, '', 'its wires outlived the nodes they connect');
+  assert.match(els.orgnote.textContent, /not saying there are none/,
+    'an emptied diagram with no sentence reads as "you have no agents"');
 });
 
 test('the detail panel carries the explanation the card gave up', () => {
