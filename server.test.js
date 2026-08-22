@@ -2668,6 +2668,7 @@ test('the stats tiles count the real fleet, and the alert tile hides at zero', (
     const els = {
       'st-agents': el(), 'st-working': el(), 'st-idle': el(),
       'st-attn': el(), 'st-attn-tile': el(),
+      'st-off': el(), 'st-off-tile': el(),
     };
     // The slice INCLUDES every tile write (the summary test's lesson: a
     // harness that stops short of the write reconstructs the behaviour).
@@ -2696,6 +2697,16 @@ test('the stats tiles count the real fleet, and the alert tile hides at zero', (
   assert.equal(live['st-idle'].textContent, '2', 'the idle tile does not count exactly the idle agents');
   assert.equal(live['st-attn'].textContent, '1', 'the needs-you tile lost its count');
   assert.equal(live['st-attn-tile'].hidden, false, 'a nonzero needs-you must show the alert tile');
+  /* 🔑 THE FOURTH TILE, and it is what makes the row add up: working plus idle
+     plus not-running is the agents total, which a person can check. */
+  assert.equal(live['st-off'].textContent, '0');
+  assert.equal(live['st-off-tile'].hidden, true, 'a fleet with none stopped shows a Not running tile');
+  const some = drive(fleet, { total: 9, needsYou: 1, notRunning: 2 });
+  assert.equal(some['st-off'].textContent, '2', 'the not-running tile lost its count');
+  assert.equal(some['st-off-tile'].hidden, false, 'a stopped agent does not reach the headline');
+  /* ⚠️ FROM THE COUNT, not from filtering the roster: the roster here holds no
+     not-running rows at all, so a tile derived from it would read 0 and this
+     assertion is what says which source won. */
 
   const calm = drive(fleet.filter((a) => a.state !== 'needs_you'), { total: 6, needsYou: 0 });
   assert.equal(calm['st-attn-tile'].hidden, true,
@@ -2729,6 +2740,11 @@ test('a failed poll blanks the stats tiles instead of asserting the last fleet i
     orgnote: { textContent: '', hidden: false, innerHTML: '' },
     'st-agents': el('14'), 'st-working': el('9'), 'st-idle': el('4'), 'st-attn': el('1'),
     'st-attn-tile': { textContent: '', hidden: false, innerHTML: '' },
+    /* ⚠️ Seeded with a last-success number for the same presence-before-absence
+       reason as the rest, and its tile is seeded HIDDEN: the not-running tile
+       is the one that must come BACK on a failed poll, showing a question mark
+       rather than the false claim that none are stopped. */
+    'st-off': el('6'), 'st-off-tile': { textContent: '', hidden: true, innerHTML: '' },
     // The residual summary is seeded with a last-tick claim too: it sits
     // directly under the tiles and carries the same kind of number.
     summary: { textContent: '2 we could not read at all, so some agents may be missing', hidden: false },

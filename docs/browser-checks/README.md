@@ -84,6 +84,7 @@ one invented by somebody who did not write them.
 | `render-memory-words.js` | Measure the two unknown-memory captions on all three surfaces that draw them, |
 | `render-model-more.js` | The create form's model hint and "More models" disclosure (#202) |
 | `render-survival.js` | The panel naming the agents that will not come back after a restart (#277) |
+| `render-not-running.js` | The card and the tile for an agent Kosmos knows about that is not running (#278) |
 | `render-pjsettings.js` | **no header sentence.** Read it before running it, and give it one. |
 | `render-projects.js` | Render every state of the Projects screens in a real browser, light and dark |
 | `render-reload-toast.js` | The reload toast in both tones, beside the shipped offer toast it must not look like (#270) |

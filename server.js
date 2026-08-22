@@ -44,6 +44,12 @@ const { version } = require('./package.json');
 const store = require('./engine/store');
 const create = require('./engine/create');
 const register = require('./engine/register');
+/* ⚠️ For the not-running rows only. `engine/status.js` reads the same store for
+   the agents it can see; this is the same question asked about an agent with no
+   pane, not a second idea of where a face lives. */
+function safeAvatarFor(name) {
+  try { return store.avatarPath(name); } catch { return null; }
+}
 const roles = require('./engine/roles');
 const commitments = require('./engine/commitments');
 const you = require('./engine/you');
@@ -802,7 +808,82 @@ const server = http.createServer((req, res) => {
       // "1 needs you" on screen with no card anywhere to click. Recomputed with
       // the ENGINE's own counter rather than a copy of its predicates here, so
       // a count added there cannot quietly stop being recomputed here.
+      /**
+       * 🛑 AN AGENT THAT IS NOT RUNNING IS STILL AN AGENT, and the board was
+       * discarding it. The roster above comes from `tmux list-panes`, so an
+       * agent with no live pane is not merely unreported, it is absent: Josh's
+       * board read "1 Agents" this morning while fifteen more sat in
+       * ~/work/workers with their instructions, avatars and history intact, and
+       * the Projects tab one click away was correctly saying "4 agents, 4 we
+       * cannot see" about the same fleet. Two screens, one app, one moment,
+       * opposite answers (Mona Lisa, #278).
+       *
+       * 🔑 IT IS MERGED HERE RATHER THAN IN `snapshot()` because
+       * `engine/register.js` already requires `engine/status.js`, and the
+       * reverse is a circular import. The consequence, stated rather than
+       * discovered: `node engine/status.js` on the command line still shows
+       * only what is running, which is right for a tmux reader.
+       *
+       * ⚠️ RECORD FIELDS ONLY, NEVER A READING (Mona Lisa's ruling). The name,
+       * the face, the role and the reporting line survive a stopped session and
+       * are true right now. The memory, the task line and the model do not
+       * exist for an agent that is not up: the transcript holds YESTERDAY's
+       * model, and a card showing it would be the stale-screenshot failure this
+       * morning already cost us. So the row carries no `context`, no `model`
+       * and no `task` at all — absent, rather than blank or unknown, because
+       * "unknown" means we tried to read it and could not, and here there is
+       * nothing to read.
+       */
+      const offline = (() => {
+        try {
+          const seen = new Set(agents.map((a) => a.sessionName));
+          const known = register.survey();
+          if (!known.ok) return [];
+          return known.agents
+            .filter((k) => !k.removed && k.folder && !seen.has(k.name) && !gone.has(k.name))
+            .map((k) => {
+              const profile = store.readProfile(k.name) || {};
+              return {
+                name: k.shownAs || k.name,
+                sessionName: k.name,
+                session: null,
+                nameDerived: false,
+                role: profile.role || null,
+                /* Nothing to act ON: there is no pane to type into, no session
+                   to capture, and every gate downstream reads these. */
+                target: null,
+                isAgentPane: false,
+                isAgentSession: false,
+                isFleetSession: false,
+                isNamedOurs: true,
+                state: 'stopped',
+                /* ⚠️ THE FLAG THE SCREEN BRANCHES ON, and it is not derivable
+                   from the state: a pane running something that is not Claude
+                   is also stopped, and that agent IS up. */
+                running: false,
+                stateConfidence: 'structured',
+                because: 'this agent is not running: nothing on this computer has a session for it',
+                hasAvatar: Boolean(safeAvatarFor(k.name)),
+                profile,
+                plannedModelName: plannedFor({ sessionName: k.name, isNamedOurs: true }),
+                account: accountOf(k.name),
+                commitments: commitments.read(k.name),
+                instructions: instructions.staleness(k.name),
+              };
+            });
+        } catch {
+          /* ⚠️ A roster we could not extend is the roster we already had. This
+             must never be able to take the running agents off the board. */
+          return [];
+        }
+      })();
       const counts = countAgents(agents, snap.counts && snap.counts.unreadableLines);
+      /* ⚠️ COUNTED SEPARATELY, and the row still adds up: Working plus Idle
+         plus the rest is what is RUNNING, and `notRunning` is the remainder of
+         `total`. A single "Agents" number covering both would put a figure on
+         screen that no arithmetic on the other tiles reaches. */
+      counts.notRunning = offline.length;
+      counts.total += offline.length;
       // ⚠️ A MACHINE-LEVEL FACT, DELIBERATELY NOT A PER-AGENT ONE. Whether this
       // computer can reach a Claude subscription is one fact about the machine,
       // not thirteen facts about thirteen agents, and putting it on every card
@@ -822,7 +903,10 @@ const server = http.createServer((req, res) => {
       // available() is the cached verdict -- the request path never waits on
       // the release host, and a down host just means no toast.
       updates.poke();
-      body = JSON.stringify({ ...snap, agents, counts, connection, version, update: updates.available(), updateLook: updates.lastLook() });
+      body = JSON.stringify({
+        ...snap, agents: agents.concat(offline), counts, connection, version,
+        update: updates.available(), updateLook: updates.lastLook(),
+      });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
       /* ⚠️ AND SAYING WHAT WENT WRONG BEATS FAILING LOUDLY IN A SENTENCE NOBODY
