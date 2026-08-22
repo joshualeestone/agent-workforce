@@ -645,10 +645,21 @@ test('a first-time installer meets the port precondition before anything is down
   assert.ok(!between.includes('_pausebody="$(curl'),
     'the uninstall path verifies the port, so a running board would abort an uninstall');
 
-  assert.ok(setup.includes('default for OpenTelemetry collectors, so that may be what is there'),
+  assert.ok(setup.includes('also the default for OpenTelemetry collectors'),
     'the early warning no longer names the collision a person is likeliest to have');
-  assert.ok(setup.includes('KOSMOS_PORT=16181 in front of the curl'),
-    'the early warning gives no way through, so a person with a collector is simply stopped');
+
+  /**
+   * 🛑 AND IT WARNS RATHER THAN ABORTS. An earlier version of this change made
+   * an occupied port a hard stop, and `tools/test-install.sh` caught it: the
+   * considered design is that such an install EXITS 0, says so, and does not
+   * open a browser onto the stranger's board. Aborting would leave somebody
+   * with nothing installed over a port they can change with one word.
+   */
+  const arm = setup.slice(early, setup.indexOf('esac', early));
+  assert.ok(!arm.includes('die "'),
+    'a busy port aborts the install again; it should say so and finish');
+  assert.ok(arm.includes('this install will finish'),
+    'the early notice does not tell a person the install still completes');
 });
 
 test('every copy of the default port agrees, and none of them sits in the ephemeral range', () => {

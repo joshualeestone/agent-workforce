@@ -771,7 +771,15 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    stands out as a stark warning that you need to click on it". On a red card the
    white pill is the highest-contrast thing, which inverts the usual pill-on-white
    and is the point. */
-.acard.attn .astate.st-attn { background: #fff; }
+/* ⚠️ `--k-surface`, NOT a literal white, and Mona Lisa caught this after
+   shipping it. Josh's instruction is "leave the button white so it stands out
+   as a stark warning" — in LIGHT those are the same value; in DARK a literal
+   white pill on a dark red card is a searing blob with grey text in it, which
+   reads as broken rather than urgent.
+   🔑 THE INTENT IS A RELATIONSHIP, NOT A COLOUR: the pill is the card's own
+   SURFACE standing clear of a tinted ground, and `--k-surface` is that in both
+   themes. */
+.acard.attn .astate.st-attn { background: var(--k-surface); }
 /* The orb breathes with its dots, so a working agent reads as working from
    across the room. Off entirely for reduced motion: a full board would otherwise
    carry a dozen pulses at once. */
@@ -4167,11 +4175,25 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
           <b id="upd-line" role="status" class="upd-line"></b></div>
         <button class="btn-quiet" type="button" id="upd-btn" hidden>Check for Update</button>
       </div>
-      <div class="setrow off" style="margin-top:12px;">
-        <div><b>Tell me when there is a new version</b>
-          <p class="dhint" style="margin:2px 0 0;">Kosmos always tells you. Turning that off is not built yet.</p></div>
-        <span class="toggle" aria-hidden="true"><i></i></span>
+      <!-- 🛑 THIS ROW USED TO BE A SWITCH THAT COULD NOT MOVE. It read "Tell me
+           when there is a new version", with a hint underneath admitting
+           "Kosmos always tells you. Turning that off is not built yet" — a
+           control beside a sentence explaining that the control does nothing.
+           Josh, 2026-08-22: "the switch should be on the updates to be
+           automatically update Kosmos.. right now the switch makes no sense".
+           🔑 THE HINT DID NOT RESCUE IT. Being honest about a dead control is
+           not the same as not shipping one: a switch is a promise that
+           something changes when you flip it, and the label was the promise
+           whatever the small print said. Same rung as the day's other finding
+           — admitting the gap is the first half, and the second half is
+           whether the person can ACT. Now they can: it installs, or it does
+           not, and both are real. -->
+      <div class="setrow" id="auto-row" style="margin-top:12px;">
+        <div><b>Update Kosmos automatically</b>
+          <p class="dhint" style="margin:2px 0 0;">On by default. New versions install themselves, which takes a few seconds and reloads this board. Agents keep running throughout.</p></div>
+        <button class="toggle" id="auto-toggle" role="switch" aria-checked="false" aria-label="Update Kosmos automatically"><i></i></button>
       </div>
+      <p class="dhint" id="auto-msg" role="status" style="margin:8px 0 0;"></p>
     </section>
 
     <section class="dbox">
@@ -6220,6 +6242,52 @@ async function engToggleClick() {
     ENG_SAVING = false;
   }
 }
+/* Automatic updates. Deliberately the same shape as the engineering-mode
+   pair above: learn on boot and after a save, never poll a preference.
+   ⚠️ THE PAINT IS DRIVEN BY THE SERVER'S READ, not by what was clicked. A
+   PUT that stores nothing must leave the switch where it truly is, or the
+   screen shows a person consenting to something the disk does not say. */
+let AUTO_EPOCH = 0;
+function autoPaint(r) {
+  const tog = document.getElementById('auto-toggle');
+  const on = r && r.on === true;
+  tog.classList.toggle('on', on);
+  tog.setAttribute('aria-checked', on ? 'true' : 'false');
+  document.getElementById('auto-msg').textContent = (r && r.ok === false)
+    ? 'We could not read this setting, so updates will wait for you to press Install.' : '';
+}
+async function refreshAutoUpdate() {
+  const mine = ++AUTO_EPOCH;
+  try {
+    const r = await (await fetch('/api/autoupdate')).json();
+    if (mine !== AUTO_EPOCH) return;
+    autoPaint(r);
+  } catch { /* the switch keeps its last honest position */ }
+}
+let AUTO_SAVING = false;
+async function autoToggleClick() {
+  if (AUTO_SAVING) return;
+  AUTO_SAVING = true;
+  const mine = ++AUTO_EPOCH;
+  const msg = document.getElementById('auto-msg');
+  try {
+    const on = document.getElementById('auto-toggle').getAttribute('aria-checked') !== 'true';
+    const res = await fetch('/api/autoupdate', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ on }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (mine !== AUTO_EPOCH) return;
+    if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
+    autoPaint(body);
+  } catch {
+    msg.textContent = 'We could not save that setting.';
+  } finally {
+    AUTO_SAVING = false;
+  }
+}
+document.getElementById('auto-toggle').addEventListener('click', autoToggleClick);
 document.getElementById('eng-toggle').addEventListener('click', engToggleClick);
 
 /* The one place the project page's viewport visibility is decided: the
@@ -6242,6 +6310,7 @@ function pjScreenOnScreen() {
   return ENG_ON && Boolean(vp) && !vp.hidden && Boolean(pre) && !pre.hidden;
 }
 refreshEngMode();
+refreshAutoUpdate();
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
   try {

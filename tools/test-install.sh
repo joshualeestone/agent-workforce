@@ -805,7 +805,7 @@ printf '%s' "$$" > "$SB/home27/board.pid"
 OPENED_BEFORE_STRANGER="$(wc -l < "$SB/opened.log" | tr -d ' ')"
 RC=0; cat "$SETUP" | HOME="$SBH23" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SYS28" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/stranger-board.log" 2>&1 || RC=$?
 chk "occupied-port install exits 0" "[ $RC -eq 0 ]"
-chk "the occupied port is named, not claimed" "grep -q 'could not confirm a board of its own' \"$SB/stranger-board.log\" && ! grep -q '^  Kosmos is running\.\$' \"$SB/stranger-board.log\""
+chk "the occupied port is named, not claimed" "grep -q 'something else is already answering on port' \"$SB/stranger-board.log\" && ! grep -q '^  Kosmos is running\.\$' \"$SB/stranger-board.log\""
 chk "no browser was opened onto the stranger's board" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_BEFORE_STRANGER\" ]"
 rm -f "$SB/home27/board.pid"
 # The ANCHOR of the ps predicate, pinned: another install's LIVE server
@@ -818,7 +818,7 @@ cp "$SB/home26/board.pid" "$SB/home31/board.pid"
 OPENED_BEFORE_ANCHOR="$(wc -l < "$SB/opened.log" | tr -d ' ')"
 RC=0; cat "$SETUP" | HOME="$SB/anchor-home" KOSMOS_APP_DIR= KOSMOS_SYS_APP_DIR="$SB/sys31" KOSMOS_NO_OPEN= KOSMOS_OPEN_CMD="$SB/open-stub" sh > "$SB/anchor.log" 2>&1 || RC=$?
 chk "anchored install exits 0" "[ $RC -eq 0 ]"
-chk "another install's live server does not read as ours" "grep -q 'could not confirm' \"$SB/anchor.log\""
+chk "another install's live server does not read as ours" "grep -q 'something else is already answering on port' \"$SB/anchor.log\""
 chk "no open on another install's server" "[ \"\$(wc -l < \"$SB/opened.log\" | tr -d ' ')\" = \"$OPENED_BEFORE_ANCHOR\" ]"
 KOSMOS_HOME="$SB/home26" "$SB/bin26/kosmos" stop > /dev/null 2>&1 || true
 

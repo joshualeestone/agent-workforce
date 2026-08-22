@@ -38,6 +38,10 @@ let fetcher = null;            // tests inject; null means global fetch
 let cache = { at: 0, latest: null, reached: false, readable: false };
 let inFlight = null;
 let installRunner = null;   // tests inject; production spawns the real installer
+// Read lazily through a function rather than required at the top, so a test can
+// answer the question without writing a preference file, and so this module
+// keeps working if the preference file is not readable at load time.
+let autoPrefFn = null;      // tests inject; production reads the real setting
 let installedRootFn = null; // tests inject; production checks the real layout
 
 function parts(v) {
@@ -109,6 +113,38 @@ async function refresh() {
     // hit this stamp from a button press while offline.
     if (!landed) cache = { at: started, latest: null, reached: false, readable: false };
   }
+  maybeAutoInstall();
+}
+
+/**
+ * The automatic half of the update switch: a look that FOUND something newer
+ * installs it, if the person has left that switch on.
+ *
+ * 🔑 IT HANGS OFF `refresh()`, NOT OFF A TIMER OF ITS OWN. The 15-minute look
+ * is the only clock in this module, and a second one would drift out of step
+ * with the cache it reads -- so "we just learned there is a newer version" is
+ * exactly the moment to act, and it is already a moment this file owns.
+ *
+ * Every gate here is a refusal, and each is load-bearing:
+ *   - `available()`  the same comparison the toast uses, so nothing installs
+ *                    that the screen would not have offered. Unknown loses.
+ *   - `installedRoot()` a from-source checkout is never auto-installed over;
+ *                    that would point the installer at a working tree.
+ *   - `autoPref().on` an unreadable preference reads OFF (see autoupdate.js).
+ * `beginInstall()` is single-flight on its own, so a burst of refreshes
+ * cannot stack installers.
+ *
+ * ⚠️ IT MUST NOT THROW INTO `refresh()`. This runs inside the one code path
+ * whose whole contract is failing soft; a preference file on a bad mount
+ * must cost no update notice at all.
+ */
+function maybeAutoInstall() {
+  try {
+    if (!available()) return;
+    if (!installedRoot()) return;
+    if (!(autoPref() || {}).on) return;
+    beginInstall();
+  } catch { /* an update that cannot start must not break the one that shows */ }
 }
 
 /** What the last look established: for the screen's could-not-reach state.
@@ -146,6 +182,11 @@ async function checkNow() {
  * the answer is null: source updates with git, and the installer must never
  * be pointed at a developer's working tree.
  */
+function autoPref() {
+  if (autoPrefFn) return autoPrefFn();
+  return require('./autoupdate').read();
+}
+
 function installedRoot() {
   if (installedRootFn) return installedRootFn();
   const home = path.resolve(__dirname, '..', '..');
@@ -222,12 +263,13 @@ function beginInstall() {
 /* Test hooks. Production code never calls these. */
 function setBase(b) { base = b || (process.env.AGENT_WORKFORCE_RELEASE_BASE || DEFAULT_BASE); }
 function setInstallRunner(f) { installRunner = f; }
+function setAutoPref(f) { autoPrefFn = f; }
 function setInstalledRoot(f) { installedRootFn = f; }
 function setFetcher(f) { fetcher = f; }
 function resetCache() { cache = { at: 0, latest: null, reached: false, readable: false }; inFlight = null; installStarted = false; }
 
 module.exports = {
   available, poke, refresh, newer, installedRoot, setupUrl, beginInstall,
-  alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot,
+  alreadyInstalling, setBase, setFetcher, setInstallRunner, setInstalledRoot, setAutoPref,
   resetCache, RUNNING, TTL, lastLook, checkNow,
 };

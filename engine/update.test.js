@@ -145,3 +145,77 @@ test('a reachable host with an unusable answer is readable:false, never up-to-da
 test('the fifteen-minute promise, asserted on the exported value', () => {
   assert.equal(update.TTL, 15 * 60 * 1000, 'the check interval drifted from the promised fifteen minutes');
 });
+
+/* ---- the automatic half of the update switch --------------------------
+   Josh, 2026-08-22: "the switch should be on the updates to be automatically
+   update Kosmos". These fix WHEN it fires, and the three refusals matter more
+   than the fire: this is the one path in the product that runs software with
+   nobody watching. */
+
+function autoSetup({ latest, pref, root }) {
+  update.resetCache();
+  update.setFetcher(async () => ({ ok: true, json: async () => ({ version: latest }) }));
+  update.setInstalledRoot(() => root);
+  update.setAutoPref(() => pref);
+  let started = 0;
+  update.setInstallRunner(() => { started += 1; });
+  return () => started;
+}
+
+test.afterEach(() => {
+  update.setInstalledRoot(null);
+  update.setAutoPref(null);
+  update.setInstallRunner(null);
+});
+
+test('a look that finds a newer version installs it when the switch is on', async () => {
+  const started = autoSetup({ latest: '99.0.0', pref: { on: true, ok: true }, root: '/opt/kosmos' });
+  await update.refresh();
+  assert.equal(started(), 1, 'the switch is on and a newer version went uninstalled');
+});
+
+test('the switch off means the same look installs nothing', async () => {
+  const started = autoSetup({ latest: '99.0.0', pref: { on: false, ok: true }, root: '/opt/kosmos' });
+  await update.refresh();
+  assert.equal(started(), 0, 'software installed itself against the person\'s choice');
+  // and the offer is still THERE -- off means "do not install", not "do not tell me".
+  assert.deepEqual(update.available(), { version: '99.0.0' },
+    'turning off automatic updates also silenced the notice, which is a different setting');
+});
+
+test('an unreadable preference installs nothing', async () => {
+  const started = autoSetup({ latest: '99.0.0', pref: { on: false, ok: false }, root: '/opt/kosmos' });
+  await update.refresh();
+  assert.equal(started(), 0);
+});
+
+test('a from-source checkout is never auto-installed over', async () => {
+  const started = autoSetup({ latest: '99.0.0', pref: { on: true, ok: true }, root: null });
+  await update.refresh();
+  assert.equal(started(), 0, 'the installer was pointed at a working tree');
+});
+
+test('nothing newer, nothing installed', async () => {
+  const started = autoSetup({ latest: RUNNING, pref: { on: true, ok: true }, root: '/opt/kosmos' });
+  await update.refresh();
+  assert.equal(started(), 0);
+});
+
+test('a preference that throws costs the update notice nothing', async () => {
+  update.resetCache();
+  update.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
+  update.setInstalledRoot(() => '/opt/kosmos');
+  update.setAutoPref(() => { throw new Error('bad mount'); });
+  update.setInstallRunner(() => {});
+  await update.refresh();
+  assert.deepEqual(update.available(), { version: '99.0.0' },
+    'a preference we could not read broke the notice that does not depend on it');
+});
+
+test('repeated looks cannot stack installers', async () => {
+  const started = autoSetup({ latest: '99.0.0', pref: { on: true, ok: true }, root: '/opt/kosmos' });
+  await update.refresh();
+  await update.refresh();
+  await update.refresh();
+  assert.equal(started(), 1, 'three looks ran three installers over each other');
+});

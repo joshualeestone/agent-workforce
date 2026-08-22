@@ -1070,18 +1070,23 @@ if [ "$FRESH_INSTALL" = "no" ]; then
 fi
 
 
-# 🛑 A PORT ALREADY IN USE IS A PRECONDITION, AND A STRANGER SHOULD MEET IT HERE.
+# 🔑 A BUSY PORT IS SAID EARLY, AND THE INSTALL STILL FINISHES.
 #
 # It used to be discovered only at the very END of a first-time install: every
-# step succeeded, the browser correctly refused to open, and the last paragraph
-# was the whole product the person ever saw. Checking it beside the macOS
-# floor costs three seconds and happens BEFORE the folders are made and long
-# before the tmux download.
+# step succeeded, and the last paragraph was the whole product the person saw.
+# Saying it beside the macOS check costs three seconds and lands before the
+# download, so nobody is surprised by it after investing.
 #
-# ⚠️ FRESH INSTALLS ONLY, and that is not a simplification. On an UPDATE our own
-# board is legitimately answering right up until the pause below stops it, so
-# running this early would abort every update with "a Kosmos board is already
-# running" -- true, and exactly the wrong thing to do about it. The update path
+# 🛑 BUT IT DOES NOT ABORT, AND AN EARLIER VERSION OF THIS DID. `tools/test-install.sh`
+# encodes the considered design and caught it: "install onto an occupied port
+# must say so, not print 'Kosmos is running', and must NOT open a browser onto
+# the stranger's board" -- and the install EXITS 0. Aborting would leave a
+# person with nothing installed over a port they can change with one word,
+# which is worse than finishing and telling them how to start it elsewhere.
+# The end-of-install paragraph already does that half.
+#
+# ⚠️ FRESH INSTALLS ONLY. On an UPDATE our own board is legitimately answering
+# until the pause stops it, so this would fire on every update. The update path
 # keeps its own check AFTER the stop, where it means "the stop did not work".
 #
 # 📌 Identity, not a bare 200: naming a stranger "a Kosmos board" hands out
@@ -1090,11 +1095,14 @@ if [ "$FRESH_INSTALL" = "yes" ]; then
   _portbody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _portbody=""
   case "$_portbody" in
     *"Agent Workforce"*|*Kosmos*)
-      die "A Kosmos board is already running on port $PORT (another account on this Mac runs its own). Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
+      info "note: a Kosmos board is already answering on port $PORT (another account on this Mac runs its own)."
+      info "      this install will finish; it will tell you how to start yours on another port."
       ;;
     "") ;;
     *)
-      die "Another app on this Mac is already using port $PORT, which Kosmos needs. Port $PORT is also the default for OpenTelemetry collectors, so that may be what is there. Quit it, or run the install line again with KOSMOS_PORT=16181 in front of the curl."
+      info "note: something else is already using port $PORT, so Kosmos will not be able to start there."
+      info "      port $PORT is also the default for OpenTelemetry collectors, so that may be what it is."
+      info "      this install will finish and tell you how to start Kosmos on another port."
       ;;
   esac
 fi

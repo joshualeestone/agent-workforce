@@ -44,6 +44,7 @@ const commitments = require('./engine/commitments');
 const you = require('./engine/you');
 const limits = require('./engine/limits');
 const engmode = require('./engine/engmode');
+const autoupdate = require('./engine/autoupdate');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
 const tasks = require('./engine/tasks');
@@ -2331,6 +2332,28 @@ const server = http.createServer((req, res) => {
     return;
   }
   /* --- engineering mode (whether the raw session is shown) ---------------- */
+  /* The automatic-updates switch. Same shape as /api/engmode deliberately:
+     one preference, GET to learn it, PUT to set it, and the READ is echoed
+     back after a write rather than the request body -- so the screen paints
+     what is stored, never what was asked for. */
+  if (pathname === '/api/autoupdate' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, autoupdate.read()); }
+    catch { sendJson(res, 500, { error: 'that setting could not be read' }); }
+    return;
+  }
+  if (pathname === '/api/autoupdate' && req.method === 'PUT') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}') || {}; }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
+        const saved = autoupdate.write({ on: body.on });
+        if (!saved.ok) { sendJson(res, 400, { error: saved.because }); return; }
+        sendJson(res, 200, autoupdate.read());
+      })
+      .catch(() => sendJson(res, 400, { error: 'we could not save that setting' }));
+    return;
+  }
   if (pathname === '/api/engmode' && (req.method === 'GET' || req.method === 'HEAD')) {
     try { sendJson(res, 200, engmode.read()); }
     catch { sendJson(res, 500, { error: 'that setting could not be read' }); }
