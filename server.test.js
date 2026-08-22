@@ -6509,7 +6509,18 @@ test('a member row says when the agent has NOT picked the project up yet', () =>
    * stops being true the moment the agent can be told in-band (#143), and a
    * sentence naming a workaround outlives the workaround.
    */
-  const hasIt = pageFunction('pjMemberHasIt', '');
+  /* ⚠️ `esc` IS LIFTED, NOT STUBBED. The stale arm now renders a button carrying
+     the agent's session name, and that name is the one value on this row the
+     code did not write. A stub would let an escaping bug through the only
+     branch that puts an untrusted value into an attribute. */
+  const hasIt = pageFunction('pjMemberHasIt', pageFnSource('esc'));
+  /* One real card, for its real `sessionName`. `pjMemberHasIt` reads exactly two
+     fields and one of them is the name it writes into an attribute, so a typed
+     literal would be asserting my spelling against itself. */
+  const board = fleet.install([fleet.agent('memberrow', { state: 'idle' })], { strict: false });
+  const fleetCard = board.agents.find((c) => c.sessionName === 'memberrow');
+  board.restore();
+  assert.ok(fleetCard, 'the fleet produced no card, so the assertions below prove nothing');
 
   assert.match(hasIt({ instructions: { state: 'stale' } }), /Has not picked this up yet/,
     'a member running on instructions from before it was added says nothing about it');
@@ -6522,10 +6533,52 @@ test('a member row says when the agent has NOT picked the project up yet', () =>
 
   // 🛑 NEITHER SENTENCE NAMES THE WORKAROUND. The detail panel carries the
   // full "only a restart re-reads them"; this row carries what is TRUE.
+  /* ⚠️ THE GUARD NOW MEASURES WHAT A PERSON READS, and that is a real change to
+     what it checks rather than a loosening of it. It used to match the whole
+     markup, which passed only while the row had no controls; the remedy below
+     carries `data-restart-agent`, and an attribute is machinery rather than a
+     sentence. The rule's own words are that the ROW must not NAME the
+     workaround, and naming happens in the text. Mona Lisa believed the original
+     assertion would pass unchanged when she ruled the button in; it does not,
+     and narrowing it deliberately is the honest way to keep it rather than
+     discovering later that it had been deleted. */
+  const readable = (html) => String(html).replace(/<[^>]*>/g, ' ');
   for (const st of ['stale', 'unknown']) {
-    assert.doesNotMatch(hasIt({ instructions: { state: st } }), /restart/i,
-      'the ' + st + ' row names a workaround, which outlives the workaround');
+    assert.doesNotMatch(readable(hasIt({ instructions: { state: st } })), /restart/i,
+      'the ' + st + ' row names a workaround in words, which outlives the workaround');
   }
+  /* CONTROL: the stripper really removes markup, so the assertions above are
+     not passing on an empty string. */
+  assert.match(readable('<b data-x="restart">hello</b>'), /hello/);
+  assert.doesNotMatch(readable('<b data-x="restart">hello</b>'), /restart/i);
+
+  /* 🛑 AND NOW IT CARRIES THE REMEDY, which the rule above still permits
+     because the rule's real target was naming OUR MECHANISM where the person
+     has an INTENT. "Bring it up to date" is what they want; it is true before
+     #143 lands and after it, and when an agent can be told in-band the same
+     button does the same thing with nothing edited. The mechanism is named in
+     the confirmation the button opens, where it costs something. (#144, Mona
+     Lisa ruling against her own earlier one, which sent the remedy to a panel
+     the person has no reason to visit.) */
+  /* The member's name comes from the REAL producer, per fixture-discipline: a
+     literal here is free to carry a shape `snapshot()` never emits, and the
+     attribute this row writes is keyed on that exact field. */
+  const realName = fleetCard.sessionName;
+  const withName = (state) => hasIt(Object.assign({ instructions: { state } }, fleetCard));
+  const stale = withName('stale');
+  assert.match(stale, /Bring it up to date/, 'the stale row states a problem with no way to act on it');
+  assert.match(stale, new RegExp('data-restart-agent="' + realName + '"'),
+    'the remedy is not wired to the shared restart path, so it opens no confirmation');
+  /* ⚠️ ONLY THE ARM THAT KNOWS. "We cannot tell" is not evidence anything needs
+     fixing, and a button beside it turns a could-not-look into a diagnosis. */
+  assert.ok(!/Bring it up to date/.test(withName('unknown')),
+    'the unknown row offers a remedy for a problem it has not established');
+  assert.equal(withName('current'), '', 'the expected case grew a button');
+  /* The name reaches an ATTRIBUTE, so it is escaped. Built by mutating the real
+     card rather than by typing a shape. */
+  const evil = hasIt(Object.assign({}, fleetCard, { instructions: { state: 'stale' } },
+    JSON.parse('{"sessionName":"a\\"evil\\"b"}')));
+  assert.ok(!/"evil"/.test(evil), 'a session name breaks out of the attribute');
 });
 
 test('pjMember suppressTold removes the per-member verdict span, and only with it', () => {

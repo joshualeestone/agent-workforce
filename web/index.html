@@ -1848,6 +1848,12 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    was the recorded defence, and the floor does not have a caption exemption. */
 .pj-member small { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
 .pj-member .pj-told { display: block; font: var(--text-caption) var(--font-ui); color: var(--label-2); flex-basis: 100%; }
+/* The remedy beside the not-picked-up line. Quiet and inline: it is the second
+   thing on that line, and the sentence is what a person reads before deciding
+   whether they care. */
+.pj-notyet-go { margin-left: 8px; font: inherit; padding: 0; border: 0; background: none;
+  color: var(--k-ink); text-decoration: underline; cursor: pointer; border-radius: 4px; }
+.pj-notyet-go:focus-visible { outline: 2px solid var(--k-ink); outline-offset: 2px; }
 /* The not-yet-told mark. Same size and rhythm as .pj-told beside it; it is a
    fact about this row rather than an alarm, so it takes the attention colour
    and not the error one.
@@ -2201,6 +2207,13 @@ svg { display: block; }
    Mouse print got smaller in IMPORTANCE, not in legibility. Only two elements
    carry this class, both in this panel, so the blast radius is the panel. */
 .fpath { font: var(--text-caption) var(--font-ui); color: var(--label-2); }
+/* ⚠️ COLLAPSES WHEN EMPTY, which it now always is on the instructions box: the
+   path sentence was cut (#198) and the element stays only because four call
+   sites wire its visibility. `hidden = !data.editable` therefore SHOWS an empty
+   div, which costs nothing today because this rule has no box model, and would
+   cost a gap the moment somebody gives `.fpath` a margin. Same guard `.fhint`
+   already carries, for the same reason. */
+.fpath:empty { display: none; }
 /* ⚠️ TWO CLASSES THAT WERE WORN AND NEVER DEFINED. Project settings renders the
    folder NAME — the answer to the question that screen exists to answer — as
    `<p class="shint"><code class="t">`, and neither class had a rule anywhere in
@@ -3266,16 +3279,26 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          signal for the person who does want to look. Hiding it would buy
          simplicity with a small dishonesty. -->
     <label class="flabel" for="d-instr">Instructions</label>
-    <!-- ⚠️ "a restart does not change WHAT IT SAYS", not "does not clear it".
-         The bare pronoun was unambiguous grammatically and ambiguous on the
-         SCREEN: this page now carries a Memory box that also talks about
-         restarts, and a reader glancing between two boxes about the same act
-         can carry the wrong subject across. A restart really does clear the
-         memory ring -- the session is new and so is its transcript -- and
-         really does not touch this file, which is what the Restart button on
-         the notice below already says. Three surfaces, one fact. (#198; the
-         name-the-noun form is mine, the sentence is Mona Lisa's.) -->
-    <div class="fhint">What this agent is for, in your words. It is the first thing they read when they start, and a restart does not change what it says.</div>
+    <!-- 🛑 "THE ONLY THING THAT SURVIVES A RESTART", not "a restart does not
+         change what it says". Those look like one sentence and are two claims.
+         The old one is about the FILE being stable, which is true and
+         uninteresting: of course restarting does not rewrite your file. The
+         new one is about CONSEQUENCE, everything else goes and this does not,
+         and that is the half that tells somebody why anything belongs in the
+         field at all (#198, Mona Lisa).
+
+         🔑 IT ALSO CLOSES A SPLIT ACROSS TWO BOXES. The talk box on this same
+         page says "Anything that needs to last belongs in their instructions",
+         which points at SURVIVES and not at does-not-change. The two screens
+         were making different claims about one fact.
+
+         ⚠️ The earlier wording was chosen to stop a reader carrying the wrong
+         subject across from the Memory box, which also talks about restarts.
+         That concern still holds and this wording still answers it: "survives a
+         restart" names what survives, so there is no bare pronoun to attach to
+         the wrong box. A restart really does clear the memory ring and really
+         does leave this file alone. -->
+    <div class="fhint" id="d-instr-lede">What this agent is for, in your words. The first thing they read every time they start, and the only thing that survives a restart.</div>
     <!-- Ships DISABLED. `loadInstructions` enables it when there is something
          real in it. Without this, /?tab=detail (a deep link this file supports)
          never calls that function at all and renders a permanently enabled,
@@ -3286,7 +3309,13 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          the wording we go with"): the path is NOT shown. The app's older
          demoted-not-hidden ruling stays in history below; the reassurance
          sentence is what survives on screen. -->
-    <div class="fpath" id="d-instr-foot" hidden>A real file you can also edit by hand.</div>
+    <!-- 🛑 THE PATH LINE IS GONE (#198 item two, Mona Lisa). The element stays
+         because three call sites hide it and one shows it, and removing it
+         would be a change to the panel's wiring rather than to its copy; the
+         SENTENCE is what was cut. What it said, that this is a real file you
+         can also edit by hand, was true and was the least of the four things
+         competing for a reader at the moment they are editing the field. -->
+    <div class="fpath" id="d-instr-foot" hidden></div>
       <button class="btn" id="d-instr-save" type="button" disabled>Save</button>
     </div>
     <!-- Announced: this is the only channel for every outcome of the most
@@ -9565,6 +9594,20 @@ function openDetail(sessionName) {
      hides rather than printing "no task showing" beside a name. */
   dtask.textContent = stateReason(a) || a.task || '';
   dtask.hidden = !dtask.textContent;
+  /* The lede names the AGENT rather than saying "this agent", which is the
+     pack's wording and the same substitution the rest of this panel already
+     makes. `textContent`, so a name is never markup.
+     ⚠️ Falls back to the generic when there is no name to use, rather than
+     rendering "What  is for": a missing name is a state this panel can be in
+     for a tick, and a sentence with a hole in it reads as broken rather than
+     as generic. */
+  const lede = document.getElementById('d-instr-lede');
+  if (lede) {
+    const who = (a && (a.name || a.sessionName)) || '';
+    lede.textContent = (who ? 'What ' + who + ' is for' : 'What this agent is for')
+      + ', in your words. The first thing they read every time they start, '
+      + 'and the only thing that survives a restart.';
+  }
   /* ⚠️ AFTER the badge/task block, deliberately: a test extracts that block by
      its first and last lines and runs it in isolation, so a call placed inside
      it needs a stub the test would then be asserting against instead of the
@@ -10115,7 +10158,24 @@ function renderStale(s) {
          to be discovered: a restart ends the session the agent is in, so it
          comes back with nothing in its memory ring, which Josh has twice read
          as the product being broken. */
-      + 'Restarting the agent is what applies them.'
+      /* 🛑 IT NAMES THE EDITS, BECAUSE THE PRONOUN IT REPLACED POINTED AT THE
+         WRONG NOUN. The previous wording ended on a bare plural pronoun whose
+         nearest antecedent in the block is the older instructions, and applying
+         THOSE is the opposite of what a restart does. What the pronoun meant is
+         the edits, and no sentence here named them (#212, Mona Lisa).
+         ⚠️ DESCRIBED RATHER THAN QUOTED, on purpose. The guard for this is a
+         grep over this function's source, so pasting the old sentence into the
+         comment explaining its removal puts it straight back as far as any
+         check is concerned. Sixth time that has cost me a cycle.
+         ⚠️ It has to stand alone, because the clause before it is CONDITIONAL:
+         "Edited X, running since Y" drops out whenever either timestamp is
+         missing, so anything relying on it to supply the noun fails exactly
+         when we know least. "Running on older instructions. A restart is what
+         picks up the edits." is whole by itself.
+         📌 "A restart" rather than "restarting it" avoids echoing the button
+         underneath, which matters more here than on the page because this is a
+         live region and both are read aloud. */
+      + 'A restart is what picks up the edits.'
       + '<button class="btn-quiet instr-restart" type="button" data-restart-agent="'
       /* ⚠️ `CURRENT`, NOT AN ARGUMENT. `renderStale` is handed only the
          staleness object, and it is only ever called for the agent whose
@@ -13201,9 +13261,41 @@ function pjMember(m, suppressTold) {
 function pjMemberHasIt(m) {
   const s = m.instructions || {};
   if (s.state === 'stale') {
-    return '<span class="pj-notyet">Has not picked this up yet</span>';
+    /* 🔑 THE REMEDY RIDES WITH THE STATE (#144). The line is true for as long
+       as the agent runs, because nothing re-reads instructions without a
+       restart, so on its own it edges toward furniture on a page somebody
+       lives on. A line you can act on and clear is an unfinished task rather
+       than noise. The earlier ruling sent the remedy to the detail panel,
+       which assumed the person reaches it: #144 exists because they do not,
+       having done the adding here.
+
+       🛑 IT NAMES THE INTENT, NOT THE MECHANISM, and that is what makes it
+       survivable. The standing rule was that this row must not name a
+       workaround, because "Restart it" stops being true the moment an agent
+       can be told in-band (#143). The danger turns out not to be the word
+       restart: it is naming OUR IMPLEMENTATION where the person has an INTENT.
+       "Bring it up to date" is what they want, is true before #143 and after
+       it, and when the agent can be told in-band the same button does the same
+       thing with nothing edited. It survives by construction rather than by
+       somebody remembering to change it. (Mona Lisa, ruling against her own
+       earlier one.)
+
+       📌 The mechanism is named where it costs something: #259's confirmation
+       opens on "Restart <name>?" and says what would be lost. Intent on the
+       button, cost in the dialog. After #143 that dialog stops being opened.
+
+       ⚠️ The receipt is the DISAPPEARANCE. A restarted agent's instructions are
+       no longer stale, so the poll takes this line away by itself, and
+       `noteFor` finds nothing here and writes nothing. */
+    return '<span class="pj-notyet">Has not picked this up yet'
+      + '<button class="btn-quiet pj-notyet-go" type="button" data-restart-agent="'
+      + esc(m.sessionName) + '">Bring it up to date</button></span>';
   }
   if (s.state === 'unknown') {
+    /* ⚠️ NO REMEDY ON THIS ARM, deliberately. "We cannot tell" is not evidence
+       that anything needs fixing, and a button beside it turns a could-not-look
+       into a diagnosis. The stale arm knows; this one does not, and offering
+       the same action on both would say they are the same finding. */
     return '<span class="pj-notyet">We cannot tell whether it has this yet</span>';
   }
   /* CURRENT says NOTHING. A row that announces the expected case trains people
