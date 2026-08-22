@@ -596,3 +596,36 @@ test('the port-collision message names what was seen, and the escape clears the 
   assert.ok(setup.includes('Kosmos is installed, but something else is already answering'),
     'a person whose port is busy is no longer told the install itself succeeded');
 });
+
+test('the port precondition runs for a first-time installer, not only on upgrades', () => {
+  /**
+   * 🛑 THE CHECK EXISTED ALREADY AND WAS GATED TO THE WRONG PEOPLE. It curls the
+   * port, identifies whether a Kosmos board or a stranger is answering, and
+   * gives different advice for each — and it sat inside the pause-for-update
+   * block, so only somebody who ALREADY had Kosmos was warned early. A
+   * first-time installer met the same collision at the very end, after every
+   * step had succeeded and with the browser correctly refusing to open.
+   * Found by Splinter walking the install as a stranger would.
+   *
+   * ⚠️ ASSERTED BY ORDER RATHER THAN BY PRESENCE. The check being in the file
+   * proves nothing — it was in the file before. What matters is that it sits
+   * AFTER the upgrade gate closes.
+   */
+  const setup = fs.readFileSync(path.join(__dirname, 'install', 'setup.sh'), 'utf8');
+  const gate = setup.indexOf('if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then');
+  assert.ok(gate > -1, 'the upgrade gate vanished');
+  const gateEnd = setup.indexOf('\nfi\n', gate);
+  assert.ok(gateEnd > gate, 'could not find the end of the upgrade gate');
+
+  const check = setup.indexOf('_pausebody="$(curl');
+  assert.ok(check > -1, 'the port check vanished entirely');
+  assert.ok(check > gateEnd,
+    'the port check is inside the upgrade-only block again, so a first-time installer is never warned');
+
+  /* And it still names the likely culprit and a way through, rather than only
+     saying no. */
+  assert.ok(setup.includes('default for OpenTelemetry collectors, so that may be what is there'),
+    'the early warning no longer names the collision a person is likeliest to have');
+  assert.ok(setup.includes('KOSMOS_PORT=4417 in front of the curl'),
+    'the early warning gives no way through, so a person with a collector is simply stopped');
+});

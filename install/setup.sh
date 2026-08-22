@@ -1067,21 +1067,38 @@ mkdir -p "$KOSMOS_HOME" "$BIN_DIR" || die "Could not create $KOSMOS_HOME. Check 
 if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
   info "pausing Kosmos for the update"
   "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
-  # Identity, not a bare 200: naming a stranger "a Kosmos board" hands out
-  # advice ('kosmos stop') that the very next command refuses, and every
-  # rerun reproduces it. Same lesson the kosmos command's health check
-  # carries; the advice differs by who is actually on the port.
-  _pausebody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _pausebody=""
-  case "$_pausebody" in
-    *"Agent Workforce"*|*Kosmos*)
-      die "A Kosmos board is still running on port $PORT and could not be paused for the update. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
-      ;;
-    "") ;;
-    *)
-      die "Another app on this Mac is using port $PORT, which Kosmos needs. Quit that app, then paste the install line again."
-      ;;
-  esac
 fi
+
+# 🛑 THE PORT CHECK RUNS FOR EVERYONE NOW, AND IT USED TO RUN ONLY ON UPGRADES.
+#
+# It sat inside the pause-for-update block above, so a person who ALREADY had
+# Kosmos got this early, identity-aware warning and a FIRST-TIME installer got
+# nothing -- meeting the same collision at the very end instead, after every
+# step had succeeded and with the browser correctly refusing to open. Exactly
+# backwards from where it is needed. Found by Splinter walking the install as a
+# stranger would.
+#
+# ⚠️ ONLY THE PAUSE IS UPGRADE-SPECIFIC. Stopping our own board needs an
+# existing install; asking WHO IS ANSWERING does not, and both sentences below
+# are already right for a fresh machine -- a Kosmos board answering there is
+# another account's, and "quit whatever started it" is the correct advice.
+#
+# 📌 THIS IS THE PRECONDITION, WHICH IS THE POINT: somebody accepts it before
+# investing ten minutes, rather than reading it as a failure afterwards.
+#
+# Identity, not a bare 200: naming a stranger "a Kosmos board" hands out advice
+# ('kosmos stop') that the very next command refuses, and every rerun reproduces
+# it. The advice differs by who is actually on the port.
+_pausebody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _pausebody=""
+case "$_pausebody" in
+  *"Agent Workforce"*|*Kosmos*)
+    die "A Kosmos board is already running on port $PORT. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
+    ;;
+  "") ;;
+  *)
+    die "Another app on this Mac is already using port $PORT, which Kosmos needs. Port $PORT is also the default for OpenTelemetry collectors, so that may be what is there. Quit it, or run the install line again with KOSMOS_PORT=4417 in front of the curl."
+    ;;
+esac
 
 step "Setting up the pieces Kosmos needs."
 # ⚠️ FETCHED ON EVERY RUN, not only the first. The old guard skipped this
