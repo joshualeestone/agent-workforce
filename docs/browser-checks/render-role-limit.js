@@ -24,6 +24,14 @@
  * visible text plus the vertical order of two elements, which is layout. It
  * would not be fine for a screenshot or anything about paint.
  *
+ * ⚠️ IT NEEDS A SANDBOX WITH FIRST RUN ALREADY COMPLETE, and that is not a
+ * convenience. A fresh sandbox opens onboarding over the whole app, and this
+ * script cannot be trusted to notice: it did not, until the occlusion assertion
+ * below was added. Seed the flag before starting the server --
+ *
+ *   mkdir -p "$SB/data/AgentWorkforce"
+ *   echo '{"completedAt":"2026-01-01T00:00:00.000Z"}' > "$SB/data/AgentWorkforce/first-run.json"
+ *
  * Run: see the README in this directory.
  */
 'use strict';
@@ -112,10 +120,29 @@ async function rolesFrom(page) {
         const s = getComputedStyle(n);
         return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && +s.opacity > 0;
       };
+      /* 🛑 AND NOTHING IS ON TOP OF IT. Sizes and computed styles say an element
+         was LAID OUT, which is not the same as a person being able to read it:
+         the first version of this script passed every assertion while the whole
+         page sat under an opaque first-run overlay, because a covered paragraph
+         still measures 24px tall in the right place. `elementFromPoint` asks the
+         only question that matters, which is what is at that spot on screen. */
+      let onTop = false;
+      if (p && vis(p)) {
+        /* ⚠️ SCROLLED TO FIRST. `elementFromPoint` is viewport-relative and
+           returns null for a point below the fold, which this paragraph is on a
+           1000px-tall window -- so without this the assertion failed on a
+           perfectly readable screen AND on a covered one, which is a check that
+           reports the same thing either way. */
+        p.scrollIntoView({ block: 'center' });
+        const r = p.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + r.height / 2);
+        onTop = Boolean(hit) && (hit === p || p.contains(hit));
+      }
       return {
         onStep2: !document.getElementById('cstep-name').hidden,
         text: p ? p.textContent : null,
         shown: vis(p),
+        onTop,
         limitBottom: p ? p.getBoundingClientRect().bottom : null,
         buttonTop: btn ? btn.getBoundingClientRect().top : null,
       };
@@ -124,6 +151,7 @@ async function rolesFrom(page) {
     check(`[${role.key}] the last step is the one on screen`, seen.onStep2);
     check(`[${role.key}] the limit is visible there`, seen.shown && seen.text === role.caution,
       JSON.stringify(String(seen.text).slice(0, 56)));
+    check(`[${role.key}] and a person can actually see it, with nothing over it`, seen.onTop);
     /* Above the button, not below it: below is after the decision.
        ⚠️ IT REQUIRES THE SENTENCE TO BE THERE FIRST, and that is not belt and
        braces: a hidden paragraph reports a bottom of 0, which is above
