@@ -219,3 +219,72 @@ test('repeated looks cannot stack installers', async () => {
   await update.refresh();
   assert.equal(started(), 1, 'three looks ran three installers over each other');
 });
+
+test('an automatic install that keeps failing does not retry every look', async () => {
+  /**
+   * 🛑 THE LOOP THIS CLOSES IS UNATTENDED, WHICH IS WHAT MAKES IT BAD. A
+   * machine that cannot install -- no write permission, a full disk, a blocked
+   * release host -- would spawn a fresh `curl | sh` on every fifteen-minute
+   * look, forever, with nobody watching. `beginInstall` releases its
+   * single-flight flag on a non-zero exit so a PERSON can press Install again,
+   * and that release is exactly what handed the automatic path an unbounded
+   * retry.
+   */
+  update.resetCache();
+  update.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
+  update.setInstalledRoot(() => '/opt/kosmos');
+  update.setAutoPref(() => ({ on: true, ok: true }));
+  let started = 0;
+  /* A runner that FAILS the way a real one does: the spawn succeeds and the
+     child exits non-zero, which is what releases the flag. */
+  update.setInstallRunner(() => {
+    started += 1;
+    return { on: (evt, fn) => { if (evt === 'exit') setTimeout(() => fn(1), 0); }, unref() {} };
+  });
+
+  await update.refresh();
+  assert.equal(started, 1, 'the premise: the first look does try');
+  await new Promise((r) => setTimeout(r, 5));   // let the exit handler run
+
+  /* ⚠️ NOT `resetCache()` BETWEEN LOOKS, which is what the first version of
+     this test did -- and `resetCache` clears the backoff stamp, so the test
+     wiped the very state it was asserting about and read the result as the
+     code failing. `refresh()` called directly is the real second look: it
+     bypasses the TTL the same way the background poll eventually does, and
+     touches nothing else. */
+  await update.refresh();
+  assert.equal(started, 1, 'a failed automatic install retried on the very next look');
+
+  update.setInstalledRoot(null); update.setAutoPref(null); update.setInstallRunner(null);
+});
+
+test('a PERSON whose install fails does not suppress the next automatic one', async () => {
+  /**
+   * 🔑 THE OBSERVABLE HARM OF STAMPING THE BACKOFF ON BOTH PATHS is not that
+   * the button stops working -- `beginInstall` never consults the stamp -- it
+   * is that ONE failed press by a person would silence the unattended path for
+   * an hour on a machine that could have installed perfectly well a minute
+   * later. So the test has to be about the AUTO attempt that follows a MANUAL
+   * failure, which is where the difference shows.
+   */
+  update.resetCache();
+  let started = 0;
+  const failing = () => {
+    started += 1;
+    return { on: (evt, fn) => { if (evt === 'exit') setTimeout(() => fn(1), 0); }, unref() {} };
+  };
+  update.setInstallRunner(failing);
+
+  update.beginInstall();                       // as the route calls it: no `auto`
+  assert.equal(started, 1, 'the premise: the press tried');
+  await new Promise((r) => setTimeout(r, 5));  // its exit releases the flag
+
+  update.setFetcher(async () => ({ ok: true, json: async () => ({ version: '99.0.0' }) }));
+  update.setInstalledRoot(() => '/opt/kosmos');
+  update.setAutoPref(() => ({ on: true, ok: true }));
+  await update.refresh();
+  assert.equal(started, 2,
+    'a person\'s failed press put the UNATTENDED path into a backoff it never earned');
+
+  update.setInstalledRoot(null); update.setAutoPref(null); update.setInstallRunner(null);
+});

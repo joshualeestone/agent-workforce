@@ -138,12 +138,32 @@ async function refresh() {
  * whose whole contract is failing soft; a preference file on a bad mount
  * must cost no update notice at all.
  */
+/**
+ * 🛑 A FAILED AUTOMATIC INSTALL DOES NOT RETRY EVERY FIFTEEN MINUTES. Without
+ * this, a machine that CANNOT install -- no write permission, a full disk, a
+ * blocked release host, a checksum that keeps failing -- spawns a fresh
+ * `curl | sh` on every look, forever, with nobody watching. `beginInstall`
+ * releases its single-flight flag on a non-zero exit precisely so a person can
+ * press Install again, and that release is what hands the automatic path an
+ * unbounded loop.
+ *
+ * ⚠️ THE DIRECTION THIS FAILS IN IS DELIBERATE. Backing off means a broken
+ * machine can be up to an hour behind; not backing off means it hammers itself
+ * and the release host all day. And the cost is bounded and visible either way,
+ * because the Settings card still shows the version and the Install button
+ * still works IMMEDIATELY -- the backoff is on the UNATTENDED path only, where
+ * nobody is there to see it failing.
+ */
+const AUTO_RETRY_AFTER = 60 * 60 * 1000;
+let autoFailedAt = 0;
+
 function maybeAutoInstall() {
   try {
     if (!available()) return;
     if (!installedRoot()) return;
     if (!(autoPref() || {}).on) return;
-    beginInstall();
+    if (autoFailedAt && Date.now() - autoFailedAt < AUTO_RETRY_AFTER) return;
+    beginInstall({ auto: true });
   } catch { /* an update that cannot start must not break the one that shows */ }
 }
 
@@ -213,25 +233,13 @@ function setupUrl() {
  * are separate process trees).
  */
 let installStarted = false;
-function alreadyInstalling() { return installStarted; }
-function beginInstall() {
-  // ⚠️ Single-flight. available() stays truthy until the new server is up,
-  // so a double click or a second tab would spawn a SECOND detached
-  // installer racing the first through the stage-and-swap. One per server
-  // lifetime; the flag dies with the process the installer restarts.
-  if (installStarted) return;
-  installStarted = true;
-  if (installRunner) return installRunner(setupUrl());
-  // The URL travels as a positional parameter, never interpolated into the
-  // one command in this product that ends in `| sh`; and KOSMOS_RELEASE_BASE
-  // rides along so the installer stages its tarballs from the SAME host the
-  // script came from (the app's env override and the installer's default
-  // could otherwise split-brain a staging deployment).
-  const child = spawn('/bin/sh', ['-c', 'curl -fsSL "$1" | sh', 'sh', setupUrl()], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, KOSMOS_RELEASE_BASE: base },
-  });
+
+/**
+ * The two things that must happen when an installer child fails, wherever the
+ * child came from. Shared so a test double exercises the real wiring rather
+ * than a shape that merely resembles it.
+ */
+function wireChild(child, opts) {
   // ⚠️ 'error' fires ASYNCHRONOUSLY on spawn failure (EMFILE, EAGAIN); with
   // no listener it becomes an uncaught exception, and the failure mode of
   // the one route that runs software would be crashing the board with no
@@ -240,6 +248,9 @@ function beginInstall() {
   // the flag, and the person's retry gets a real attempt.
   child.on('error', (err) => {
     installStarted = false;
+    /* Only the unattended path is held back. A person pressing Install is
+       present, is watching, and gets an immediate attempt every time. */
+    if (opts && opts.auto) autoFailedAt = Date.now();
     process.stderr.write(`Kosmos update could not start: ${String((err && err.message) || err)}\n`);
   });
   // ⚠️ And the PIPELINE failing after a clean spawn (release host 404, a
@@ -254,9 +265,46 @@ function beginInstall() {
   child.on('exit', (code) => {
     if (code !== 0) {
       installStarted = false;
+      if (opts && opts.auto) autoFailedAt = Date.now();
       process.stderr.write(`Kosmos update failed before it could restart the board (exit ${code}); Install can be tried again\n`);
     }
   });
+}
+
+function alreadyInstalling() { return installStarted; }
+function beginInstall(opts) {
+  // ⚠️ Single-flight. available() stays truthy until the new server is up,
+  // so a double click or a second tab would spawn a SECOND detached
+  // installer racing the first through the stage-and-swap. One per server
+  // lifetime; the flag dies with the process the installer restarts.
+  if (installStarted) return;
+  installStarted = true;
+  /* 🛑 AN INJECTED RUNNER GOES THROUGH THE SAME WIRING, and it did not before.
+     This returned immediately on `installRunner`, so the two handlers below --
+     the ones that release the single-flight flag and stamp the automatic
+     backoff -- were unreachable from any test. Both of tonight's mutations
+     against that backoff stayed GREEN for exactly that reason: the second look
+     was blocked by a flag that had never been released, not by the guard the
+     test claimed to be measuring.
+     🔑 A test double that skips the code around it is not a double, it is a
+     bypass. If the runner hands back something child-shaped, it is treated as
+     a child. */
+  if (installRunner) {
+    const fake = installRunner(setupUrl());
+    if (fake && typeof fake.on === 'function') { wireChild(fake, opts); return fake; }
+    return fake;
+  }
+  // The URL travels as a positional parameter, never interpolated into the
+  // one command in this product that ends in `| sh`; and KOSMOS_RELEASE_BASE
+  // rides along so the installer stages its tarballs from the SAME host the
+  // script came from (the app's env override and the installer's default
+  // could otherwise split-brain a staging deployment).
+  const child = spawn('/bin/sh', ['-c', 'curl -fsSL "$1" | sh', 'sh', setupUrl()], {
+    detached: true,
+    stdio: 'ignore',
+    env: { ...process.env, KOSMOS_RELEASE_BASE: base },
+  });
+  wireChild(child, opts);
   child.unref();
 }
 
@@ -266,7 +314,7 @@ function setInstallRunner(f) { installRunner = f; }
 function setAutoPref(f) { autoPrefFn = f; }
 function setInstalledRoot(f) { installedRootFn = f; }
 function setFetcher(f) { fetcher = f; }
-function resetCache() { cache = { at: 0, latest: null, reached: false, readable: false }; inFlight = null; installStarted = false; }
+function resetCache() { cache = { at: 0, latest: null, reached: false, readable: false }; inFlight = null; installStarted = false; autoFailedAt = 0; }
 
 module.exports = {
   available, poke, refresh, newer, installedRoot, setupUrl, beginInstall,
