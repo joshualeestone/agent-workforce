@@ -49,6 +49,26 @@ if ! git -C "$REPO" diff --quiet -- package.json; then
   git -C "$REPO" add package.json
   git -C "$REPO" commit -q -m "v${V//./} -- version"
   echo "   committed the bump, so the build is stamped at a real commit"
+  # 🛑 AND PUSHED, BECAUSE A COMMIT THAT NEVER LEAVES IS NOT A STAMP. This
+  # script committed the bump and stopped, so every release left its version
+  # commit on one machine. Nothing looked wrong: the bundle carried the right
+  # version, the site served it, and `verify-served.sh` passed, because every
+  # check here measures the ARTIFACT and none of them asks whether the commit
+  # the artifact is stamped at exists anywhere else.
+  #
+  # ⚠️ The whole reason for the paragraph above is that a version resolves to a
+  # commit. A commit only this machine has does not resolve for anybody, so the
+  # unpushed state defeats the stated purpose rather than merely being untidy.
+  #
+  # 📌 A failure here is REPORTED AND NOT FATAL. The release is about what the
+  # site serves; being unable to reach the remote is a real thing to say and a
+  # bad reason to refuse to ship. Step 9 still proves what a user receives.
+  if git -C "$REPO" push -q origin HEAD 2>/dev/null; then
+    echo "   pushed it, so the stamp resolves somewhere other than this machine"
+  else
+    echo "   ⚠️  COULD NOT PUSH THE BUMP. The release continues, and the version"
+    echo "      stamp resolves to a commit only this machine has until you do."
+  fi
 fi
 [ -z "$(git -C "$REPO" status --porcelain)" ] || {
   echo "the tree is dirty after the bump; the bundle would ship as -DIRTY"; exit 1; }

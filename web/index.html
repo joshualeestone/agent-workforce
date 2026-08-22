@@ -13287,9 +13287,20 @@ function pjMemberHasIt(m) {
        ⚠️ The receipt is the DISAPPEARANCE. A restarted agent's instructions are
        no longer stale, so the poll takes this line away by itself, and
        `noteFor` finds nothing here and writes nothing. */
+    /* 🛑 AN ACCESSIBLE NAME THAT SAYS WHICH AGENT. On a project with six stale
+       members a screen reader otherwise hears "Bring it up to date" six times
+       with nothing to tell them apart, which is the same list problem the two
+       sibling controls on this screen already solve ("Remove from project:
+       <name>", "Answer <name>'s question").
+       ⚠️ THE VISIBLE WORDS SURVIVE VERBATIM (SC 2.5.3), which is why it is not
+       "Bring <name> up to date": a label that reworded the visible string would
+       break voice control for somebody saying what they can see. The colon form
+       is the Remove sibling's, and it is the one that satisfies both.
+       (Mona Lisa, found by checking the fix rather than reading it.) */
     return '<span class="pj-notyet">Has not picked this up yet'
       + '<button class="btn-quiet pj-notyet-go" type="button" data-restart-agent="'
-      + esc(m.sessionName) + '">Bring it up to date</button></span>';
+      + esc(m.sessionName) + '" aria-label="Bring it up to date: ' + esc(m.name || m.sessionName)
+      + '">Bring it up to date</button></span>';
   }
   if (s.state === 'unknown') {
     /* ⚠️ NO REMEDY ON THIS ARM, deliberately. "We cannot tell" is not evidence

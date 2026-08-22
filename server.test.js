@@ -6542,7 +6542,15 @@ test('a member row says when the agent has NOT picked the project up yet', () =>
      assertion would pass unchanged when she ruled the button in; it does not,
      and narrowing it deliberately is the honest way to keep it rather than
      discovering later that it had been deleted. */
-  const readable = (html) => String(html).replace(/<[^>]*>/g, ' ');
+  /* ⚠️ IT READS THE ACCESSIBLE NAME TOO. An `aria-label` is words a person
+     reads, just not with their eyes, so a future "Restart Leo" hidden in one
+     would slip this guard exactly as `data-restart-agent` slipped the version
+     that matched raw markup. Same hole, other side of the same fix (Mona Lisa).
+     Everything else in a tag is machinery. */
+  const readable = (html) => {
+    const labels = [...String(html).matchAll(/aria-label="([^"]*)"/g)].map((m) => m[1]).join(' ');
+    return String(html).replace(/<[^>]*>/g, ' ') + ' ' + labels;
+  };
   for (const st of ['stale', 'unknown']) {
     assert.doesNotMatch(readable(hasIt({ instructions: { state: st } })), /restart/i,
       'the ' + st + ' row names a workaround in words, which outlives the workaround');
@@ -6551,6 +6559,8 @@ test('a member row says when the agent has NOT picked the project up yet', () =>
      not passing on an empty string. */
   assert.match(readable('<b data-x="restart">hello</b>'), /hello/);
   assert.doesNotMatch(readable('<b data-x="restart">hello</b>'), /restart/i);
+  /* And the other arm: an accessible name IS read, so it must not be stripped. */
+  assert.match(readable('<b aria-label="Restart Leo">x</b>'), /Restart Leo/);
 
   /* 🛑 AND NOW IT CARRIES THE REMEDY, which the rule above still permits
      because the rule's real target was naming OUR MECHANISM where the person
@@ -6569,6 +6579,16 @@ test('a member row says when the agent has NOT picked the project up yet', () =>
   assert.match(stale, /Bring it up to date/, 'the stale row states a problem with no way to act on it');
   assert.match(stale, new RegExp('data-restart-agent="' + realName + '"'),
     'the remedy is not wired to the shared restart path, so it opens no confirmation');
+  /* 🔑 AND IT SAYS WHICH AGENT. Six stale members otherwise announce six
+     identical buttons. The visible words survive verbatim inside it (SC 2.5.3),
+     so voice control still works for somebody saying what they can see. */
+  assert.match(stale, /aria-label="Bring it up to date: [^"]+"/,
+    'the remedy has no accessible name, so a list of them is unnavigable by ear');
+  const label = stale.match(/aria-label="([^"]*)"/)[1];
+  assert.ok(label.includes('Bring it up to date'),
+    'the accessible name does not contain the visible words: ' + label);
+  assert.ok(label.length > 'Bring it up to date'.length,
+    'the accessible name adds nothing, so it still does not say which agent');
   /* ⚠️ ONLY THE ARM THAT KNOWS. "We cannot tell" is not evidence anything needs
      fixing, and a button beside it turns a could-not-look into a diagnosis. */
   assert.ok(!/Bring it up to date/.test(withName('unknown')),
