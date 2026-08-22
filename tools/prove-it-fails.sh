@@ -82,19 +82,40 @@ git diff --stat | tail -1 | sed 's/^/    changed: /'
 # trusted. Splinter's line when the glob was widened: the enforcement was "a
 # person knowing", which is the thing we had spent the evening replacing.
 #
+# 🛑 BUT NOT EVERY NODE TEST OF A SHELL FILE IS WRONG, and the first version of
+# this refusal blocked a proof I had legitimately run an hour earlier. A node
+# test can READ setup.sh and assert about its text -- that every copy of the
+# default port agrees, that a phrase is absent, that one block precedes another
+# -- and mutating the file really does turn those red. What it cannot do is
+# prove anything about what the script DOES when it runs.
+# 🔑 The two are not separable by inspection, so the caller states which it is.
+# `SHELL_READ_ONLY=1` is a claim, printed in the output, that can be wrong and
+# be seen to be wrong; silence was an assumption that could not.
+#
 # 📌 It restores first, so a refusal never leaves the tree broken.
 _changed_shell="$(git diff --name-only | grep -E '\.sh$|^install/kosmos$' || true)"
 case "$TESTFILE" in
   *.test.js)
-    if [ -n "$_changed_shell" ]; then
+    if [ -n "$_changed_shell" ] && [ "${SHELL_READ_ONLY:-}" != "1" ]; then
       echo "    🛑 THIS MUTATION CHANGED SHELL, AND $TESTFILE CANNOT EXECUTE IT."
       echo "$_changed_shell" | sed 's/^/       changed: /'
-      echo "       yarn test never runs these files, so a green result here would"
-      echo "       mean the runner did not touch the break, not that a guard held."
-      echo "       Point it at tools/test-install.sh (minutes, it really installs)."
+      echo "       yarn test never RUNS these files, so if your guard is about what"
+      echo "       the script DOES, a green result here would mean the runner never"
+      echo "       touched the break. Point it at tools/test-install.sh, which really"
+      echo "       installs (minutes, not seconds)."
+      echo
+      echo "       If your guard READS the file instead — the port copies, a banned"
+      echo "       phrase, an ordering check — that is a legitimate proof and this"
+      echo "       is the wrong refusal. Say so and it runs:"
+      echo "           SHELL_READ_ONLY=1 bash tools/prove-it-fails.sh ..."
       git checkout -q -- .
       echo "    restored"
       exit 1
+    fi
+    if [ -n "$_changed_shell" ]; then
+      # Stated, so the run's own record says which case it was. A claim made
+      # out loud can be wrong and be seen to be wrong; an assumption cannot.
+      echo "    (SHELL_READ_ONLY: this test reads the shell file rather than running it)"
     fi
     ;;
 esac
