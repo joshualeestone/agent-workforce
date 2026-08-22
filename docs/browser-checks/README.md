@@ -7,6 +7,22 @@ a browser, and this repo has no dependencies and is not about to grow one for a
 check that runs a few times a release. They live here so the next person can run
 exactly what was run, rather than re-deriving it.
 
+## The composition check
+
+`regress-a-night.js` is the odd one here and worth knowing about. Every other
+script pins ONE surface. That one pins that a night's worth of releases still
+COMPOSE: three board layouts, four Settings switches, the accounts list, Delete
+history and a task page with parts, in both themes, on one build.
+
+🔑 **Each of those was verified when it shipped and then had hours of other work
+land on top of it, which is the moment nobody looks again.** Two of the defects
+it now asserts against were found exactly that way: a third board layout that
+left the grid switched on underneath it, and a separator rule that selected zero
+elements once a row was appended after the list.
+
+Run `node docs/browser-checks/regress-a-night.js --seed` for the four lines that
+build the board it expects.
+
 ## Why they exist
 
 Everything in this directory is here because of defects that `node --test`
