@@ -287,10 +287,19 @@ function hasPicture() { return picturePath() !== null; }
  * person cannot be expected to learn two rules about the same act.
  */
 function savePicture(contentType, buffer) {
-  const ext = PIC_TYPES[contentType];
-  if (!ext) return { ok: false, because: 'that has to be a PNG, JPEG, WebP or GIF' };
+  /* 🔑 THE BYTES DECIDE, the same as the agent avatar and for the same reason:
+     the page sends `file.type`, which the browser derives from the FILENAME, so
+     a good PNG the OS could not type arrived with nothing and was refused. One
+     sniffer, in store.js, rather than a second copy of the signatures here
+     (#12). */
+  /* ⚠️ EMPTY FIRST. Sniffing an empty buffer says "not an image", which is true
+     and useless: "that file was empty" is the sentence that tells somebody what
+     happened. Reordering these silently downgraded that message, which is the
+     kind of loss a passing test suite does not notice. */
   if (!buffer || !buffer.length) return { ok: false, because: 'that file was empty' };
   if (buffer.length > 5 * 1024 * 1024) return { ok: false, because: 'that picture is larger than 5MB' };
+  const ext = PIC_TYPES[store.imageTypeOf(buffer)];
+  if (!ext) return { ok: false, because: 'that has to be a PNG, JPEG, WebP or GIF' };
   try {
     fs.mkdirSync(AVATAR_DIR, { recursive: true });
     /* Replace rather than accumulate: one picture, and an old .png left beside
