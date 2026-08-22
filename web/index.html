@@ -3325,9 +3325,21 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   <div class="field">
     <label class="flabel" for="d-file">Picture</label>
     <div class="fhint">A face makes an agent easy to pick out at a glance.</div>
+    <!-- ⚠️ A REAL BUTTON OVER A HIDDEN INPUT, which is the pattern the create
+         form already uses and the reason is recorded there: a hidden file input
+         is out of the tab order and a label is not keyboard-activatable, so the
+         label-only version makes this the one control on the form a keyboard
+         cannot reach. A button that forwards the click keeps it reachable.
+         🛑 THIS SCREEN AND SETTINGS WERE LEFT ON THE BROWSER DEFAULT while
+         create got the treatment, so two of the three places a person picks a
+         picture rendered an unstyled "Choose File / No file chosen" in a
+         product where every other control is drawn. Same shape as the memory
+         figure earlier tonight: three surfaces, one job, and the ones nobody
+         was editing stayed behind. -->
     <div class="frow">
-      <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif">
+      <button class="btn sav-btn" type="button" id="d-file-btn">Change picture</button>
       <button class="btn" id="d-remove" type="button">Remove</button>
+      <input type="file" id="d-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
     </div>
     <div class="fmsg" id="d-msg"></div>
   </div>
@@ -4791,8 +4803,9 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
       <div class="yourow">
         <span class="lav youav" id="you-face" aria-hidden="true">You</span>
         <div class="frow">
-          <input type="file" id="you-file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="A picture of you">
+          <button class="btn sav-btn" type="button" id="you-file-btn">Change picture</button>
           <button class="btn-quiet" id="you-remove" type="button" hidden>Remove</button>
+          <input type="file" id="you-file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="A picture of you" hidden>
         </div>
       </div>
       <p class="dhint" id="you-msg" role="status" style="margin:10px 0 0;">It appears wherever Kosmos shows you, which is the middle of the org chart and beside anything you have said.</p>
@@ -12373,6 +12386,15 @@ document.getElementById('create-name').addEventListener('input', () => {
 
 document.getElementById('create-avatar-btn').addEventListener('click', () => {
   document.getElementById('create-avatar').click();
+});
+/* The same forwarding for the other two pickers. Each input keeps its own
+   `change` handler untouched: `.click()` on a file input fires `change` exactly
+   as a direct click does, so nothing about how the file is read changes. */
+document.getElementById('d-file-btn').addEventListener('click', () => {
+  document.getElementById('d-file').click();
+});
+document.getElementById('you-file-btn').addEventListener('click', () => {
+  document.getElementById('you-file').click();
 });
 document.getElementById('create-avatar').addEventListener('change', (e) => {
   // Held client-side: there is no agent yet to attach it to. Uploaded right
