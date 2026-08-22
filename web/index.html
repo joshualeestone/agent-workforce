@@ -123,7 +123,7 @@
   --warn-ink:      #7a5200;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg:            #1c1c1e;
     --bg-elevated:   #2c2c2e;
     --bg-sunken:     #141416;
@@ -168,7 +168,7 @@
   :root { --label-2: rgba(0,0,0,0.78); --separator: rgba(0,0,0,0.3); }
 }
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root { --label-2: rgba(255,255,255,0.87); --separator: rgba(255,255,255,0.45); }
+  :root:not([data-theme="light"]) { --label-2: rgba(255,255,255,0.87); --separator: rgba(255,255,255,0.45); }
 }
 
 /* Containers that are themselves elevated: a field on them takes the PAPER of
@@ -666,9 +666,25 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
   /* The tint is the ONLY selected cue at this width (the underline is
      gone), and the dark-ink shade vanishes on the flipped dark band. */
   @media (prefers-color-scheme: dark) {
-    .apphead .tab.on { background: rgba(245,245,244,.08); }
+    :root:not([data-theme="light"]) .apphead .tab.on { background: rgba(245,245,244,.08); }
   }
 }
+/* The appearance picker (#40, and Mona Lisa's item 15: "light/dark toggle
+   missing top right"). Sized down to chrome weight: it is a preference, not
+   an action, and it sits next to a status stamp that must stay the loudest
+   thing in that corner. */
+.themepick { display: inline-flex; align-items: center; gap: 2px; padding: 2px;
+             border: 1px solid var(--k-rule); border-radius: 999px; background: var(--k-surface); }
+.themeopt { display: inline-flex; align-items: center; justify-content: center;
+            min-width: 26px; height: 22px; padding: 0 8px; border: 0; border-radius: 999px;
+            background: none; color: var(--label-2); cursor: pointer;
+            font: 600 11px var(--font-ui); letter-spacing: .04em; }
+.themeopt:hover { color: var(--label); }
+.themeopt[aria-checked="true"] { background: var(--k-sunk); color: var(--label); }
+/* ⚠️ A visible focus ring, because these are 22px targets in a corner: the
+   keyboard user needs to see which of three they are on. */
+.themeopt:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
+@media (max-width: 40rem) { .themepick { display: none; } }
 .headleft { display: flex; align-items: center; gap: var(--space-5); }
 /* An empty slot is a flex item and would spend one trailing gap. */
 #utoast-slot:empty, #unote-slot:empty { display: none; }
@@ -868,7 +884,16 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .astate.st-stopped { border-color: rgba(20,22,26,.30); }
 .astate.st-unknown { border-color: rgba(20,22,26,.22); border-style: dashed; }
 .acard > .astate.st-attn { display: flex; align-items: center; gap: 6px; width: 100%; }
-.atask { font-size: .9375rem; color: var(--k-ink-2); margin-top: 6px; }
+/* ⚠️ .875rem, NOT .9375rem, and this was the one item of four the card regroup
+   missed. Josh's words: "I also shrunk the status text by quite a bit so it's
+   not so giant and prominent" — `.atask` IS that status text. The three
+   siblings around it all landed; this one silently kept its old size, which is
+   the shape a partial port always takes.
+   📌 Safe as a bare rule: `.atask` is used exactly once in this file, on the
+   card. The list row uses `.ltask`, so nothing else moves. (Found by Mona
+   Lisa, whose comparison instrument had itself been pinned to a two-day-old
+   pack and was calling the pack's own progress a disagreement.) */
+.atask { font-size: .875rem; color: var(--k-ink-2); margin-top: 6px; }
 /* `.acut` is retired: the pack dropped the rule AND the divs together, and a
    surviving rule would still draw a line under markup that no longer exists. */
 /* The role sits directly under the name as one unit (Josh's regroup). */
@@ -1549,7 +1574,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
 .composerhint { margin: 0; font-size: .75rem; color: var(--k-ink-2); }
 .composerhint b { font-family: var(--font-mono); font-weight: 700; color: var(--k-ink); }
 @media (prefers-color-scheme: dark) {
-  .msg-av { background: rgba(245,245,244,.10); }
+  :root:not([data-theme="light"]) .msg-av { background: rgba(245,245,244,.10); }
 }
 /* ⚠️ `display: block` on all three, and it is not cosmetic. These are
    SPANs inside a button, so without it the folder path and the agents line ran
@@ -1918,15 +1943,7 @@ svg { display: block; }
 .avatar-bg       { fill: var(--bg-sunken); stroke: var(--separator); stroke-width: 0.5; }
 .avatar-initials { fill: var(--label-2); font: 600 var(--text-body) var(--font-ui); letter-spacing: .02em; }
 @media (prefers-color-scheme: dark) {
-  /* The toast's attention red lightens in dark: #b3261e measures ~2.1:1
-     on the dark elevated ground and fails AA as 13px text. ONE dark
-     attention red across the app: #ff8c82, the pack's own dark family,
-     ruled by Mona Lisa 2026-08-18 in-channel with the pack's one-red
-     argument ("two reds a few pixels apart meaning different things is
-     the drift that never gets cleaned up"); the pre-pack #F0665A
-     retired here -- it measured 4.48:1 on this ground, itself under the
-     4.5 floor for the 13px headline. #ff8c82 is 6.19:1. */
-  .utoast { --utone: #ff8c82; }
+  :root:not([data-theme="light"]) .utoast { --utone: #ff8c82; }
 }
 .note  { margin-top: var(--space-4); padding: var(--space-4) var(--space-5);
          font: var(--text-callout) var(--font-ui); color: var(--label);
@@ -2192,84 +2209,44 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
    guard against someone "tidying" the block back up the file. The pack's
    real dark values replace all of this in #40. */
 @media (prefers-color-scheme: dark) {
-  /* border too: the light dashed value (rgba ink at .26) is near-invisible
-     over the dark ground, and a vanished dashed border is the whole
-     "add" affordance gone (the rule below also joins its surface to the
-     sibling tiles' k-surface) */
-  .stat.action { background: var(--k-surface); border-color: var(--label-3); }
-  /* hover carries higher specificity (0,3,0) than the line above, so it
-     needs its own dark ground or the tile flickers transparent on hover.
-     ONE surface declaration per rule: an earlier cut carried a second
-     .stat.action pair later in this block, resolved only by within-block
-     order -- do not reintroduce one. */
-  .stat.action:hover { background: var(--k-surface); border-color: var(--gold-deep); }
-  .stat.action .slab, .stat.action .plus { color: var(--label); }
-  .linkish { color: var(--label-2); }
-  .linkish:hover { color: var(--label); }
-  .removed-wrap { border-top-color: var(--separator); }
-  .removed-row + .removed-row { border-top-color: var(--separator); }
-  .removed-row .who { color: var(--label); }
-  .removed-row .when, .removed-hint { color: var(--label-2); }
-  /* focus rings drawn ON the body ground flip with it; being AFTER the
-     outline shorthand declarations is what makes these effective */
-  .stat.action:focus-visible, .linkish:focus-visible { outline-color: var(--label); }
-  /* pack-pass ground text on the BODY ground (the agent-page header,
-     both dremove strips), mapped to the legacy dark tokens, same lesson
-     as .linkish above. Since the dark-tokens set the .dbox surfaces flip
-     too (k-surface + k-ink together), so these patches cover only the
-     ground furniture, and --label/--k-ink dark values are near-twins. */
-  .detail { color: var(--label); }
-  .dname { color: var(--label); }
-  .dremove { border-top-color: var(--separator); color: var(--label); }
-  .dremove .dhint, .detail .dremove .fhint, .detail .dremove .fmsg { color: var(--label-2); }
-  .dremove .btn-quiet { color: var(--label); }
-  .dprojlab { color: var(--label-2); }
-  /* The pack's dark set leaves its attn red at #b3261e, which measures
-     2.69:1 on the dark card (a pack defect, recorded in the plan; its own
-     dark .pending already uses the 255,140,130 family, which is the red
-     it chose for dark grounds -- 8.0:1 here). */
-  .pjpill.attn { color: #ff8c82; }
-  .pj-row.attn { border-color: rgba(255,140,130,.55); }
-  /* The whole attn family, not just the projects pair: these composited
-     ~1.35:1 against the dark card and the needs-you cue vanished on the
-     board (dark-tokens review, blocker 1). */
-  .acard.attn { border-color: rgba(255,140,130,.55); box-shadow: 0 1px 3px rgba(255,140,130,.14); }
-  .lrow.attn { border-color: rgba(255,140,130,.55); }
-  .astate.st-attn { border-color: rgba(255,140,130,.62); }
-  .stat.alert { border-color: rgba(255,140,130,.55); }
-  .acard.hot { background: linear-gradient(180deg, rgba(255,140,130,.15) 0%, rgba(255,140,130,0) 42%), var(--k-surface); }
-  /* The receipt pill landed (#75) AFTER this dark pass (#71), so its
-     borders never met it: failed carried the light red and placed the
-     light green into dark. Same families as their siblings here and
-     .astate.st-working; .delivery.unsure is dashed geometry, no color. */
-  .delivery.placed { border-color: rgba(121,197,157,.5); }
-  .delivery.failed { border-color: rgba(255,140,130,.5); }
-  /* Instrument geometry drawn in light-ink alphas: the gauge track, the
-     unknown dashes, and the list memory bar were ~invisible over the
-     dark card, and the dashes are the SOLE carrier of memory-unknown
-     (blocker 2). Same alphas, light ink. */
-  .gt { stroke: rgba(245,245,244,.14); }
-  .gu { stroke: rgba(245,245,244,.28); }
-  .bar { background: rgba(245,245,244,.14); }
-  .bar.unknown { background: repeating-linear-gradient(90deg, rgba(245,245,244,.24) 0 3px, transparent 3px 8px); }
-  /* The family's two instrument FILLS (pass 2): the high-severity arc and
-     bar segment kept the light red at ~1.8:1 against their own dark
-     tracks; and the hazard triangle, so an attn pill does not draw two
-     different reds side by side. Its glyph flips to the dark ink. */
-  .gf.high { stroke: #ff8c82; }
-  .bar i.high { background: #ff8c82; }
-  .haz { background: #ff8c82; color: #0c0d0f; }
-  .membadge { background: #ff8c82; color: #0c0d0f; }
-  /* Working's green border outranked BY the quiet states after their fix
-     (~1.9 vs ~2.7): the third channel's ordering held with a lighter
-     green from the same fill family. */
-  .astate.st-working { border-color: rgba(121,197,157,.62); }
-  /* The state pill's third channel (border) for the three quiet states,
-     and the hover/selected cues, all dark-ink literals gone flat. */
-  .astate.st-paused, .astate.st-stopped { border-color: rgba(245,245,244,.32); }
-  .astate.st-unknown { border-color: rgba(245,245,244,.24); }
-  .lrow:hover { border-color: rgba(245,245,244,.30); }
-  .pj-row:hover { border-color: rgba(245,245,244,.30); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+  :root:not([data-theme="light"]) .stat.action { background: var(--k-surface); border-color: var(--label-3); }
+  :root:not([data-theme="light"]) .stat.action:hover { background: var(--k-surface); border-color: var(--gold-deep); }
+  :root:not([data-theme="light"]) .stat.action .slab, :root:not([data-theme="light"]) .stat.action .plus { color: var(--label); }
+  :root:not([data-theme="light"]) .linkish { color: var(--label-2); }
+  :root:not([data-theme="light"]) .linkish:hover { color: var(--label); }
+  :root:not([data-theme="light"]) .removed-wrap { border-top-color: var(--separator); }
+  :root:not([data-theme="light"]) .removed-row + .removed-row { border-top-color: var(--separator); }
+  :root:not([data-theme="light"]) .removed-row .who { color: var(--label); }
+  :root:not([data-theme="light"]) .removed-row .when, :root:not([data-theme="light"]) .removed-hint { color: var(--label-2); }
+  :root:not([data-theme="light"]) .stat.action:focus-visible, :root:not([data-theme="light"]) .linkish:focus-visible { outline-color: var(--label); }
+  :root:not([data-theme="light"]) .detail { color: var(--label); }
+  :root:not([data-theme="light"]) .dname { color: var(--label); }
+  :root:not([data-theme="light"]) .dremove { border-top-color: var(--separator); color: var(--label); }
+  :root:not([data-theme="light"]) .dremove .dhint, :root:not([data-theme="light"]) .detail .dremove .fhint, :root:not([data-theme="light"]) .detail .dremove .fmsg { color: var(--label-2); }
+  :root:not([data-theme="light"]) .dremove .btn-quiet { color: var(--label); }
+  :root:not([data-theme="light"]) .dprojlab { color: var(--label-2); }
+  :root:not([data-theme="light"]) .pjpill.attn { color: #ff8c82; }
+  :root:not([data-theme="light"]) .pj-row.attn { border-color: rgba(255,140,130,.55); }
+  :root:not([data-theme="light"]) .acard.attn { border-color: rgba(255,140,130,.55); box-shadow: 0 1px 3px rgba(255,140,130,.14); }
+  :root:not([data-theme="light"]) .lrow.attn { border-color: rgba(255,140,130,.55); }
+  :root:not([data-theme="light"]) .astate.st-attn { border-color: rgba(255,140,130,.62); }
+  :root:not([data-theme="light"]) .stat.alert { border-color: rgba(255,140,130,.55); }
+  :root:not([data-theme="light"]) .acard.hot { background: linear-gradient(180deg, rgba(255,140,130,.15) 0%, rgba(255,140,130,0) 42%), var(--k-surface); }
+  :root:not([data-theme="light"]) .delivery.placed { border-color: rgba(121,197,157,.5); }
+  :root:not([data-theme="light"]) .delivery.failed { border-color: rgba(255,140,130,.5); }
+  :root:not([data-theme="light"]) .gt { stroke: rgba(245,245,244,.14); }
+  :root:not([data-theme="light"]) .gu { stroke: rgba(245,245,244,.28); }
+  :root:not([data-theme="light"]) .bar { background: rgba(245,245,244,.14); }
+  :root:not([data-theme="light"]) .bar.unknown { background: repeating-linear-gradient(90deg, rgba(245,245,244,.24) 0 3px, transparent 3px 8px); }
+  :root:not([data-theme="light"]) .gf.high { stroke: #ff8c82; }
+  :root:not([data-theme="light"]) .bar i.high { background: #ff8c82; }
+  :root:not([data-theme="light"]) .haz { background: #ff8c82; color: #0c0d0f; }
+  :root:not([data-theme="light"]) .membadge { background: #ff8c82; color: #0c0d0f; }
+  :root:not([data-theme="light"]) .astate.st-working { border-color: rgba(121,197,157,.62); }
+  :root:not([data-theme="light"]) .astate.st-paused, :root:not([data-theme="light"]) .astate.st-stopped { border-color: rgba(245,245,244,.32); }
+  :root:not([data-theme="light"]) .astate.st-unknown { border-color: rgba(245,245,244,.24); }
+  :root:not([data-theme="light"]) .lrow:hover { border-color: rgba(245,245,244,.30); }
+  :root:not([data-theme="light"]) .pj-row:hover { border-color: rgba(245,245,244,.30); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
 }
 /* A restore that half-worked, said on the row it happened to. Full width so it
    wraps under the name rather than squeezing the Restore button off the end. */
@@ -2462,7 +2439,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
    render shows it, which is why the suite now carries "every CSS declaration in the page sits
    inside a selector" to guard it. */
 @media (prefers-color-scheme: dark) {
-  #firstrun { --label-2: #4a4f57; --separator: #e3e1dc; }
+  :root:not([data-theme="light"]) #firstrun { --label-2: #4a4f57; --separator: #e3e1dc; }
 }
 #firstrun .fr-box {
   width: min(660px, 100%); background: #fff; border-radius: 24px; border: 0;
@@ -2628,7 +2605,125 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
    white-on-white in dark (dead markup today; pinned while adjacent). */
 .fr-body p.fr-next { font: var(--text-callout) var(--font-ui); color: var(--k-ink-2);
                      margin-top: var(--space-7); font-style: italic; }
+/* ===== GENERATED: forced dark theme. Do not edit by hand. ===== */
+/* Written by tools/sync-forced-theme.js from the prefers-color-scheme
+   blocks above. Edit those; run the tool; commit both. */
+:root[data-theme="dark"] {
+    --bg:            #1c1c1e;
+    --bg-elevated:   #2c2c2e;
+    --bg-sunken:     #141416;
+    --label:         rgba(255,255,255,0.92);
+    --label-2:       rgba(255,255,255,0.62);
+    --label-3:       rgba(255,255,255,0.42);
+    --separator:     rgba(255,255,255,0.14);
+    --border-strong: rgba(255,255,255,0.26);
+    --shadow-card:   0 1px 3px rgba(0,0,0,0.5);
+    --attn-bg:       rgba(255,255,255,0.055);
+    --warn-bg:       rgba(255,190,60,0.12);
+    --warn-border:   rgba(255,190,60,0.32);
+    --warn-ink:      #ffca55;
+    /* The pack's own dark set for the k-tokens, verbatim (17c line 49).
+       Until this block existed the k-tokens held their light values in
+       both schemes, so every card riding --k-surface sat literal-white
+       on the flipped page ground -- measured by Mona Lisa 2026-08-18
+       (card interior 255,255,255 in dark). This was the deferred half
+       of the theme pass (#40); the card-surface flip ships here, the
+       manual data-theme toggle stays with #40. */
+    --k-bg:      #0c0d0f;
+    --k-surface: #17191c;
+    --k-ink:     #f5f5f4;
+    --k-ink-2:   #a9adb3;
+    --k-rule:    #2a2d31;
+    --k-track:   rgba(245,245,244,.22);
+    --k-knob:    #e8e9eb;
+    /* The inverse: a raised-looking wash on the dark ground, because a
+       darker-than-black panel is not a thing anybody can see. */
+    --k-sunk:    rgba(245,245,244,.06);
+    --k-optline: #6e7278;
+  }
+
+@media (prefers-contrast: more) {
+:root[data-theme="dark"] { --label-2: rgba(255,255,255,0.87); --separator: rgba(255,255,255,0.45); }
+}
+
+@media (max-width: 56rem) {
+:root[data-theme="dark"] .apphead .tab.on { background: rgba(245,245,244,.08); }
+}
+
+:root[data-theme="dark"] .msg-av { background: rgba(245,245,244,.10); }
+
+:root[data-theme="dark"] .utoast { --utone: #ff8c82; }
+
+:root[data-theme="dark"] .stat.action { background: var(--k-surface); border-color: var(--label-3); }
+:root[data-theme="dark"] .stat.action:hover { background: var(--k-surface); border-color: var(--gold-deep); }
+:root[data-theme="dark"] .stat.action .slab, :root[data-theme="dark"] .stat.action .plus { color: var(--label); }
+:root[data-theme="dark"] .linkish { color: var(--label-2); }
+:root[data-theme="dark"] .linkish:hover { color: var(--label); }
+:root[data-theme="dark"] .removed-wrap { border-top-color: var(--separator); }
+:root[data-theme="dark"] .removed-row + .removed-row { border-top-color: var(--separator); }
+:root[data-theme="dark"] .removed-row .who { color: var(--label); }
+:root[data-theme="dark"] .removed-row .when, :root[data-theme="dark"] .removed-hint { color: var(--label-2); }
+:root[data-theme="dark"] .stat.action:focus-visible, :root[data-theme="dark"] .linkish:focus-visible { outline-color: var(--label); }
+:root[data-theme="dark"] .detail { color: var(--label); }
+:root[data-theme="dark"] .dname { color: var(--label); }
+:root[data-theme="dark"] .dremove { border-top-color: var(--separator); color: var(--label); }
+:root[data-theme="dark"] .dremove .dhint, :root[data-theme="dark"] .detail .dremove .fhint, :root[data-theme="dark"] .detail .dremove .fmsg { color: var(--label-2); }
+:root[data-theme="dark"] .dremove .btn-quiet { color: var(--label); }
+:root[data-theme="dark"] .dprojlab { color: var(--label-2); }
+:root[data-theme="dark"] .pjpill.attn { color: #ff8c82; }
+:root[data-theme="dark"] .pj-row.attn { border-color: rgba(255,140,130,.55); }
+:root[data-theme="dark"] .acard.attn { border-color: rgba(255,140,130,.55); box-shadow: 0 1px 3px rgba(255,140,130,.14); }
+:root[data-theme="dark"] .lrow.attn { border-color: rgba(255,140,130,.55); }
+:root[data-theme="dark"] .astate.st-attn { border-color: rgba(255,140,130,.62); }
+:root[data-theme="dark"] .stat.alert { border-color: rgba(255,140,130,.55); }
+:root[data-theme="dark"] .acard.hot { background: linear-gradient(180deg, rgba(255,140,130,.15) 0%, rgba(255,140,130,0) 42%), var(--k-surface); }
+:root[data-theme="dark"] .delivery.placed { border-color: rgba(121,197,157,.5); }
+:root[data-theme="dark"] .delivery.failed { border-color: rgba(255,140,130,.5); }
+:root[data-theme="dark"] .gt { stroke: rgba(245,245,244,.14); }
+:root[data-theme="dark"] .gu { stroke: rgba(245,245,244,.28); }
+:root[data-theme="dark"] .bar { background: rgba(245,245,244,.14); }
+:root[data-theme="dark"] .bar.unknown { background: repeating-linear-gradient(90deg, rgba(245,245,244,.24) 0 3px, transparent 3px 8px); }
+:root[data-theme="dark"] .gf.high { stroke: #ff8c82; }
+:root[data-theme="dark"] .bar i.high { background: #ff8c82; }
+:root[data-theme="dark"] .haz { background: #ff8c82; color: #0c0d0f; }
+:root[data-theme="dark"] .membadge { background: #ff8c82; color: #0c0d0f; }
+:root[data-theme="dark"] .astate.st-working { border-color: rgba(121,197,157,.62); }
+:root[data-theme="dark"] .astate.st-paused, :root[data-theme="dark"] .astate.st-stopped { border-color: rgba(245,245,244,.32); }
+:root[data-theme="dark"] .astate.st-unknown { border-color: rgba(245,245,244,.24); }
+:root[data-theme="dark"] .lrow:hover { border-color: rgba(245,245,244,.30); }
+:root[data-theme="dark"] .pj-row:hover { border-color: rgba(245,245,244,.30); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+
+:root[data-theme="dark"] #firstrun { --label-2: #4a4f57; --separator: #e3e1dc; }
+/* ===== END GENERATED ===== */
 </style>
+<!-- ⚠️ THE id HERE IS LOAD-BEARING, NOT DECORATION. Every page test in this
+     repo lifts the app's source with a regex for an ATTRIBUTE-LESS script tag,
+     and a second attribute-less one earlier in the file captures all of them:
+     eleven tests failed at once with "paintTaskPage vanished from the page"
+     about code sitting right there. The attribute means the extractor keeps
+     finding the block it has always found. Same shape as the two guard captures
+     yesterday: adding code changes what existing checks point at.
+     🛑 AND THIS COMMENT MAY NOT SPELL THAT TAG OUT. The first version quoted
+     the regex verbatim, so the COMMENT became the first match and the tests
+     stayed red for exactly the same reason, one line higher. Fourth time
+     tonight a comment quoting the thing it explains has broken the check that
+     reads for it. -->
+<script id="theme-boot">
+/* 🛑 IN THE HEAD, BEFORE ANY MARKUP, and that placement is the feature. The
+   app's own script runs after the body, so applying a saved theme there paints
+   the whole page in the system theme first and then flips it -- a white flash
+   on every load for somebody who chose dark, which reads as the app being
+   broken rather than as a preference arriving late.
+   ⚠️ NO STORED VALUE MEANS NO ATTRIBUTE, deliberately: the media queries then
+   answer, which is "follow this Mac". Kosmos must not record a preference on
+   somebody's behalf just because they opened it. */
+(function () {
+  try {
+    var t = localStorage.getItem('kosmos-theme');
+    if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) { /* private mode, a locked-down profile: the system theme is a fine answer */ }
+})();
+</script>
 </head>
 <body>
 <!-- ⚠️ THE STICKY UNIT IS THE WHOLE BAR, header and tabs together, pulled to
@@ -2681,6 +2776,26 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   <div class="headright appright">
     <!-- The pack's stamp shape: a labelled two-line chrome block. The
          failed variant is the app's own honest extra; the pack draws none. -->
+    <!-- ⚠️ THREE STATES, NOT TWO, and the third is the default. "Follow this
+         Mac" is a real answer and the one almost everybody wants: a two-way
+         switch has to guess an initial position, and whichever it guesses is
+         wrong for half the machines it starts on. Somebody who has never
+         touched this should get whatever their Mac is set to, forever, without
+         Kosmos having recorded a preference on their behalf.
+         🔑 A SEGMENTED CONTROL RATHER THAN A TOGGLE for the same reason: a
+         toggle cannot show three states, and "on" would have to mean dark,
+         which reads as a claim about the room rather than a choice. -->
+    <div class="themepick" role="radiogroup" aria-label="Appearance">
+      <button type="button" class="themeopt" data-theme-set="system" role="radio" aria-checked="true" title="Follow this Mac">Auto</button>
+      <button type="button" class="themeopt" data-theme-set="light" role="radio" aria-checked="false" title="Always light">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/></svg>
+        <span class="vh">Always light</span>
+      </button>
+      <button type="button" class="themeopt" data-theme-set="dark" role="radio" aria-checked="false" title="Always dark">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.2 8.2 0 1 0 10.2 10.2z"/></svg>
+        <span class="vh">Always dark</span>
+      </button>
+    </div>
     <div class="checked stamp" id="checked"></div>
     <!-- ⚠️ NO hidden ATTRIBUTE: the global [hidden]{display:none !important}
          would beat the narrow-width media query that shows this, leaving no
@@ -4082,7 +4197,7 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <div class="field" id="pj-folder-field" hidden>
       <span class="flabel">Which folder is this project's work in?</span>
       <p class="fhint">Pick a folder you already have. <b>Kosmos never puts its
-         own files in it</b> — everything it keeps lives somewhere else.</p>
+         own files in it</b>. Everything it keeps lives somewhere else.</p>
       <div class="frow" style="margin-bottom: var(--space-4)">
         <!-- ⚠️ `aria-live`, because focus lands here after every step into a
              folder (see `pjBrowse`) and this text is the only thing that says
@@ -4448,6 +4563,40 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
 
 <script>
 'use strict';
+
+/* ---- appearance: follow this Mac, or override it (#40) ------------------
+   The head script has already applied any stored choice; this paints the
+   control to match and handles clicks. Kept together with it in mind: the two
+   read the SAME key and the SAME three values, and if they ever disagree the
+   page flashes on load, which is how a split like this announces itself. */
+const THEME_KEY = 'kosmos-theme';
+function themeStored() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return (t === 'dark' || t === 'light') ? t : 'system';
+  } catch { return 'system'; }
+}
+function paintThemePicker() {
+  const now = themeStored();
+  for (const b of document.querySelectorAll('[data-theme-set]')) {
+    b.setAttribute('aria-checked', b.dataset.themeSet === now ? 'true' : 'false');
+  }
+}
+function setTheme(which) {
+  if (which === 'system') {
+    document.documentElement.removeAttribute('data-theme');
+    try { localStorage.removeItem(THEME_KEY); } catch { /* nothing to forget */ }
+  } else {
+    document.documentElement.setAttribute('data-theme', which);
+    try { localStorage.setItem(THEME_KEY, which); } catch { /* the choice holds for this window */ }
+  }
+  paintThemePicker();
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-theme-set]');
+  if (b) setTheme(b.dataset.themeSet);
+});
+paintThemePicker();
 
 // Plain words, not internal vocabulary. "rate_limited" is not a thing a person
 // should ever have to read.
@@ -8521,7 +8670,7 @@ function setWritesOffered(a, tied) {
     // the ONLY message the legitimate non-Discord agent this branch most
     // affects ever sees.
     why.textContent = tied ? '' : `This session is called ${a.sessionName}, but it is `
-      + `not the one an agent named ${a.sessionName} would run in — we expect that to be `
+      + `not the one an agent named ${a.sessionName} would run in. We expect that to be `
       + `${a.sessionName}-discord. So we cannot say this pane belongs to that agent, and `
       + 'we will not change its picture, role or instructions from here.';
   }
