@@ -569,6 +569,23 @@ uninstall() {
       info "It was not started by the kosmos command. Quit it, or restart your Mac, to finish."
     fi
   fi
+  # ⚠️ AND THE BOARD'S OWN LOGIN JOB, which is newer than the agents' and does
+  # not match their glob. Left behind, it is a launchd entry that runs a
+  # deleted `kosmos` at every login forever — an orphan with a new cause, and
+  # invisible to a person who believes they uninstalled the product.
+  _board_label=com.kosmos.board
+  _board_plist="${AGENT_WORKFORCE_LAUNCH:-$HOME/Library/LaunchAgents}/$_board_label.plist"
+  if [ -f "$_board_plist" ]; then
+    info "removing the login job for the board"
+    # enable before bootout, for the same reason the agents' loop below does
+    # it: a standing per-user `disable` override outlives the plist and would
+    # silently refuse to start a reinstalled Kosmos.
+    if [ -z "${AGENT_WORKFORCE_LAUNCH:-}" ]; then
+      /bin/launchctl enable "gui/$(/usr/bin/id -u)/$_board_label" 2>/dev/null || true
+      /bin/launchctl bootout "gui/$(/usr/bin/id -u)/$_board_label" 2>/dev/null || true
+    fi
+    rm -f "$_board_plist"
+  fi
   _agents_stopped=no
   # ⚠️ THE SYMLINK GOES BEFORE THE FOLDER, AND `-L` IS CHECKED. `-e` follows
   # symlinks, so once the folder was deleted the dangling link answered
@@ -1853,6 +1870,104 @@ fi
 step "Starting Kosmos."
 KOSMOS_SAY_INDENT="     " "$KOSMOS_HOME/bin/kosmos" start || die "Kosmos installed but would not start. What it said is above; it is safe to paste the install line again."
 ok
+
+# ---- and start it again at every login --------------------------------------
+#
+# 🛑 THE BOARD WAS THE ONE PIECE WITH NO LOGIN JOB, and every agent had one.
+# `kosmos start` runs the server under `nohup`, which survives the terminal that
+# launched it and nothing else: a reboot ends it, and NOTHING anywhere started
+# it again. Measured on Josh's machine on 2026-08-22, and the reason it read as
+# total failure rather than as one dead process is that the browser still had
+# the page cached — so every panel rendered and every panel said "we could not
+# check this computer". The product looked broken in six places at once because
+# the one thing that answers questions was not running.
+#
+# ⚠️ THIS FLEET'S OWN MAC HAD A HAND-WRITTEN com.kosmos.board.plist since
+# 10 August, so the dev board came back after every reboot and a real install
+# never did. We were configured out of our own bug, which is why nobody hit it
+# for eleven days. Two things that file learned the hard way are carried into
+# the template below rather than rediscovered: launchd sets neither PATH nor
+# LANG, and without LANG tmux sanitises its format output so every agent comes
+# back named `angel-discord_0.0_2.1.223_…` with the tab separators replaced.
+#
+# ⚠️ RunAtLoad AND NO KeepAlive, deliberately, and this is the one decision here
+# worth arguing with. `kosmos start` daemonises and exits, so it is a "run this
+# at login" job rather than a supervised process. KeepAlive would relaunch it
+# the moment it returned — a loop — and the alternative shape (launchd owns the
+# node process directly) breaks `kosmos stop`, which must keep meaning stopped,
+# and the updater's stop/start with it. Crash supervision is a real thing to
+# want and it needs `kosmos` to grow a foreground mode; it is not this change.
+step "Keeping Kosmos running after a restart."
+_launch_dir="${AGENT_WORKFORCE_LAUNCH:-$HOME/Library/LaunchAgents}"
+_board_label=com.kosmos.board
+_board_plist="$_launch_dir/$_board_label.plist"
+# Paths are user-controlled (KOSMOS_HOME is overridable) and this is XML, so
+# they are escaped rather than trusted to be boring. Five characters, in the
+# order that keeps `&` from eating the escapes it introduces.
+_xmlq() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
+_board_ok=no
+if mkdir -p "$_launch_dir" 2>/dev/null && cat > "$_board_plist.new" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$_board_label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>$(_xmlq "$KOSMOS_HOME/bin/kosmos")</string>
+    <string>start</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>$(_xmlq "$HOME")</string>
+    <key>PATH</key><string>$(_xmlq "$KOSMOS_HOME/tmux/bin"):/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key><string>en_US.UTF-8</string>
+    <key>KOSMOS_PORT</key><string>$(_xmlq "$PORT")</string>
+  </dict>
+  <!-- Whose background item this is, so macOS files it under Kosmos in Login
+       Items rather than as an anonymous entry the person cannot place. Same
+       identifier the agents' jobs carry. -->
+  <key>AssociatedBundleIdentifiers</key>
+  <array><string>com.chaoskosmos.kosmos</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$(_xmlq "$KOSMOS_HOME/logs/login.log")</string>
+  <key>StandardErrorPath</key><string>$(_xmlq "$KOSMOS_HOME/logs/login.log")</string>
+</dict>
+</plist>
+PLIST
+then
+  mv -f "$_board_plist.new" "$_board_plist" 2>/dev/null && _board_ok=yes
+fi
+rm -f "$_board_plist.new" 2>/dev/null || true
+if [ "$_board_ok" = yes ]; then
+  # ⚠️ NO launchctl UNDER A SANDBOX. AGENT_WORKFORCE_LAUNCH set means a harness
+  # pointed the plist directory at a temp folder — and launchd has no such
+  # directory to point: a bootstrap here would register a REAL job on the
+  # machine running the test, which outlives the test and starts a board at
+  # every login from a tree the harness deleted.
+  if [ -z "${AGENT_WORKFORCE_LAUNCH:-}" ]; then
+    _uid="$(/usr/bin/id -u)"
+    # enable BEFORE bootout, the order the uninstall path above documents: a
+    # `launchctl disable` from any earlier life writes a per-user override
+    # keyed on the label that outlives the plist, and bootstrapping into a
+    # standing disable succeeds and starts nothing.
+    /bin/launchctl enable "gui/$_uid/$_board_label" 2>/dev/null || true
+    /bin/launchctl bootout "gui/$_uid/$_board_label" 2>/dev/null || true
+    # RunAtLoad means this bootstrap also runs `kosmos start`, which finds the
+    # board this installer started a moment ago and says so. Idempotent by
+    # construction rather than by being careful about ordering.
+    /bin/launchctl bootstrap "gui/$_uid" "$_board_plist" 2>/dev/null || true
+  fi
+  info "Kosmos will start itself when you log in"
+  ok
+else
+  # ⚠️ NOT FATAL, and said in terms of what it costs rather than what failed.
+  # Everything else about this install works; the person loses exactly one
+  # thing, and the thing they would do instead is the thing they already do.
+  info "note: could not write $_board_plist, so Kosmos will not start itself after a restart."
+  info "Opening the Kosmos icon starts it, as it always has."
+fi
 
 # ⚠️ PROVE THE BOARD ON THE PORT IS THIS INSTALL'S OWN. cmd_start's
 # healthy() accepts ANY board identifying as Kosmos on the port, so on a

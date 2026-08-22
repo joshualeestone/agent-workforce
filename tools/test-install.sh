@@ -180,6 +180,35 @@ chk "PATH wiring wrote the export line (the functional half)" "grep -qF \"$SB/bi
 chk "the gold-K icon landed inside the app, intact" "[ \"\$(shasum -a 256 \"$SB/apps/Kosmos.app/Contents/Resources/Kosmos.icns\" 2>/dev/null | cut -d' ' -f1)\" = \"\$(shasum -a 256 \"$KOS_SRC/app/assets/Kosmos.icns\" | cut -d' ' -f1)\" ]"
 chk "the bundle declares its architecture (no Rosetta prompt)" "grep -q 'LSArchitecturePriority' \"$SB/apps/Kosmos.app/Contents/Info.plist\" && grep -q 'arm64' \"$SB/apps/Kosmos.app/Contents/Info.plist\""
 chk "VERSION record installed" "[ -f \"$SB/home/VERSION\" ]"
+# 🛑 THE BOARD'S LOGIN JOB. Its absence is what made a reboot look like total
+# failure on 2026-08-22: the board died with the machine, nothing started it,
+# and the browser's cached page then reported six separate "we could not check
+# this computer" panels for one dead process.
+BOARD_PLIST="$SB/launch/com.kosmos.board.plist"
+chk "the board gets a login job" "[ -f \"$BOARD_PLIST\" ]"
+chk "the login job starts THIS install's command" "grep -qF \"$SB/home/bin/kosmos\" \"$BOARD_PLIST\" && grep -q '<string>start</string>' \"$BOARD_PLIST\""
+chk "the login job runs at login" "grep -q '<key>RunAtLoad</key><true/>' \"$BOARD_PLIST\""
+# ⚠️ Both of these were learned by bisecting a hand-written copy of this file
+# on the fleet Mac, and neither is cosmetic. launchd sets no PATH and no LANG:
+# without LANG tmux sanitises its format output, replacing the tab separators,
+# and every agent comes back on the board named `angel-discord_0.0_2.1.223_…`.
+chk "the login job carries a UTF-8 locale (tmux mangles its output without one)" "grep -q 'en_US.UTF-8' \"$BOARD_PLIST\""
+chk "the login job carries this install's bundled tmux on PATH" "grep -qF \"$SB/home/tmux/bin\" \"$BOARD_PLIST\""
+# The icon bakes the install-time port; a login job on the DEFAULT port would
+# start a second board the icon never opens.
+chk "the login job carries this install's port" "grep -qF \"<key>KOSMOS_PORT</key><string>$PORT</string>\" \"$BOARD_PLIST\""
+chk "the login job is well-formed plist XML" "plutil -lint \"$BOARD_PLIST\" >/dev/null 2>&1"
+# ⚠️ A SANDBOXED RUN MUST NOT REGISTER A REAL JOB. AGENT_WORKFORCE_LAUNCH
+# points the plist at a temp folder and launchd has no equivalent knob, so the
+# installer skips launchctl entirely when that variable is set. Without the
+# gate this harness would leave a job on the operator's machine that starts a
+# board from a deleted mktemp tree at every login.
+# ⚠️ ASKED AS "does any registered job point INTO THE SANDBOX", not as "does a
+# job exist". The operator's own machine will carry a real com.kosmos.board
+# once this ships, so an existence check would be permanently green for a
+# reason that has nothing to do with this harness.
+chk "a sandboxed install registered no launchd job pointing at the sandbox" \
+  "! /bin/launchctl print \"gui/\$(/usr/bin/id -u)/com.kosmos.board\" 2>/dev/null | grep -qF \"$SB\""
 chk "KOSMOS_APP_DIR bypasses the probe entirely" "[ \"\$(stat -f %Fm \"$SB/sysnever\")\" = \"$SYSNEVER_MTIME\" ] && [ -z \"\$(ls -A \"$SB/sysnever\")\" ]"
 # The generated launcher, actually executed: the account guard must PASS
 # for the account that installed (a uid compare, exactly the leg the old
@@ -235,6 +264,10 @@ chk "symlink gone" "[ ! -e \"$SB/bin/kosmos\" ] && [ ! -L \"$SB/bin/kosmos\" ]"
 chk "app gone" "[ ! -d \"$SB/apps/Kosmos.app\" ]"
 chk "override-branch stage and aside residue swept" "[ ! -e \"$SB/apps/.Kosmos.app.stage.333\" ] && [ ! -e \"$SB/apps/.Kosmos.app.old.444\" ]"
 chk "agent plist removed" "[ ! -e \"$SB/launch/com.kosmos.agent.tiharness.plist\" ]"
+# ⚠️ THE BOARD'S JOB DOES NOT MATCH THE AGENTS' GLOB, so it needs its own
+# removal and its own check. Left behind it runs a deleted `kosmos` at every
+# login forever, invisible to somebody who believes they uninstalled Kosmos.
+chk "the board's login job removed" "[ ! -e \"$SB/launch/com.kosmos.board.plist\" ]"
 chk "user data folder survives" "[ -d \"$SB/data\" ]"
 # ⚠️ BYTE FOR BYTE, not merely present. The directory check above cannot tell
 # a preserved folder from an emptied one, and an uninstall that deleted a
