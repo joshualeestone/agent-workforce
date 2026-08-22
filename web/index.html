@@ -16510,9 +16510,29 @@ const FR_STEPS = 6;
 // final else, exhaustive by construction: step is clamped to [1, FR_STEPS],
 // so a sixth step must add its pane AND its branch -- said here because the
 // constant cannot reach an else.)
-// ⚠️ The machine-look/orientation content IS step 1 now (the pack's Success
-// screen opens the flow; orientation lands before the person is invested,
-// not after they are finished -- the spec calls the move out explicitly).
+// 🛑 THE MACHINE-LOOK/ORIENTATION CONTENT IS STEP 1, AND TWO WRITTEN RULINGS
+// PLACE IT LAST. This comment used to justify the position by saying the
+// orientation spec "calls the move out explicitly". It does not. Under its own
+// Placement heading that spec says "New step 5, at the end", and reasons it:
+// orientation about RETURNING only makes sense once they have seen what they
+// are returning to. The PIN eleven lines above says the same thing in Josh's
+// own ordering, ending on "getting back". Neither sanctions step 1.
+//
+// ⚠️ THE ARGUMENT THAT WOULD HAVE SAVED THIS POSITION IS VOID. The spec's own
+// second finding is that Skip appeared on every step, so a screen at the end
+// reaches nobody who skips. That was the strongest case for putting it first,
+// and the pack then REMOVED Skip entirely (see the no-visible-skip note in the
+// wizard footer), so everybody reaches the last step now.
+//
+// 📌 The live claim is the pack's, and it is a real one: its Success screen
+// opens the flow. What is unresolved is whether "the install worked, here is
+// where your icon is" and "here is how to get back to this later" are one
+// screen or two. They arrived as two in the spec and ship as one here.
+// Raised with Josh rather than moved: renumbering a wizard step touches the
+// dot progress, the step label and two generation guards, and there is a real
+// argument for the current position. What is NOT arguable is the citation,
+// which is why only that is corrected here.
+//
 // The constant keeps its name so the generation-guard pins keep reading.
 const FR_STEP_RETURN = 1;
 const FR_STEP_YOU = 5;
