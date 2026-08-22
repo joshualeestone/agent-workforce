@@ -323,6 +323,10 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 /* In the hub the picture fills the circle the word used to sit in. */
 .hub.haspic { padding: 0; overflow: hidden; border-width: 2px; }
 .hub.haspic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* The one checkbox on the create form. A row rather than a bare input so the
+   whole line is the target: a 13px box on its own is a hard thing to hit. */
+.tellrow { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: .875rem; }
+.tellrow input { width: 16px; height: 16px; flex: 0 0 16px; accent-color: var(--gold-deep, #b8860b); }
 .acct-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
             padding: 9px 0; border-bottom: 1px solid var(--k-rule); font-size: .875rem; }
 .acct-row:last-child { border-bottom: 0; }
@@ -3834,6 +3838,20 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          being made, so the menu would carry no choice. Same rule as the
          projects picker, and the same resolution as the removed-agents list at
          zero. -->
+    <!-- #238. Josh: "They will see a checkbox that says 'Let Kosmos know you
+         created an agent' and they can uncheck it if they want."
+         ⚠️ THE LABEL IS ONE STRING IN ONE PLACE, because it is still being
+         worded: "Kosmos" is also the app on their own Mac, so "Let Kosmos know"
+         can be read as telling the local app, which it obviously already
+         knows. Mona Lisa and I raised that separately and it is Josh's to rule;
+         until he does, his exact words ship and the change is one edit. -->
+    <div class="field" id="create-tell-wrap">
+      <label class="tellrow" for="create-tell">
+        <input type="checkbox" id="create-tell" checked>
+        <span>Let Kosmos know you created an agent</span>
+      </label>
+    </div>
+
     <div class="field" id="create-reports-wrap" hidden>
       <label class="flabel" for="create-reports">Reports to <span class="flabel-soft">(optional)</span></label>
       <div class="frow">
@@ -4648,6 +4666,15 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            — admitting the gap is the first half, and the second half is
            whether the person can ACT. Now they can: it installs, or it does
            not, and both are real. -->
+      <!-- The standing answer for the same thing (#238). The box on the create
+           page answers for one agent; this answers for good, and it wins. -->
+      <div class="setrow" id="tell-row" style="margin-top:12px;">
+        <div><b>Let the Kosmos team know when you make an agent</b>
+          <p class="dhint" style="margin:2px 0 0;">Just that it happened, so we know how many people are using Kosmos. Nothing about the agent, and nothing it does.</p></div>
+        <button class="toggle" id="tell-toggle" role="switch" aria-checked="false" aria-label="Let the Kosmos team know when you make an agent"><i></i></button>
+      </div>
+      <p class="dhint" id="tell-msg" role="status" style="margin:8px 0 0;"></p>
+
       <div class="setrow" id="auto-row" style="margin-top:12px;">
         <div><b>Update Kosmos automatically</b>
           <p class="dhint" style="margin:2px 0 0;">On by default. New versions install themselves, which takes a few seconds and reloads this board. Agents keep running throughout.</p></div>
@@ -6859,6 +6886,49 @@ async function engToggleClick() {
    ⚠️ THE PAINT IS DRIVEN BY THE SERVER'S READ, not by what was clicked. A
    PUT that stores nothing must leave the switch where it truly is, or the
    screen shows a person consenting to something the disk does not say. */
+/* The standing #238 answer. Same shape as the two preference pairs beside it:
+   learn on boot and after a save, never poll a preference, and paint from the
+   server's READ so the switch cannot show a position the disk does not hold. */
+let TELL_EPOCH = 0;
+function tellPaint(r) {
+  const tog = document.getElementById('tell-toggle');
+  const on = r && r.on === true;
+  tog.classList.toggle('on', on);
+  tog.setAttribute('aria-checked', on ? 'true' : 'false');
+  document.getElementById('tell-msg').textContent = (r && r.ok === false)
+    ? 'We could not read this setting, so nothing is sent.' : '';
+}
+async function refreshTell() {
+  const mine = ++TELL_EPOCH;
+  try {
+    const r = await (await fetch('/api/ping-setting')).json();
+    if (mine !== TELL_EPOCH) return;
+    tellPaint(r);
+  } catch { /* the switch keeps its last honest position */ }
+}
+let TELL_SAVING = false;
+async function tellToggleClick() {
+  if (TELL_SAVING) return;
+  TELL_SAVING = true;
+  const mine = ++TELL_EPOCH;
+  const msg = document.getElementById('tell-msg');
+  try {
+    const on = document.getElementById('tell-toggle').getAttribute('aria-checked') !== 'true';
+    const res = await fetch('/api/ping-setting', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (mine !== TELL_EPOCH) return;
+    if (!res.ok) { msg.textContent = body.error || 'We could not save that setting.'; return; }
+    tellPaint(body);
+  } catch {
+    msg.textContent = 'We could not save that setting.';
+  } finally {
+    TELL_SAVING = false;
+  }
+}
+document.getElementById('tell-toggle').addEventListener('click', tellToggleClick);
+
 let AUTO_EPOCH = 0;
 function autoPaint(r) {
   const tog = document.getElementById('auto-toggle');
@@ -6923,6 +6993,7 @@ function pjScreenOnScreen() {
 }
 refreshEngMode();
 refreshAutoUpdate();
+refreshTell();
 refreshYou();
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
@@ -11757,6 +11828,10 @@ document.getElementById('create-go').addEventListener('click', async () => {
         const rwrap2 = document.getElementById('create-reports-wrap');
         const to = document.getElementById('create-reports').value;
         if (!rwrap2.hidden && to) b.reportsTo = to;
+        /* Sent only when it is FALSE. The server defaults it to true, so a
+           caller that has never heard of this field behaves the way the box
+           does, and an older client cannot silently opt somebody out. */
+        if (!document.getElementById('create-tell').checked) b.tellKosmos = false;
         if (CREATE_PROJECTS.length) b.projects = CREATE_PROJECTS;
         return b;
       })()),

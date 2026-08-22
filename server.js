@@ -46,6 +46,7 @@ const limits = require('./engine/limits');
 const engmode = require('./engine/engmode');
 const accounts = require('./engine/accounts');
 const forget = require('./engine/forget');
+const ping = require('./engine/ping');
 const autoupdate = require('./engine/autoupdate');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
@@ -1109,6 +1110,13 @@ const server = http.createServer((req, res) => {
           account: body.account,
           reportsTo: body.reportsTo,
         });
+        /* #238. Only on a real creation, and never in a way that can affect
+           one: `agentCreated` returns nothing, so this cannot be awaited, and
+           every failure inside it is swallowed. The box on the form is one
+           agent's answer; the standing setting in Settings beats it. */
+        if (result.outcome === create.OUTCOME.CREATED) {
+          ping.agentCreated({ wanted: body.tellKosmos !== false });
+        }
         // REFUSED is the caller's fault (a bad name, a duplicate); PARTIAL is
         // ours, and it is a 200 because the thing half-happened and the caller
         // needs the detail rather than an error.
@@ -1330,6 +1338,29 @@ const server = http.createServer((req, res) => {
   /* What "Delete your history" would remove, so the screen can say it before
      it asks. The counts come from the engine, never from the page: a control
      with no undo must not describe its own scope in its own words. */
+  /* The standing answer for #238, so Settings can turn it off for good. Same
+     shape as the other preference routes: GET to learn it, PUT to set it, and
+     the READ is echoed back after a write rather than the request body. */
+  if (pathname === '/api/ping-setting' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { const r = ping.read(); sendJson(res, 200, { on: r.on, ok: r.ok }); }
+    catch { sendJson(res, 500, { error: 'that setting could not be read' }); }
+    return;
+  }
+  if (pathname === '/api/ping-setting' && req.method === 'PUT') {
+    readBody(req)
+      .then((buf) => {
+        let body;
+        try { body = JSON.parse(buf.toString('utf8') || '{}') || {}; }
+        catch { sendJson(res, 400, { error: 'we could not read that request' }); return; }
+        const saved = ping.setOn(body.on);
+        if (!saved.ok) { sendJson(res, 400, { error: saved.because }); return; }
+        const r = ping.read();
+        sendJson(res, 200, { on: r.on, ok: r.ok });
+      })
+      .catch(() => sendJson(res, 400, { error: 'we could not save that setting' }));
+    return;
+  }
+
   if (pathname === '/api/history' && (req.method === 'GET' || req.method === 'HEAD')) {
     try { sendJson(res, 200, forget.summary()); }
     catch { sendJson(res, 500, { error: 'we could not look at your history' }); }
