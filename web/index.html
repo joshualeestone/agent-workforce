@@ -4085,9 +4085,23 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
            "Add Member", and title case on a control makes it read as a proper
            noun rather than an instruction. -->
       <button class="btn-quiet pj-addmem" id="pj-add-member" type="button"><span aria-hidden="true">+</span> Add member</button>
-      <div class="frow" id="pj-one-add-row" hidden style="margin-top: var(--space-5)">
-        <select id="pj-one-add" aria-label="An agent to add to this project"></select>
-        <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
+      <div id="pj-one-add-row" hidden style="margin-top: var(--space-5)">
+        <!-- ⚠️ A VISIBLE LABEL, not only an aria one (#109). The picker opens
+             from a button, so it arrives on screen with no heading above it and
+             nothing on the row says what the menu is FOR: a sighted person got
+             a dropdown of names and a button, and had to infer. The aria-label
+             served a screen reader and nobody else, which is the shape this
+             file has removed twice before -- an accessible name doing the job
+             of copy.
+             📌 The `for` and the `id` make it the same one control, so clicking
+             the words opens the menu; the aria-label goes, because a labelled
+             control with an aria-label announces only the aria-label and the
+             two would then have to be kept in step forever. -->
+        <label class="flabel" for="pj-one-add">Who should join this project?</label>
+        <div class="frow">
+          <select id="pj-one-add"></select>
+          <button class="btn" id="pj-one-add-go" type="button">Put it on this project</button>
+        </div>
       </div>
       <p class="fmsg" id="pj-one-msg" aria-live="polite"></p>
 
