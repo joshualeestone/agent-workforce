@@ -2,6 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- 🛑 THE VERSION IS BAKED AT BUILD TIME, and the reason is the morning it
+     was needed and absent. The build line used to be written ONLY from the
+     status poll, so the version was unknown exactly when the API was
+     unreachable: Josh restarted a Mac, the board did not come back, and every
+     panel could honestly say it could not look while the one fact that would
+     have told him what he was running came from the thing that had failed
+     (#269, Mona Lisa). A fact about the BUNDLE must not require the bundle's
+     API.
+     ⚠️ THE PLACEHOLDER IS LEFT ALONE IN A SOURCE CHECKOUT, where there is no
+     build step and no version to bake. `bakedVersion()` treats the untouched
+     marker as "no answer" rather than printing it, so a developer sees the
+     polled version exactly as before. -->
+<meta name="kosmos-version" content="__KOSMOS_VERSION__">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kosmos</title>
 <!-- The tab icons (#45): the SITE's exact shape, four explicit PNGs and
@@ -718,7 +731,16 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 /* An empty slot is a flex item and would spend one trailing gap. */
 #utoast-slot:empty, #unote-slot:empty { display: none; }
 .klink { border: 0; background: none; padding: 0; cursor: pointer; display: block; line-height: 0; }
-.klink img { width: 34px; height: 34px; display: block; }
+/* 🔑 8px BECAUSE THE ELEMENT ALREADY CHOSE 8px, not because somebody picked a
+   number: `.klink:focus-visible` below sets that radius, and an outline follows
+   the element's radius, so until now a rounded focus ring drew around a square
+   image. Keyboard users saw the mismatch every time they tabbed to it (#183).
+   ⚠️ ON THE `img`, NOT ON `.klink`. The mark is a fully opaque gold tile, so a
+   radius on the parent would simply be overpainted by the square PNG, and
+   `.klink` has `line-height: 0` and no background of its own to round. The
+   corners being clipped are gold rather than white, so it rounds cleanly in
+   both themes. (Mona Lisa, who decoded the PNG rather than assuming it.) */
+.klink img { width: 34px; height: 34px; display: block; border-radius: 8px; }
 .klink:focus-visible { outline: 2px solid var(--label); outline-offset: 4px; border-radius: 8px; }
 /* ---- grid / list toggle. One component, each instance NAMES its scope with
    data-scope (the control says what it operates on rather than assuming there
@@ -6836,8 +6858,10 @@ async function tick() {
        "read-only, nothing here can change your agents", which stopped being
        true the moment the screen could edit an instruction file. Saying nothing
        is honest. Saying that again would not be. */
-    document.getElementById('build').innerHTML =
-      '<b>BETA</b> · version ' + esc(data.version || 'unknown');
+    /* The poll REFINES it; the baked value is already on screen. They agree on
+       a real install, and where they cannot agree the served bundle is the
+       one running. */
+    paintBuildLine(data.version);
 
     // The freshness stamp is load-bearing. An ambient board gets trusted
     // passively, and silence reads as "all fine". If this stops updating, the
@@ -7972,6 +7996,34 @@ let LAST = [];
 // Whether a status tick has ever ANSWERED. [] before the first answer means
 // "not heard yet", not "empty board", and the two must never be conflated
 // (the Recommended pill reads this).
+/**
+ * The version this bundle IS, from the page rather than from the API.
+ *
+ * 🔑 The build substitutes the marker below; a source checkout leaves it, and
+ * an untouched marker is not an answer. Returning null there keeps a developer
+ * on the polled value, which is the behaviour that existed before this.
+ */
+function bakedVersion() {
+  /* ⚠️ GUARDED ON THE TYPE, not on truthiness. This ran before any poll, in a
+     page-scope every headless harness evaluates, and one of them stubs
+     `getAttribute` to return an object: `v.indexOf` then throws and takes the
+     whole script down at load. A boot-time read has to survive whatever the
+     document hands it, and "is this a string" is the cheap version of that. */
+  const el = document.querySelector && document.querySelector('meta[name="kosmos-version"]');
+  const v = el && typeof el.getAttribute === 'function' ? el.getAttribute('content') : null;
+  if (typeof v !== 'string' || !v || v.indexOf('KOSMOS_VERSION') > -1) return null;
+  return v;
+}
+
+/* Painted on load, not on the first successful poll. The whole point is to be
+   readable when no poll will ever succeed. */
+function paintBuildLine(version) {
+  const el = document.getElementById('build');
+  if (!el) return;
+  const v = version || bakedVersion();
+  el.innerHTML = '<b>BETA</b> · version ' + esc(v || 'unknown');
+}
+
 let BOARD_SEEN = false;
 // ⚠️ HAVE WE LOOKED YET, which is a different question from whether the list is
 // empty -- and the agent picker answered them with the same value. `LAST` is
@@ -18945,6 +18997,11 @@ if (BOOT_TAB === 'create') loadRoles();
  */
 firstRunBoot(PARAMS.get('first-run') === '1', Number(PARAMS.get('fr-step')) || 1);
 
+/* 🔑 BEFORE THE FIRST POLL, not after it. The whole point of baking the version
+   is that it is readable when no poll will ever succeed, and painting it from
+   `tick()` alone would have kept the empty line on exactly the machine this was
+   written for. */
+paintBuildLine(null);
 tick();
 setInterval(tick, 5000);
 </script>

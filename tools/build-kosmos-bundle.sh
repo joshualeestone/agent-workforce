@@ -58,6 +58,29 @@ for f in "$REPO"/engine/*.js; do
   case "$f" in *.test.js) ;; *) cp "$f" "$STAGE/app/engine/" ;; esac
 done
 cp -R "$REPO/web" "$STAGE/app/web"
+# 🛑 BAKE THE VERSION INTO THE PAGE. It used to be readable only from the status
+# poll, so on a machine whose board was not running the version was unknown for
+# the same reason everything else was (#269). A fact about the bundle must not
+# require the bundle's API.
+#
+# ⚠️ SUBSTITUTED HERE RATHER THAN COMMITTED, so a source checkout keeps the
+# marker and the page falls back to the polled value. And VERIFIED, because a
+# silent no-op sed would ship the marker itself to a person's screen: the check
+# below fails the build rather than shipping "version __KOSMOS_VERSION__".
+# ⚠️ READ WITHOUT AN INTERPRETER, and that is an ordering fact rather than a
+# preference. The first version used "$STAGE/runtime/bin/node", which is not
+# staged yet at this point in the build, so the whole build died one line later
+# with "No such file or directory". package.json IS already copied, and one
+# field out of it does not need a JSON parser.
+_ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$STAGE/app/package.json" | head -1)"
+[ -n "$_ver" ] || { echo "could not read the version to bake into the page" >&2; exit 1; }
+sed -i '' "s/__KOSMOS_VERSION__/$_ver/" "$STAGE/app/web/index.html" 2>/dev/null \
+  || sed -i "s/__KOSMOS_VERSION__/$_ver/" "$STAGE/app/web/index.html"
+grep -q "__KOSMOS_VERSION__" "$STAGE/app/web/index.html" && {
+  echo "the version marker survived the bake; the page would ship it verbatim" >&2; exit 1; }
+grep -q "content=\"$_ver\"" "$STAGE/app/web/index.html" || {
+  echo "the version was not baked into the page" >&2; exit 1; }
+echo "==> baked version $_ver into the page"
 cp "$REPO/bin/agent-supervisor.sh" "$STAGE/app/bin/"
 chmod +x "$STAGE/app/bin/agent-supervisor.sh"
 # The app icon artwork, when it exists: the installer looks for
