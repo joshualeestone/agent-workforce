@@ -58,7 +58,8 @@ function lift(names, tail) {
 }
 
 const tree = lift(['orgTreeOf'], 'return orgTreeOf;');
-const place = lift(['orgTreeOf', 'orgPlace'], 'return { orgTreeOf, orgPlace };');
+const place = lift(['orgTreeOf', 'orgPlace'],
+  'return { orgTreeOf, orgPlace, ORG_R0, ORG_STEP, ORG_MIN_ARC };');
 
 /**
  * Inputs come from the REAL producers, and the field names are pinned to them.
@@ -177,13 +178,21 @@ test('a crowded ring spills outward instead of overlapping', () => {
   /**
    * 🔑 EVERYBODY'S FIRST ORG CHART IS THIS. A fleet starts with nobody
    * assigned, so "everyone on ring one" is the FIRST screen anyone sees, not an
-   * edge case. Circumference is finite: at 150px radius and a 62px arc per
-   * node, about fifteen fit before they touch.
+   * edge case. Circumference is finite: the first ring holds however many
+   * minimum-arcs fit around it, and thirty is comfortably more than that at
+   * any ring size this product has shipped.
    */
   const many = agents(...Array.from({ length: 30 }, (_, i) => a('a' + i)));
   const { placed, maxR } = place.orgPlace(place.orgTreeOf(many));
   assert.equal(placed.size, 30, 'an agent was dropped');
-  assert.ok(maxR > 150, 'thirty nodes stayed on one radius', 'maxR ' + maxR);
+  /* ⚠️ AGAINST THE LIFTED CONSTANT, not against `150`. Written as a literal
+     this assertion passed with the first ring widened to 400px -- where thirty
+     nodes fit on one ring comfortably and NOTHING SPILLS, which is the exact
+     behaviour the test is named for. A literal here does not merely go stale,
+     it inverts: the bigger the ring grows, the more certainly `maxR > 150`
+     holds while the property stops being true. */
+  assert.ok(maxR > place.ORG_R0,
+    'thirty nodes stayed on the first ring (maxR ' + maxR + ', R0 ' + place.ORG_R0 + ')');
 
   /* The real assertion: no two nodes closer than a node's width. Positions are
      polar, so this is the same arithmetic the browser check does on rects. */
