@@ -71,6 +71,29 @@ export PATH="$KOSMOS_HOME/tmux/bin:$PATH"
 # ships /usr/share/terminfo, and pinning converts the documented fallback
 # assumption into a fact.
 export TERMINFO_DIRS="${TERMINFO_DIRS:-/usr/share/terminfo}"
+# 🛑 A UTF-8 LOCALE, AND WITHOUT IT THE BOARD CANNOT READ A SINGLE AGENT.
+# Measured on Josh's Mac, 2026-08-22, and reproduced here: tmux SANITISES its
+# own format output when the locale is not UTF-8, replacing the tab separators
+# (and anything non-ASCII) with underscores.
+#
+#   with a UTF-8 locale   angel-discord<TAB>0.0<TAB>2.1.237<TAB>0<TAB><TAB>✳ …
+#   with none             angel-discord_0.0_2.1.237_0___ …
+#
+# The engine splits those lines on tabs, so every line is rejected, zero panes
+# parse, and the board correctly refuses with "we could not make sense of what
+# came back" — a running fleet, invisible, on a screen that cannot say why.
+#
+# ⚠️ IT BELONGS HERE RATHER THAN ONLY IN A launchd PLIST, and that mistake is
+# exactly what shipped: the board's login job sets LANG, and every OTHER way of
+# starting the board does not. A Terminal gives you one; the app icon and
+# anything else macOS launches give you almost nothing. This file is the one
+# path all of them go through.
+#
+# ⚠️ Deferring to a locale that is already set: a person whose Mac runs in
+# another language has a UTF-8 locale of their own, and overriding it would
+# make this command the thing that decides what language their agents' titles
+# are shown in. Only the EMPTY case is filled.
+export LANG="${LANG:-en_US.UTF-8}"
 # ⚠️ THE APP IS TOLD WHERE ITS tmux IS, EXPLICITLY. PATH only fixes the
 # engine's bare `tmux` calls (reading the board); agent CREATION and the
 # first-run machine check resolve their tmux as AGENT_WORKFORCE_TMUX_BIN

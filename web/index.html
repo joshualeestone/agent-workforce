@@ -6584,7 +6584,20 @@ async function tick() {
     // predating a save or a reload.
     const pollEpoch = INSTR_EPOCH;
     const res = await fetch('/api/status', { cache: 'no-store' });
-    if (!res.ok) throw new Error('status ' + res.status);
+    /* 🛑 THE SERVER'S SENTENCE WAS NEVER READ. This threw `status 500` and the
+       box showed exactly that, while the response body carried a sentence and,
+       since #281, tmux's own words for what went wrong. Josh spent a morning on
+       a machine that was telling us the answer into a discarded body. */
+    if (!res.ok) {
+      const said = await res.json().catch(() => null);
+      const parts = [];
+      if (said && said.error) parts.push(said.error);
+      if (said && said.detail) parts.push(said.detail);
+      /* The status code stays, at the end: it is the one part that is true even
+         when the body is missing or is not ours. */
+      parts.push('status ' + res.status);
+      throw new Error(parts.join(' · '));
+    }
     const data = await res.json();
 
     const lim = new URLSearchParams(location.search).get('limit');

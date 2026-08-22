@@ -193,14 +193,48 @@ function tmuxSaidNoServer(got) {
  * the same question drifting apart is this codebase's worst habit and these two
  * have already drifted once.
  */
+/**
+ * What went wrong the last time we asked tmux, in tmux's own words.
+ *
+ * 🛑 THE ANSWER EXISTED AND WAS DISCARDED ONE LAYER DOWN. `shDetail` keeps the
+ * stderr; `tmuxPanes` flattened a failure to `null`, so the board could say
+ * "we cannot read your agents" and nothing anywhere could say WHY. Josh's Mac,
+ * 2026-08-22: the board came back after a reboot, the agents call returned 500,
+ * and finding out what tmux had actually said needed a terminal, a person, and
+ * two rounds of messages. The machine knew the whole time.
+ *
+ * ⚠️ IT IS A HINT, NOT A DIAGNOSIS, and the screen must present it as one. It is
+ * the last failure this process saw, so it can be stale relative to the call
+ * being reported on; it is worth showing because a stale real message beats an
+ * accurate silence, not because it is authoritative.
+ *
+ * 📌 Null after a successful look, so a screen cannot show yesterday's problem
+ * beside today's healthy board.
+ */
+let LAST_LOOK_PROBLEM = null;
+function lastLookProblem() { return LAST_LOOK_PROBLEM; }
+
+/* One line, bounded, and never HTML: it reaches a screen. */
+function oneLine(text, max) {
+  const flat = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
 function tmuxPanes() {
   const got = shDetail('tmux', ['list-panes', '-a', '-F', PANE_FORMAT]);
-  if (got.ran && got.status === 0) return got.out;
+  if (got.ran && got.status === 0) { LAST_LOOK_PROBLEM = null; return got.out; }
   // ⚠️ An empty STRING, not null. `readPanes('')` is zero panes and zero
   // rejects, which is the honest reading of "tmux answered, and there are no
   // sessions" — and it is a different value from the `null` that means we never
   // got an answer.
-  if (tmuxSaidNoServer(got)) return '';
+  if (tmuxSaidNoServer(got)) { LAST_LOOK_PROBLEM = null; return ''; }
+  /* ⚠️ TWO DIFFERENT FAILURES AND THEY NEED DIFFERENT WORDS. A process that
+     never started (`ran` false: not installed, not on PATH, killed by the
+     timeout) has no stderr to quote, and quoting an empty string would put an
+     empty pair of quotes on somebody's screen. */
+  LAST_LOOK_PROBLEM = got.ran
+    ? (oneLine(got.err, 300) || `tmux exited ${got.status} without saying why`)
+    : 'we could not run tmux at all on this computer';
   return null;
 }
 
@@ -636,6 +670,15 @@ function listPanes() {
    * running, because a mangled answer and no answer were indistinguishable.
    */
   if (rejected > 0 && panes.length === 0) {
+    /* 🔑 SHOW A LINE OF IT. "We could not make sense of what came back" is
+       honest and unactionable; the answer is in the shape of what came back and
+       one line of it names the cause outright. Josh's board, 2026-08-22, said
+       exactly that sentence for an hour while the mangled line underneath it
+       would have read anna_0.0_2.1.237_0___ and pointed straight at the
+       missing locale.
+       ⚠️ ONE LINE AND BOUNDED. A pane title is arbitrary text somebody's agent
+       wrote, and this reaches a screen. */
+    LAST_LOOK_PROBLEM = `tmux answered and we could not read it. It came back like this: ${oneLine(String(out).split('\n')[0], 160)}`;
     throw new Error('we could not make sense of what came back');
   }
   // Some read, some did not: the fleet is shown, and the gap is RETURNED
@@ -2181,6 +2224,10 @@ function paneRoster() {
    */
   const { panes, rejected } = readPanes(out);
   if (rejected > 0 && panes.length === 0) {
+    /* The same sample as `listPanes`, because this refusal reaches a person too
+       (every name-keyed route fails closed through here) and a caller cannot
+       tell which of the two threw. */
+    LAST_LOOK_PROBLEM = `tmux answered and we could not read it. It came back like this: ${oneLine(String(out).split('\n')[0], 160)}`;
     throw new Error('we could not make sense of what came back');
   }
   return onePanePerSession(panes).map((pane) => ({
@@ -2337,6 +2384,10 @@ module.exports = {
   NO_READING,
   countAgents, snapshot, paneRoster, readPanes, isParseable, classify, isNamedOurs,
   rank, paneOrder, modelDisplayName, readIdentity, transcriptFor,
+  /* ⚠️ Exported so the ROUTE can say what tmux said. The alternative is a
+     second caller of `list-panes` asking the same question a second time,
+     which would report a different moment from the one that failed. */
+  lastLookProblem,
   isAgentPane, isAgentSession, isFleetSession, parsePanes, onePanePerSession,
   setPaneSource, setPaneCapture, tmuxSaidNoServer, shDetail,
   PANE_FORMAT, PANE_COLUMNS, STATE, CONFIDENCE, CONTEXT_LIMITS,

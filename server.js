@@ -24,7 +24,11 @@ const path = require('node:path');
 // `STATE` travels with them: the thread route compares a member's state, and a
 // literal there is a comparison that silently stops matching the day the engine
 // renames one.
-const { snapshot, paneRoster, countAgents, STATE, modelDisplayName } = require('./engine/status');
+const {
+  snapshot, paneRoster, countAgents, STATE, modelDisplayName,
+  /* What tmux said the last time a look failed, for the 500 below to carry. */
+  lastLookProblem,
+} = require('./engine/status');
 const removal = require('./engine/remove');
 const firstrun = require('./engine/firstrun');
 const subscription = require('./engine/subscription');
@@ -821,8 +825,14 @@ const server = http.createServer((req, res) => {
       body = JSON.stringify({ ...snap, agents, counts, connection, version, update: updates.available(), updateLook: updates.lastLook() });
     } catch (err) {
       // Failing loudly beats serving a stale or empty board that looks healthy.
+      /* ⚠️ AND SAYING WHAT WENT WRONG BEATS FAILING LOUDLY IN A SENTENCE NOBODY
+         CAN ACT ON. `detail` is tmux's own words for the last failed look, kept
+         by the engine rather than asked for again here: a second call would
+         report a different moment from the one that just failed. */
       res.writeHead(500, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: String(err && err.message) }));
+      let detail = null;
+      try { detail = lastLookProblem(); } catch { detail = null; }
+      res.end(JSON.stringify({ error: String(err && err.message), detail: detail || undefined }));
       return;
     }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
