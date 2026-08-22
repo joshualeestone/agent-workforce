@@ -756,6 +756,33 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
          box-shadow: 0 1px 2px rgba(20,22,26,.04); }
 .acard.attn { border-color: rgba(179,38,30,.42); box-shadow: 0 1px 3px rgba(179,38,30,.12); }
 .acard.unk { border-style: dashed; }
+/* 🔑 STATE OWNS THE GROUND AND THE STROKE (Josh, 2026-08-21), ported from the
+   pack cut of the same day. Working takes a green wash, needs-you a red one, and
+   everything else stays white: "that way you can really see quickly: these three
+   agents are working, this one has an issue, and these other ones are idle."
+   ⚠️ PAUSED, STOPPED AND UNKNOWN KEEP THE WHITE TREATMENT, ruled in the same
+   message. Red covers ONE state. It is impactful because it is rare, and
+   widening it to four costs exactly the scanning it was asked to buy. */
+.acard.working { background: linear-gradient(rgba(47,125,90,.10), rgba(47,125,90,.10)), var(--k-surface);
+                 border-color: rgba(47,125,90,.42); }
+.acard.attn { background: linear-gradient(rgba(179,38,30,.09), rgba(179,38,30,.09)), var(--k-surface);
+              border-color: rgba(179,38,30,.55); box-shadow: 0 1px 3px rgba(179,38,30,.12); }
+/* ⚠️ WHITE ON THE RED GROUND, deliberately (Josh): "leave the button white so it
+   stands out as a stark warning that you need to click on it". On a red card the
+   white pill is the highest-contrast thing, which inverts the usual pill-on-white
+   and is the point. */
+.acard.attn .astate.st-attn { background: #fff; }
+/* The orb breathes with its dots, so a working agent reads as working from
+   across the room. Off entirely for reduced motion: a full board would otherwise
+   carry a dozen pulses at once. */
+.acard.working .astate.st-working { animation: breathe 2.4s ease-in-out infinite; }
+@keyframes breathe {
+  0%, 100% { background: rgba(47,125,90,.07); border-color: rgba(47,125,90,.38); }
+  50%      { background: rgba(47,125,90,.20); border-color: rgba(47,125,90,.62); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .acard.working .astate.st-working { animation: none; background: rgba(47,125,90,.14); }
+}
 /* The heat wash is a GROUND, not a border: borders already mean "needs you". */
 .acard.hot { background: linear-gradient(180deg, rgba(179,38,30,.16) 0%, rgba(179,38,30,0) 42%), var(--k-surface); }
 /* Surface and ink flip TOGETHER, both on k-tokens (the dark-tokens set):
@@ -819,15 +846,20 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
 .astate.st-unknown { border-color: rgba(20,22,26,.22); border-style: dashed; }
 .acard > .astate.st-attn { display: flex; align-items: center; gap: 6px; width: 100%; }
 .atask { font-size: .9375rem; color: var(--k-ink-2); margin-top: 6px; }
-.acut { height: 1px; background: var(--k-rule); margin: 16px 0 14px; }
-.acard .ameta { font-weight: 600; color: var(--k-ink); font-size: .9375rem; }
+/* `.acut` is retired: the pack dropped the rule AND the divs together, and a
+   surviving rule would still draw a line under markup that no longer exists. */
+/* The role sits directly under the name as one unit (Josh's regroup). */
+.acard .ameta { font-weight: 600; color: var(--k-ink); font-size: .8125rem; margin-top: 1px; }
 /* Josh, 2026-08-19: "a tiny bit more. Not crazy." One pixel is not a gap, it is
    the absence of one. Mona Lisa's spec (#184) is `--space-3`.
    ⚠️ MEASURE THE SPACE BUDGET, NOT THE ELEMENT — her rule, and the thing to
    check is the TALLEST card on the board rather than the one that prompted the
    change. Measured after: tallest went 318px -> 323px at 1400 and at 700, role
    line still 32px (two lines, not three), so nothing was pushed over. */
-.acard .amodel { font-size: .875rem; color: var(--k-ink-2); margin-top: var(--space-3); }
+/* A byline at the foot: pinned there by `margin-top:auto` so cards of different
+   heights still line their model up, and shrunk a long way — Josh: "very much
+   smaller". This is the change that let the whole card get shorter. */
+.acard .amodel { font-size: .75rem; color: var(--k-ink-2); margin-top: auto; padding-top: 16px; }
 .acard .note { text-align: left; margin-top: 12px; }
 /* presence is NOT status: three states, and the third does not look like off */
 .pres { position: absolute; right: 6px; bottom: 6px; width: 14px; height: 14px;
@@ -4738,22 +4770,29 @@ function pctOf(ctx) {
   return Number.isFinite(ctx.percent) ? ctx.percent : null;
 }
 function boardMods(a, m) {
-  const pct = pctOf(a.context);
   return [
+    /* 🔑 STATE OWNS THE GROUND (Josh, 2026-08-21). Working takes the green wash,
+       needs-you the red one, and everything else stays white: "that way you can
+       really see quickly: these three agents are working, this one has an issue,
+       and these other ones are idle."
+       ⚠️ DERIVED FROM THE PILL, never hand-typed, so the ground cannot disagree
+       with the label sitting on it. */
+    m.st === 'working' ? 'working' : '',
     m.st === 'attn' ? 'attn' : '',
     m.st === 'stopped' ? 'off' : '',
     m.st === 'unknown' ? 'unk' : '',
-    /* hot = nearly full and NOT already red: the heat wash is a ground, and
-       the attn border outranks it (the pack renders 88%-attn without hot).
-       On .lrow the class is pack-parity with no rule of its own -- the
-       pack's own list emits it unstyled and the bar band carries the heat
-       there; a future pack rule lands here for free.
-       ⚠️ DELIBERATELY not gated on the agent running: a tied stopped pane
-       still reads its own transcript, so its figure is real -- it is the
-       memory the session holds and would resume into, and the ring/bar
-       draw it for the same reason. Heat rides the figure, not the
-       process. */
-    (pct !== null && pct >= NEARLY_FULL && m.st !== 'attn') ? 'hot' : '',
+    /* 🛑 `hot` IS RETIRED, and its reasoning is kept because it was sound when
+       written: it washed a card red at 80% memory, on the rule that a border
+       means "needs you" and a ground means "getting full" — two treatments so
+       the two could not be confused.
+       Josh retired the idea itself: *"I think we do away with the concept of the
+       red indicator that shows the context is getting full… pitch that idea
+       completely."* Red now covers ONE state, and is impactful because it is rare.
+       ⚠️ THE CONSEQUENCE, PUT TO HIM AND CHOSEN RATHER THAN INHERITED: a 95%
+       agent has no card-level signal any more. The RING keeps its red — length,
+       band and the % badge untouched — so the reading is still ON the card, it
+       is just not the card. His answer: "just having the ring and the indicator
+       with the red is fine." */
   ].filter(Boolean).join(' ');
 }
 function answerBtn(a) {
@@ -4969,11 +5008,10 @@ function card(a) {
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="agauge">${ring(a)}${pres}${badge}</div>
     <div class="aname"><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button>${staleBadge(a)}</div>
+    <div class="ameta">${esc(roleLine(a))}</div>
     <div class="astate st-${m.st}">${GLYPH[m.st]}<b>${esc(copy.label)}</b>${answer}</div>
     <div class="atask">${esc(taskLine(a))}</div>
     ${unknownNote}
-    <div class="acut"></div>
-    <div class="ameta">${esc(roleLine(a))}</div>
     <div class="amodel">${esc(modelLine(a))}</div>
   </div>`;
 }

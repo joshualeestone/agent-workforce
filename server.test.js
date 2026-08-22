@@ -3074,8 +3074,27 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     assert.match(attn88, /acard attn/, 'needs_you lost its red card treatment');
     assert.doesNotMatch(attn88, /\bhot\b/,
       'the heat wash stacked onto an attn card (the pack renders 88%-attn without hot)');
-    assert.match(api.card(withPct(leo, 94)), /acard hot/,
-      'a nearly-full working card lost the heat wash');
+    /**
+     * 🛑 THE HEAT WASH IS RETIRED AND THIS ASSERTED IT, so the test had to move
+     * with the ruling rather than be deleted. Josh, 2026-08-21: *"I think we do
+     * away with the concept of the red indicator that shows the context is
+     * getting full. I think we just pitch that idea completely."*
+     *
+     * ⚠️ WHAT REPLACES IT IS THE STRONGER CLAIM: a nearly-full working agent
+     * takes the WORKING ground like any other working agent, and its memory is
+     * still on the card — in the ring, which keeps its red band and its badge.
+     * Both halves asserted, because dropping the wash without keeping the
+     * reading would be losing the signal rather than moving it.
+     */
+    const full94 = api.card(withPct(leo, 94));
+    assert.match(full94, /acard working/,
+      'a nearly-full working agent is no longer shown as working');
+    assert.doesNotMatch(full94, /\bhot\b/,
+      'the retired heat wash is back, so red covers two different things again');
+    assert.match(full94, /class="gf high"/,
+      'the ring lost its high band, so the memory reading left the card entirely');
+    assert.match(full94, /94%/,
+      'the percentage badge went with the wash; the reading has to stay');
 
     // The state grammar: presence is not status, unknown is not idle.
     const unk = api.card(vex);
