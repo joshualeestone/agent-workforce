@@ -18,7 +18,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const nodePath = require('node:path');
+
+/* Sandboxed before the fleet loads: it writes worker folders and reads a data
+   root, and neither belongs to a test about polar coordinates. */
+process.env.AGENT_WORKFORCE_DATA = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-org-'));
+process.env.AGENT_WORKFORCE_WORKERS = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'aw-org-w-'));
+const fleet = require('./test-support/fleet');
 
 const PAGE = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
 const SCRIPT = PAGE.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -36,7 +43,16 @@ function lift(names, tail) {
     }
     return SCRIPT.slice(at, end);
   }).join('\n');
-  const consts = 'const ORG_R0 = 150, ORG_STEP = 96, ORG_MIN_ARC = 62;\n';
+  /* ⚠️ READ OUT OF THE BUILD, never restated here. An earlier draft of this
+     file hard-coded `150 / 96 / 62`, which is a copy: the day somebody widens
+     the first ring, the copy keeps the old number and every placement test
+     goes on passing against a geometry the product no longer has. Lifting the
+     declarations means a changed constant reaches the tests. */
+  const consts = ['ORG_R0', 'ORG_STEP', 'ORG_MIN_ARC'].map((k) => {
+    const m = SCRIPT.match(new RegExp('const\\s+' + k + '\\s*=\\s*([-\\d.]+)\\s*;'));
+    assert.ok(m, k + ' is no longer declared in the page');
+    return 'const ' + k + ' = ' + m[1] + ';';
+  }).join('\n') + '\n';
   // eslint-disable-next-line no-new-func
   return new Function(consts + src + '\n' + tail)();
 }
@@ -44,16 +60,76 @@ function lift(names, tail) {
 const tree = lift(['orgTreeOf'], 'return orgTreeOf;');
 const place = lift(['orgTreeOf', 'orgPlace'], 'return { orgTreeOf, orgPlace };');
 
-const agent = (name, reportsTo) => ({ sessionName: name, profile: reportsTo ? { reportsTo } : {} });
+/**
+ * Inputs come from the REAL producers, and the field names are pinned to them.
+ *
+ * 🔑 `fixture-discipline.test.js` refuses hand-built cards, and it is right to:
+ * a literal is free to carry fields `snapshot()` never emits, and a test built
+ * on one proves nothing about production. So the cards here come from
+ * `fleet.install()` and the `reportsTo` on them is written through the real
+ * `store.writeProfile`, which is the same path `createAgent` uses.
+ *
+ * 🛑 BUT THE STRICT WRAPPER CANNOT BE LEFT ON FOR THE LAYOUT TESTS, and the
+ * reason is worth stating rather than working around. `create.js` writes
+ * `reportsTo` into a profile ONLY when one was chosen, so an unassigned
+ * agent's profile genuinely does not contain the key. The wrapper throws on
+ * any field the producer did not emit, which is precisely what makes it
+ * valuable -- and it cannot tell a legitimately absent OPTIONAL field from a
+ * misspelled one. Under strict mode the product's own correct read throws on
+ * the commonest board there is: a fresh install where nobody is assigned.
+ *
+ * So the protection is bought back where it can be exact, in `pins` below:
+ * ONE strict test proves `sessionName` and `profile.reportsTo` are the names
+ * the producer really uses, against a profile written by the real writer. The
+ * layout tests then run unstrict, on cards from the same producer. A typo in
+ * either field name fails `pins`; the geometry tests stay able to model an
+ * absent manager, which is the case that matters most.
+ */
+const store = require('./engine/store');
+
+const build = (specs, opts) => {
+  for (const sp of specs) if (sp.to) store.writeProfile(sp.name, { reportsTo: sp.to });
+  const board = fleet.install(
+    specs.map((sp) => fleet.agent(sp.name, { state: 'idle' })),
+    opts,
+  );
+  try {
+    const byName = Object.fromEntries(board.agents.map((c) => [c.sessionName, c]));
+    return specs.map((sp) => {
+      assert.ok(byName[sp.name], 'the fleet produced no card for ' + sp.name);
+      return byName[sp.name];
+    });
+  } finally { board.restore(); }
+};
+
+/* Unstrict, for the reason written above. */
+const agents = (...specs) => build(specs, { strict: false });
+const a = (name, to) => ({ name, to });
+
+test('the producer emits the two fields the org view reads', () => {
+  /* Strict ON. This is the one test that can afford it, and it is the one that
+     makes the rest honest: if `snapshot()` ever renames either field, or if
+     `writeProfile` stops landing in `profile`, this fails by name. */
+  const [boss, kid] = build([a('theboss'), a('thekid', 'theboss')]);
+
+  assert.equal(kid.sessionName, 'thekid', 'the card names its session `sessionName`');
+  assert.equal(kid.profile.reportsTo, 'theboss',
+    'a profile written by the real writer reaches the card as `profile.reportsTo`');
+
+  /* And the absent case is asserted WITHOUT reading the key, since reading it
+     is what the wrapper refuses. `Object.keys` goes through a different trap. */
+  assert.ok(!Object.keys(boss.profile || {}).includes('reportsTo'),
+    'an unassigned agent has no reportsTo, which is why the layout tests run unstrict');
+});
 
 test('nobody assigned puts everyone on the first ring', () => {
-  const out = tree([agent('a'), agent('b'), agent('c')]);
+  const out = tree(agents(a('a'), a('b'), a('c')));
   assert.deepEqual(out.map((n) => n.depth), [0, 0, 0]);
   assert.deepEqual(out.map((n) => n.parent), [null, null, null]);
 });
 
 test('a chain runs outward, one ring per step', () => {
-  const out = tree([agent('a'), agent('b', 'a'), agent('c', 'b')]);
+  const out = tree(agents(a('a'), a('b', 'a'), a('c', 'b')));
   const byName = Object.fromEntries(out.map((n) => [n.agent.sessionName, n]));
   assert.equal(byName.a.depth, 0);
   assert.equal(byName.b.depth, 1);
@@ -65,14 +141,14 @@ test('a manager who is not on the board is no manager', () => {
   /* ⚠️ Otherwise the agent hangs off a node that is not drawn and vanishes from
      the picture entirely. Back to the first ring is the truth: nothing above it
      exists here. */
-  const out = tree([agent('a', 'departed')]);
+  const out = tree(agents(a('a', 'departed')));
   assert.equal(out.length, 1);
   assert.equal(out[0].depth, 0);
   assert.equal(out[0].parent, null);
 });
 
 test('an agent reporting to itself is not a manager either', () => {
-  const out = tree([agent('a', 'a')]);
+  const out = tree(agents(a('a', 'a')));
   assert.equal(out[0].depth, 0, 'a self-report made a ring of one');
 });
 
@@ -86,14 +162,14 @@ test('a CYCLE terminates, and draws everybody exactly once', () => {
    * the one failure a picture cannot admit to: there is no empty space that
    * says "somebody is not drawn here".
    */
-  const out = tree([agent('a', 'b'), agent('b', 'a'), agent('c')]);
+  const out = tree(agents(a('a', 'b'), a('b', 'a'), a('c')));
   const names = out.map((n) => n.agent.sessionName).sort();
   assert.deepEqual(names, ['a', 'b', 'c'], 'a cycle swallowed an agent');
   assert.equal(new Set(names).size, 3, 'an agent was drawn twice');
 });
 
 test('a three-way cycle also terminates', () => {
-  const out = tree([agent('a', 'b'), agent('b', 'c'), agent('c', 'a')]);
+  const out = tree(agents(a('a', 'b'), a('b', 'c'), a('c', 'a')));
   assert.deepEqual(out.map((n) => n.agent.sessionName).sort(), ['a', 'b', 'c']);
 });
 
@@ -104,7 +180,7 @@ test('a crowded ring spills outward instead of overlapping', () => {
    * edge case. Circumference is finite: at 150px radius and a 62px arc per
    * node, about fifteen fit before they touch.
    */
-  const many = Array.from({ length: 30 }, (_, i) => agent('a' + i));
+  const many = agents(...Array.from({ length: 30 }, (_, i) => a('a' + i)));
   const { placed, maxR } = place.orgPlace(place.orgTreeOf(many));
   assert.equal(placed.size, 30, 'an agent was dropped');
   assert.ok(maxR > 150, 'thirty nodes stayed on one radius', 'maxR ' + maxR);
@@ -126,10 +202,9 @@ test('a crowded ring spills outward instead of overlapping', () => {
 test('a child sits near its parent rather than wherever its index falls', () => {
   /* A chain must run outward ALONG ITS OWN BRANCH; scattering children by index
      is what makes a radial chart unreadable. */
-  const { placed } = place.orgPlace(place.orgTreeOf([
-    agent('p1'), agent('p2'), agent('p3'), agent('p4'),
-    agent('kid', 'p1'),
-  ]));
+  const { placed } = place.orgPlace(place.orgTreeOf(
+    agents(a('p1'), a('p2'), a('p3'), a('p4'), a('kid', 'p1')),
+  ));
   const parent = placed.get('p1');
   const kid = placed.get('kid');
   const diff = Math.abs(((kid.ang - parent.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
