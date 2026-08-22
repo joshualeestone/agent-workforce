@@ -91,6 +91,7 @@ one invented by somebody who did not write them.
 | `render-special-purpose.js` | **no header sentence.** Read it before running it, and give it one. |
 | `render-talk.js` | A REAL agent card, from the real producer |
 | `render-tasks.js` | **no header sentence.** Read it before running it, and give it one. |
+| `render-theme-toggle.js` | The light and dark control: two options, gold active, same geometry as the view toggle (#284) |
 | `render-thread.js` | Render and DRIVE the project thread in a real browser |
 | `render-update-toast.js` | **no header sentence.** Read it before running it, and give it one. |
 | `thread-server.js` | A server for looking at the project thread, with NOTHING pointed at the real |

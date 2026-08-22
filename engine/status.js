@@ -232,6 +232,20 @@ function tmuxPanes() {
      never started (`ran` false: not installed, not on PATH, killed by the
      timeout) has no stderr to quote, and quoting an empty string would put an
      empty pair of quotes on somebody's screen. */
+  /* jargon-ok:tmux — THE RULE, stated once here and referred to below.
+
+     A PRIMARY sentence must never name our components. A person who installed
+     Kosmos has no reason to have heard of tmux, and being told about one is a
+     fact they cannot act on: `create.js` said "the paths this computer gave
+     us for Claude and tmux" and it cost a real diagnostic step, because Josh
+     was then sent `tmux ls` on a machine whose only copy is the one we ship
+     and never put on his PATH.
+
+     A DETAIL line is the opposite case and naming the component is its whole
+     job. It sits behind a plain primary sentence ("we could not make sense of
+     what came back"), it exists so that a cause reaches the screen instead of
+     a terminal, and a cause with the actor removed is not a cause. The four
+     sites marked here are all that channel. (Mona Lisa, 2026-08-22.) */
   LAST_LOOK_PROBLEM = got.ran
     ? (oneLine(got.err, 300) || `tmux exited ${got.status} without saying why`)
     : 'we could not run tmux at all on this computer';
@@ -678,6 +692,7 @@ function listPanes() {
        missing locale.
        ⚠️ ONE LINE AND BOUNDED. A pane title is arbitrary text somebody's agent
        wrote, and this reaches a screen. */
+    /* jargon-ok:tmux — a detail line; see the rule above `tmuxPanes`. */
     LAST_LOOK_PROBLEM = `tmux answered and we could not read it. It came back like this: ${oneLine(String(out).split('\n')[0], 160)}`;
     throw new Error('we could not make sense of what came back');
   }
@@ -2227,6 +2242,7 @@ function paneRoster() {
     /* The same sample as `listPanes`, because this refusal reaches a person too
        (every name-keyed route fails closed through here) and a caller cannot
        tell which of the two threw. */
+    /* jargon-ok:tmux — a detail line; see the rule above `tmuxPanes`. */
     LAST_LOOK_PROBLEM = `tmux answered and we could not read it. It came back like this: ${oneLine(String(out).split('\n')[0], 160)}`;
     throw new Error('we could not make sense of what came back');
   }

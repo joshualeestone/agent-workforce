@@ -725,14 +725,24 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    missing top right"). Sized down to chrome weight: it is a preference, not
    an action, and it sits next to a status stamp that must stay the loudest
    thing in that corner. */
-.themepick { display: inline-flex; align-items: center; gap: 2px; padding: 2px;
-             border: 1px solid var(--k-rule); border-radius: 999px; background: var(--k-surface); }
-.themeopt { display: inline-flex; align-items: center; justify-content: center;
-            min-width: 26px; height: 22px; padding: 0 8px; border: 0; border-radius: 999px;
-            background: none; color: var(--label-2); cursor: pointer;
-            font: 600 11px var(--font-ui); letter-spacing: .04em; }
+/* 🔑 THE SAME COMPONENT AS THE GRID/LIST/ORG GROUP, deliberately: Josh,
+   2026-08-22, "this should be the same height as the grid, list, and org chart
+   viewers as well. Same shape and design. We need all this to have the same
+   standard visual language sizing." So the geometry is `.viewtoggle`'s, to the
+   pixel, rather than a rounded pill that happened to be near it. */
+.themepick { display: inline-flex; border: 0.5px solid var(--separator);
+             border-radius: var(--radius-control); overflow: hidden; background: var(--bg-elevated); }
+.themeopt { border: 0; background: none; cursor: pointer; padding: 0; width: 38px; height: 30px;
+            display: grid; place-items: center; color: var(--label-2); }
+.themeopt svg { display: block; }
+.themeopt + .themeopt { border-left: 0.5px solid var(--separator); }
 .themeopt:hover { color: var(--label); }
-.themeopt[aria-checked="true"] { background: var(--k-sunk); color: var(--label); }
+/* ⚠️ GOLD, NOT A SUNKEN FILL, and it is the same ruling as the view toggle:
+   ink flips between themes and inverts what "selected" means, gold reads as
+   chosen on both grounds. The old sunken-grey active state was the one place
+   on this screen that did not follow it. */
+.themeopt[aria-checked="true"] { background: var(--gold-bright); color: #14161a; }
+.themeopt[aria-checked="true"]:focus-visible { outline-color: #14161a; }
 /* ⚠️ A visible focus ring, because these are 22px targets in a corner: the
    keyboard user needs to see which of three they are on. */
 .themeopt:focus-visible { outline: 2px solid var(--label); outline-offset: 1px; }
@@ -3054,27 +3064,33 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   <div class="headright appright">
     <!-- The pack's stamp shape: a labelled two-line chrome block. The
          failed variant is the app's own honest extra; the pack draws none. -->
-    <!-- ⚠️ THREE STATES, NOT TWO, and the third is the default. "Follow this
-         Mac" is a real answer and the one almost everybody wants: a two-way
-         switch has to guess an initial position, and whichever it guesses is
-         wrong for half the machines it starts on. Somebody who has never
-         touched this should get whatever their Mac is set to, forever, without
-         Kosmos having recorded a preference on their behalf.
-         🔑 A SEGMENTED CONTROL RATHER THAN A TOGGLE for the same reason: a
-         toggle cannot show three states, and "on" would have to mean dark,
-         which reads as a claim about the room rather than a choice. -->
+    <!-- ⚠️ TWO OPTIONS, AND THE THIRD STATE STILL EXISTS. Josh, 2026-08-22:
+         "on the light and dark mode, I don't want auto. Let's take auto off of
+         it so we have just the sun and the moon", with the pack screenshot of
+         gold marking the active one.
+
+         🔑 THE ARGUMENT THAT PUT `Auto` HERE IS STILL TRUE AND IS ANSWERED
+         WITHOUT A BUTTON. Somebody who has never touched this should get
+         whatever their Mac is set to, forever, without Kosmos recording a
+         preference on their behalf. So nothing is stored until a person picks:
+         before that, the highlighted half is whichever the Mac is CURRENTLY in,
+         and it moves on its own when the Mac does at sunset. What went is the
+         third button, not the third behaviour.
+
+         ⚠️ WHICH MEANS THE HIGHLIGHT IS A READING, NOT A RECORD, and the two
+         are only the same after a click. A control painted from storage alone
+         would show neither half lit on a machine that has never chosen. -->
+    <div class="checked stamp" id="checked"></div>
     <div class="themepick" role="radiogroup" aria-label="Appearance">
-      <button type="button" class="themeopt" data-theme-set="system" role="radio" aria-checked="true" title="Follow this Mac">Auto</button>
-      <button type="button" class="themeopt" data-theme-set="light" role="radio" aria-checked="false" title="Always light">
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/></svg>
-        <span class="vh">Always light</span>
+      <button type="button" class="themeopt" data-theme-set="light" role="radio" aria-checked="false" title="Light">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/></svg>
+        <span class="vh">Light</span>
       </button>
-      <button type="button" class="themeopt" data-theme-set="dark" role="radio" aria-checked="false" title="Always dark">
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.2 8.2 0 1 0 10.2 10.2z"/></svg>
-        <span class="vh">Always dark</span>
+      <button type="button" class="themeopt" data-theme-set="dark" role="radio" aria-checked="false" title="Dark">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.2 8.2 0 1 0 10.2 10.2z"/></svg>
+        <span class="vh">Dark</span>
       </button>
     </div>
-    <div class="checked stamp" id="checked"></div>
     <!-- ⚠️ NO hidden ATTRIBUTE: the global [hidden]{display:none !important}
          would beat the narrow-width media query that shows this, leaving no
          navigation at all below 56rem (round 1 measured exactly that). CSS
@@ -5293,8 +5309,30 @@ function themeStored() {
     return (t === 'dark' || t === 'light') ? t : 'system';
   } catch { return 'system'; }
 }
+/**
+ * What the page is ACTUALLY in, which is not the same as what is stored.
+ *
+ * 🔑 NOTHING IS STORED UNTIL SOMEBODY PICKS, and that is the whole of the old
+ * `Auto` button kept without a button. On a machine that has never chosen, the
+ * stored value is nothing and the page is in whatever the Mac is in, so a
+ * control painted from storage would light neither half. This reads the
+ * rendered truth: the stored choice when there is one, and the Mac otherwise.
+ *
+ * ⚠️ AND IT IS RE-READ ON EVERY PAINT, so an untouched machine follows its own
+ * Mac from light to dark at sunset with the highlight moving with it.
+ */
+function themeShowing() {
+  const stored = themeStored();
+  if (stored !== 'system') return stored;
+  try {
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  } catch {
+    /* No matchMedia is the same answer the CSS falls back to. */
+    return 'light';
+  }
+}
 function paintThemePicker() {
-  const now = themeStored();
+  const now = themeShowing();
   for (const b of document.querySelectorAll('[data-theme-set]')) {
     b.setAttribute('aria-checked', b.dataset.themeSet === now ? 'true' : 'false');
   }
