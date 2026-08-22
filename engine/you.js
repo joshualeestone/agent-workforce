@@ -237,4 +237,78 @@ function syncEveryone(roster) {
   return told;
 }
 
-module.exports = { FILE, START, END, NAME_MAX, DOES_MAX, KNOW_MAX, problem, save, read, blockBody, tellAgent, syncEveryone };
+/* ---- the person's picture ------------------------------------------------
+ * Josh, 2026-08-22: "we need the user avatar somewhere in settings still",
+ * asked right after "can the org chart use actual avatars". It can, and does;
+ * the gap is that the PERSON has no picture anywhere, so "You" is plain text in
+ * the org hub and in every message row. It shows worst on the chart, where a
+ * ring of faces surrounds one text label and the label is the person.
+ *
+ * 🛑 ITS OWN FILE, NOT A ROW IN THE AGENT AVATAR STORE, and this is the one
+ * trap in the feature. `engine/messages.js` already refuses to let a string
+ * match promote an agent: *"'you' is a legal tmux session name, and the one
+ * thing the screens must never do is promote an agent to operator on a string
+ * match."* Storing the person's picture as an agent called `you` would put that
+ * exact collision in the STORAGE layer, where it is harder to see -- and no
+ * spelling escapes it, because `store.safeKey` strips punctuation, so `y.ou`
+ * and `you` are one key. An agent genuinely called "You" must be able to hold
+ * its own picture at the same time as the person, and only separate storage
+ * makes that true. (Found by Mona Lisa while specifying this.)
+ *
+ * ⚠️ A PICTURE, AND NOTHING ELSE. The alternative -- a picture plus a name and
+ * a role -- would turn "You" into a named participant on four screens and edge
+ * toward looking like an account, which the welcome screen promises there is
+ * not. The name already exists in `you.json` and is deliberately not shown in
+ * those places; this does not change that.
+ */
+const AVATAR_DIR = path.join(BASE, 'you-avatar');
+const PIC_TYPES = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
+
+/** The stored picture's path, or null. */
+function picturePath() {
+  try {
+    for (const f of fs.readdirSync(AVATAR_DIR)) {
+      if (f.startsWith('picture.')) return path.join(AVATAR_DIR, f);
+    }
+  } catch { /* none yet */ }
+  return null;
+}
+
+function hasPicture() { return picturePath() !== null; }
+
+/**
+ * Store it. Same limits and the same refusals as the agent avatars, because a
+ * person cannot be expected to learn two rules about the same act.
+ */
+function savePicture(contentType, buffer) {
+  const ext = PIC_TYPES[contentType];
+  if (!ext) return { ok: false, because: 'that has to be a PNG, JPEG, WebP or GIF' };
+  if (!buffer || !buffer.length) return { ok: false, because: 'that file was empty' };
+  if (buffer.length > 5 * 1024 * 1024) return { ok: false, because: 'that picture is larger than 5MB' };
+  try {
+    fs.mkdirSync(AVATAR_DIR, { recursive: true });
+    /* Replace rather than accumulate: one picture, and an old .png left beside
+       a new .jpg would win or lose by directory order. */
+    const had = picturePath();
+    if (had) fs.unlinkSync(had);
+    fs.writeFileSync(path.join(AVATAR_DIR, 'picture' + ext), buffer);
+  } catch {
+    return { ok: false, because: 'we could not save that picture' };
+  }
+  return { ok: true };
+}
+
+function removePicture() {
+  const had = picturePath();
+  if (!had) return { ok: true, had: false };
+  try { fs.unlinkSync(had); } catch { return { ok: false, because: 'we could not remove that picture' }; }
+  return { ok: true, had: true };
+}
+
+module.exports = { FILE, START, END, NAME_MAX, DOES_MAX, KNOW_MAX, problem, save, read, blockBody, tellAgent, syncEveryone,
+  picturePath, hasPicture, savePicture, removePicture, PIC_TYPES };

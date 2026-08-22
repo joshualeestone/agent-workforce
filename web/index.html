@@ -308,6 +308,21 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 /* One signed-in Claude account. Deliberately a plain row rather than a card:
    this is a list of facts about the machine, and three bordered boxes inside a
    bordered box is the shape that made Settings look busy. */
+/* The person's picture in Settings, and the same disc in the org hub. */
+.yourow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* ⚠️ `.lav.youav`, NOT a bare `.youav`. The element wears both classes, `.lav`
+   sets 34px, and it is defined SEVEN HUNDRED LINES LATER in this file -- so at
+   equal specificity it won and the picture rendered at agent-chip size in a
+   box meant to show the person. Caught by measuring the rendered height, not
+   by reading either rule. The compound decides it by specificity rather than
+   by which of two rules happens to sit lower in the file. */
+.lav.youav { width: 56px; height: 56px; flex: 0 0 56px; font: 600 .75rem var(--font-ui);
+             color: var(--label-2); background: var(--k-sunk); }
+.lav.youav img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.yourow .frow { flex: 1; min-width: 240px; }
+/* In the hub the picture fills the circle the word used to sit in. */
+.hub.haspic { padding: 0; overflow: hidden; border-width: 2px; }
+.hub.haspic img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .acct-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
             padding: 9px 0; border-bottom: 1px solid var(--k-rule); font-size: .875rem; }
 .acct-row:last-child { border-bottom: 0; }
@@ -4459,6 +4474,27 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
        Connect-another is disabled (#59 owns the login flow). -->
   <div class="dgrid">
     <section class="dbox">
+      <h3 class="dlab">You</h3>
+      <!-- Josh, 2026-08-22: "we need the user avatar somewhere in settings
+           still". The person is the one participant with no face: "You" is
+           plain text in the org hub and in every message row, and on the chart
+           it is a text label in a ring of faces.
+           ⚠️ A PICTURE AND NOTHING ELSE. A picture plus a name and a role would
+           turn "You" into a named participant on four screens and edge toward
+           looking like an account, which the welcome screen promises there is
+           not. The name already exists in you.json and is deliberately not
+           shown in those places; this does not change that. -->
+      <div class="yourow">
+        <span class="lav youav" id="you-face" aria-hidden="true">You</span>
+        <div class="frow">
+          <input type="file" id="you-file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="A picture of you">
+          <button class="btn-quiet" id="you-remove" type="button" hidden>Remove</button>
+        </div>
+      </div>
+      <p class="dhint" id="you-msg" role="status" style="margin:10px 0 0;">It appears wherever Kosmos shows you, which is the middle of the org chart and beside anything you have said.</p>
+    </section>
+
+    <section class="dbox">
       <h3 class="dlab">Opening Kosmos</h3>
       <div id="set-applocation"><p class="dhint">Checking where the app is…</p></div>
       <div class="dstack">
@@ -6610,6 +6646,7 @@ async function paintSettings() {
   }
   await paintAccounts();
   await refreshHistory();
+  await refreshYou();
   await paintLimits();
   await refreshEngMode();
 }
@@ -6882,6 +6919,7 @@ function pjScreenOnScreen() {
 }
 refreshEngMode();
 refreshAutoUpdate();
+refreshYou();
 document.getElementById('set-reveal').addEventListener('click', async () => {
   const msg = document.getElementById('set-reveal-msg');
   try {
@@ -7177,7 +7215,9 @@ function paintOrg() {
 
   const html = '<svg class="wires" id="orgwires" viewBox="0 0 ' + size + ' ' + size
     + '" aria-hidden="true">' + wires.join('') + '</svg>'
-    + '<div class="hub" style="left:' + cx + 'px;top:' + cy + 'px">You</div>'
+    + '<div class="hub' + (YOU_PIC ? ' haspic' : '') + '" style="left:' + cx + 'px;top:' + cy + 'px"'
+    + (YOU_PIC ? ' aria-label="You"' : '') + '>'
+    + (YOU_PIC ? '<img src="' + youPicUrl() + '" alt="">' : 'You') + '</div>'
     + nodes.join('');
 
   /* 🛑 TIER ONE OF THE REPAINT RULE (Mona Lisa's section 5). Do not rebuild
@@ -9779,6 +9819,69 @@ function histSay(sum) {
   const bits = sum.parts.filter((p) => p.count > 0).map((p) => p.count + ' ' + p.label);
   return bits.length ? bits.join(' and ') : null;
 }
+/* ---- the person's picture ---------------------------------------------
+   ⚠️ ONE STATE VARIABLE, READ FROM THE SERVER, and every surface that draws
+   the person reads it. The alternative -- each surface probing the image URL
+   and reacting to a 404 -- makes the hub and Settings disagree for as long as
+   one of them has not looked, and a broken-image icon is what that disagreement
+   renders as. */
+let YOU_PIC = false;
+let YOU_PIC_V = 0;      // busted on save, so the browser cannot serve the old one
+function youPicUrl() { return '/api/you/avatar?v=' + YOU_PIC_V; }
+function paintYou() {
+  const face = document.getElementById('you-face');
+  const rm = document.getElementById('you-remove');
+  if (!face) return;
+  face.innerHTML = YOU_PIC ? '<img src="' + youPicUrl() + '" alt="">' : 'You';
+  if (rm) rm.hidden = !YOU_PIC;
+  /* The hub is only on screen in one layout, and it is rebuilt from scratch by
+     paintOrg -- so this asks for a repaint rather than reaching into it, and
+     paintOrg reads YOU_PIC when it draws. */
+  ORG_HTML = null;
+  paintOrg();
+}
+async function refreshYou() {
+  try {
+    const r = await fetch('/api/you/avatar', { method: 'HEAD', cache: 'no-store' });
+    YOU_PIC = r.ok;
+  } catch { /* keep the last honest answer */ }
+  paintYou();
+}
+document.getElementById('you-file').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  const msg = document.getElementById('you-msg');
+  if (!file) return;
+  try {
+    const res = await fetch('/api/you/avatar', {
+      method: 'PUT', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file,
+    });
+    const out = await res.json().catch(() => null);
+    if (!res.ok) { msg.textContent = (out && out.error) || 'we could not save that picture'; return; }
+    YOU_PIC = true;
+    YOU_PIC_V += 1;
+    msg.textContent = 'Saved.';
+    paintYou();
+  } catch {
+    msg.textContent = 'we could not save that picture';
+  } finally {
+    /* ⚠️ CLEARED EITHER WAY. A file input keeps its selection, so choosing the
+       same file twice fires no change event at all -- which is exactly what
+       somebody does after a failed upload. */
+    e.target.value = '';
+  }
+});
+document.getElementById('you-remove').addEventListener('click', async () => {
+  const msg = document.getElementById('you-msg');
+  try {
+    const res = await fetch('/api/you/avatar', { method: 'DELETE' });
+    if (!res.ok) { msg.textContent = 'we could not remove it'; return; }
+    YOU_PIC = false;
+    YOU_PIC_V += 1;
+    msg.textContent = '';
+    paintYou();
+  } catch { msg.textContent = 'we could not remove it'; }
+});
+
 async function refreshHistory() {
   const line = document.getElementById('hist-count');
   const btn = document.getElementById('hist-go');

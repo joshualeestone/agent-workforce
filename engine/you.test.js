@@ -221,3 +221,56 @@ test('a projectless agent heals its stale colleagues block on an About-you write
     fleet.restore();
   }
 });
+
+/* ---- the person's picture ------------------------------------------------
+   Josh, 2026-08-22: "we need the user avatar somewhere in settings still". */
+
+test('the picture is stored outside the agent namespace, so an agent called You keeps its own', () => {
+  /**
+   * 🛑 THE WHOLE POINT OF THIS TEST. `store.safeKey` strips punctuation, so
+   * every spelling of "you" collapses to one key -- routing the person's
+   * picture through the agent avatar store would mean an agent genuinely
+   * called You could not hold its own. `engine/messages.js` already refuses to
+   * let a string match promote an agent to operator; this keeps that same
+   * collision out of the storage layer, where it is harder to see.
+   */
+  const store = require('./store');
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  assert.equal(you.savePicture('image/png', png).ok, true);
+  store.saveAvatar('you', 'image/png', Buffer.from('89504e470d0a1a0aFF', 'hex'));
+
+  const mine = you.picturePath();
+  const theirs = store.avatarPath('you');
+  assert.ok(mine && theirs, 'both pictures must exist for this to prove anything');
+  assert.notEqual(mine, theirs, 'the person and an agent called You share one file');
+  assert.equal(fs.readFileSync(mine).length, png.length, "the agent's picture overwrote the person's");
+});
+
+test('one picture, replaced rather than accumulated', () => {
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+  assert.equal(you.savePicture('image/png', png).ok, true);
+  assert.match(you.picturePath(), /picture\.png$/);
+  assert.equal(you.savePicture('image/jpeg', Buffer.from('ffd8ffe0', 'hex')).ok, true);
+  /* ⚠️ An old .png left beside a new .jpg would win or lose by directory
+     order, which is a coin toss dressed as a feature. */
+  assert.match(you.picturePath(), /picture\.jpg$/);
+  const dir = path.dirname(you.picturePath());
+  assert.equal(fs.readdirSync(dir).filter((f) => f.startsWith('picture.')).length, 1);
+});
+
+test('what it refuses, and it says why in words a person can act on', () => {
+  const bad = you.savePicture('application/pdf', Buffer.from('x'));
+  assert.equal(bad.ok, false);
+  assert.match(bad.because, /PNG, JPEG, WebP or GIF/);
+  assert.equal(you.savePicture('image/png', Buffer.alloc(0)).ok, false, 'an empty file was stored');
+  const big = you.savePicture('image/png', Buffer.alloc(5 * 1024 * 1024 + 1));
+  assert.equal(big.ok, false);
+  assert.match(big.because, /5MB/);
+});
+
+test('removing is safe to do twice, and says which it was', () => {
+  assert.equal(you.savePicture('image/png', Buffer.from('89504e470d0a1a0a', 'hex')).ok, true);
+  assert.deepEqual(you.removePicture(), { ok: true, had: true });
+  assert.deepEqual(you.removePicture(), { ok: true, had: false });
+  assert.equal(you.hasPicture(), false);
+});

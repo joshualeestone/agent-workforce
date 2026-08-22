@@ -833,6 +833,58 @@ const server = http.createServer((req, res) => {
   // The snapshot sets `hasAvatar: false` so today's board does not request it,
   // but "the real agent's photograph on a stranger's card" is closed at the
   // snapshot and open at the route, and a caller that guesses the URL gets it.
+  /**
+   * The PERSON's picture. Its own route, its own file, its own namespace.
+   *
+   * 🛑 IT IS NOT `/api/agent/you/avatar`, and that is the point rather than a
+   * tidiness preference. `engine/messages.js` already refuses to let a string
+   * match promote an agent to operator, and routing the person's picture
+   * through the agent namespace would put that collision in the storage layer:
+   * `store.safeKey` strips punctuation, so every spelling of "you" is one key,
+   * and an agent genuinely called You could not hold its own picture.
+   *
+   * ⚠️ The GET is deliberately simpler than the agent one. That branch is
+   * hardened against a name a stranger's pane is claiming, a directory that
+   * opens and fails on read, and a cancelled <img> load taking the process
+   * down; the first does not apply here (there is no name) and the other two
+   * are inherited by using the same stream shape. `readFile` rather than a
+   * stream because this is one small file read once per page rather than the
+   * per-agent, per-render traffic that made the other branch's care necessary.
+   */
+  if (pathname === '/api/you/avatar' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const file = you.picturePath();
+    if (!file) { sendJson(res, 404, { error: 'no picture yet' }); return; }
+    fs.readFile(file, (err, buf) => {
+      /* Size as well as existence: the write is not atomic, so an interrupted
+         save leaves a zero-byte file that is a perfectly good file and a
+         perfectly useless picture. Same reasoning as the agent branch. */
+      if (err || !buf || !buf.length) { sendJson(res, 404, { error: 'no picture yet' }); return; }
+      const ext = path.extname(file);
+      const type = Object.keys(you.PIC_TYPES).find((k) => you.PIC_TYPES[k] === ext) || 'application/octet-stream';
+      if (res.destroyed || res.writableEnded) return;
+      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+      res.end(buf);
+    });
+    return;
+  }
+  if (pathname === '/api/you/avatar' && (req.method === 'PUT' || req.method === 'DELETE')) {
+    if (req.method === 'DELETE') {
+      const out = you.removePicture();
+      if (!out.ok) { sendJson(res, 400, { error: out.because }); return; }
+      sendJson(res, 200, { removed: out.had });
+      return;
+    }
+    readBody(req)
+      .then((buf) => {
+        const out = you.savePicture(String(req.headers['content-type'] || '').split(';')[0].trim(), buf);
+        if (!out.ok) { sendJson(res, 400, { error: out.because }); return; }
+        sendJson(res, 200, { ok: true });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || 400,
+        { error: String((err && err.message) || 'we could not read that picture') }));
+    return;
+  }
+
   const avatarGet = pathname.match(/^\/api\/agent\/([^/]+)\/avatar$/);
   if (avatarGet && (req.method === 'GET' || req.method === 'HEAD')) {
     const name = decodeSegment(avatarGet[1]);
