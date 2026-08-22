@@ -67,3 +67,36 @@ test('hiding the input did not orphan the handler that reads the file', () => {
     assert.match(SCRIPT, re, p.input + ' has no change handler, so a chosen file goes nowhere');
   }
 });
+
+/**
+ * No two controls on one surface answer to the same name.
+ *
+ * 🛑 THE AGENT PANEL HAD TWO BUTTONS BOTH SAYING "Save", one for the
+ * instructions and one for the name and role. Neither was MISSING a name;
+ * the name did not IDENTIFY, and a check asking only whether a name exists
+ * passes on both. Found by a browser sweep
+ * (`docs/browser-checks/named-controls.js`), which is where the real version
+ * of this lives because only a render knows which controls are on screen
+ * together.
+ *
+ * 🔑 THIS IS THE CHEAP HALF, pinned here so a regression fails in `yarn test`
+ * rather than waiting for somebody to run a browser. It cannot know what is
+ * visible, so it asserts the two specific labels rather than the property.
+ */
+test('the two Save buttons on the agent panel say which they are', () => {
+  for (const [id, name] of [['d-instr-save', 'Save instructions'], ['d-save', 'Save name and role']]) {
+    const re = new RegExp('id="' + id + '"[^>]*aria-label="([^"]*)"|aria-label="([^"]*)"[^>]*id="' + id + '"');
+    const m = PAGE.match(re);
+    assert.ok(m, id + ' has no accessible name, so it announces as the same word as its sibling');
+    const label = m[1] || m[2];
+    assert.equal(label, name, id + ' is named ' + label);
+    /* ⚠️ SC 2.5.3: the visible word survives verbatim inside it, or somebody
+       driving by voice says what they can see and nothing happens. */
+    assert.ok(label.includes('Save'), id + ' rewords the visible label: ' + label);
+  }
+  /* CONTROL: both buttons really do still show the same visible word, which is
+     the condition that makes the labels necessary. If one is ever renamed this
+     test should be revisited rather than silently kept. */
+  assert.equal((PAGE.match(/>Save</g) || []).length, 2,
+    'the number of buttons visibly reading Save changed, so this pairing needs re-checking');
+});
