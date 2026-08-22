@@ -21,6 +21,13 @@ const nodePath = require('node:path');
 const SANDBOX = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'create-test-'));
 process.env.AGENT_WORKFORCE_WORKERS = nodePath.join(SANDBOX, 'workers');
 process.env.AGENT_WORKFORCE_LAUNCH = nodePath.join(SANDBOX, 'LaunchAgents');
+/* ⚠️ AND A SANDBOXED HOME, because `setAccount` asks `accounts.js` which
+   accounts exist, and `accounts.js` resolves its home at REQUIRE time. Without
+   this the account tests would read the operator's real `~/.claude*` -- so they
+   would pass or fail depending on whose machine ran them, which is not a test.
+   (`create.js` keeps using `os.homedir()` for the plist's own HOME variable;
+   that is the agent's real home and is deliberately not sandboxed here.) */
+process.env.AGENT_WORKFORCE_HOME = nodePath.join(SANDBOX, 'home');
 // ⚠️ AND THE SUPPORT ROOT, which is where the SHARED supervisor is installed.
 // Without it these tests wrote into the operator's real
 // `~/Library/Application Support/AgentWorkforce`, and the refresh test
@@ -2129,4 +2136,110 @@ test('setModel rewrites the startup file and keeps everything else about the job
   const nobody = create.setModel('neverexisted', 'opus');
   assert.equal(nobody.outcome, create.OUTCOME.REFUSED);
   assert.match(nobody.because, /not started by Kosmos/);
+});
+
+
+/* ---- which Claude account an agent runs on ------------------------------
+   Josh, 2026-08-22, on an account close to its limit: *"connect another
+   account will immediately help me move agents off that account that is almost
+   out of"*. */
+
+function seedAccounts() {
+  const home = nodePath.join(SANDBOX, 'home');
+  const put = (rel, obj) => {
+    const f = nodePath.join(home, rel);
+    fs.mkdirSync(nodePath.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify(obj), 'utf8');
+  };
+  fs.mkdirSync(nodePath.join(home, '.claude', 'projects'), { recursive: true });
+  put('.claude.json', { oauthAccount: { emailAddress: 'first@example.com' } });
+
+  // shared history: a legal destination
+  fs.mkdirSync(nodePath.join(home, '.claude-work'), { recursive: true });
+  put('.claude-work/.claude.json', { oauthAccount: { emailAddress: 'work@example.com' } });
+  try { fs.symlinkSync(nodePath.join(home, '.claude', 'projects'), nodePath.join(home, '.claude-work', 'projects')); } catch { /* already there */ }
+
+  // its own history: an illegal destination
+  fs.mkdirSync(nodePath.join(home, '.claude-solo', 'projects'), { recursive: true });
+  put('.claude-solo/.claude.json', { oauthAccount: { emailAddress: 'solo@example.com' } });
+  return { home };
+}
+
+const cfgOf = (text) => {
+  const m = text.match(/<key>CLAUDE_CONFIG_DIR<\/key>\s*<string>([\s\S]*?)<\/string>/);
+  return m ? m[1] : null;
+};
+
+test('an agent can be moved to another account, and the model comes with it', () => {
+  const { home } = seedAccounts();
+  const name = 'mover';
+  recorder();
+  create.setDryRun(false);
+  const made = create.createAgent({ ...BINS, name, role: 'pm', model: 'opus' });
+  assert.equal(made.outcome, create.OUTCOME.CREATED, made.because);
+
+  /* ⚠️ THE PREMISE: an agent starts with NO key at all, and absent has always
+     meant the default account. A rewrite that started stamping the default
+     would make every unrelated edit look like an account change. */
+  assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), null);
+
+  const out = create.setAccount(name, nodePath.join(home, '.claude-work'));
+  assert.equal(out.outcome, create.OUTCOME.CREATED, out.because);
+  assert.equal(out.account.email, 'work@example.com');
+  assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), nodePath.join(home, '.claude-work'));
+  assert.equal(create.plannedModelArg(name), 'claude-opus-5',
+    'moving accounts dropped the model the agent was created with');
+
+  /* 🛑 AND THE OTHER DIRECTION, WHICH IS THE ONE THAT WOULD HAVE SHIPPED.
+     `plistFor` regenerates the whole file, so before `readJob` existed a model
+     change silently moved the agent back to the default account -- a file that
+     still parses, a job that still starts, and an agent quietly on the wrong
+     account. Neither setter is safe without the other being tested. */
+  const modelled = create.setModel(name, 'haiku');
+  assert.equal(modelled.outcome, create.OUTCOME.CREATED, modelled.because);
+  assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), nodePath.join(home, '.claude-work'),
+    'changing the model moved the agent back to the default account');
+  assert.equal(create.plannedModelArg(name), 'claude-haiku-4-5-20251001');
+
+  // Back to the default is a real choice, and it removes the key rather than
+  // writing the default path.
+  const back = create.setAccount(name, '');
+  assert.equal(back.outcome, create.OUTCOME.CREATED, back.because);
+  assert.equal(back.account.isDefault, true);
+  assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), null);
+});
+
+test('an account that keeps its own history is refused, and the refusal says what to do', () => {
+  const { home } = seedAccounts();
+  const name = 'stayer';
+  recorder();
+  create.setDryRun(false);
+  create.createAgent({ ...BINS, name, role: 'pm', model: 'opus' });
+
+  const out = create.setAccount(name, nodePath.join(home, '.claude-solo'));
+  assert.equal(out.outcome, create.OUTCOME.REFUSED);
+  /* 🔑 THE WHOLE REASON THIS REFUSAL EXISTS: transcripts live under the config
+     directory, so this move would give the agent a blank past -- and it would
+     look like a working agent behaving like a new one, with nothing on screen
+     saying why. */
+  assert.match(out.because, /nothing it has ever done/);
+  assert.match(out.because, /Point that account at your agents' history first/);
+  assert.equal(cfgOf(fs.readFileSync(create.plistPath(name), 'utf8')), null,
+    'a refused move still wrote the file');
+});
+
+test('an account we do not know, and an agent Kosmos did not start, are both refused', () => {
+  seedAccounts();
+  const name = 'refusals';
+  recorder();
+  create.setDryRun(false);
+  create.createAgent({ ...BINS, name, role: 'pm' });
+
+  const unknown = create.setAccount(name, '/tmp/not-an-account');
+  assert.equal(unknown.outcome, create.OUTCOME.REFUSED);
+  assert.match(unknown.because, /do not know that account/);
+
+  const nobody = create.setAccount('neverexisted', '');
+  assert.equal(nobody.outcome, create.OUTCOME.REFUSED);
+  assert.match(nobody.because, /could not read how neverexisted is started/);
 });

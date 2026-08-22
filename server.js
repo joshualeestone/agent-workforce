@@ -44,6 +44,7 @@ const commitments = require('./engine/commitments');
 const you = require('./engine/you');
 const limits = require('./engine/limits');
 const engmode = require('./engine/engmode');
+const accounts = require('./engine/accounts');
 const autoupdate = require('./engine/autoupdate');
 const instructions = require('./engine/instructions');
 const projects = require('./engine/projects');
@@ -723,12 +724,35 @@ const server = http.createServer((req, res) => {
         const arg = create.plannedModelArg(a.sessionName);
         return arg ? modelDisplayName(arg) : null;
       };
+      /* One list read per poll rather than per agent: `accounts.list()` stats a
+         handful of directories, and doing it thirteen times a tick to answer
+         the same question is waste the five-second poll would pay forever. */
+      const known = (() => { try { return accounts.list(); } catch { return []; } })();
+      const accountOf = (name) => {
+        const job = create.readJob(name);
+        if (!job) return null;
+        const dir = job.configDir;
+        const found = dir ? known.find((x) => x.dir === dir) : known.find((x) => x.isDefault);
+        /* ⚠️ A CONFIGURED DIRECTORY WE CANNOT IDENTIFY IS STILL REPORTED, with
+           what we do know. Returning null there would say "the default
+           account" about an agent explicitly pointed somewhere else, which is
+           the one wrong answer available here. */
+        if (found) return { dir: found.dir, email: found.email, label: found.label, isDefault: found.isDefault };
+        return dir ? { dir, email: null, label: null, isDefault: false } : null;
+      };
       const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
         // The name only. `plannedModelArg` returns null for "we do not know",
         // and null travels as null: the screen must not be able to tell a
         // missing job from a default.
         plannedModelName: plannedFor(a),
+        /* Which Claude account this agent runs on, read from its startup file
+           and resolved to something a person recognises. `null` means the
+           default account, which is what an absent key has always meant.
+           ⚠️ Only for agents we started: an untied pane borrowing a name has
+           no startup file of ours, and answering for it would be answering for
+           a stranger's session. */
+        account: a.isNamedOurs ? accountOf(a.sessionName) : null,
         commitments: a.isNamedOurs
           ? commitments.read(a.sessionName)
           : { state: 'unknown', commitments: [], reportedAt: null, because: 'we cannot tie this pane to an agent by name, so we will not speak for what that name is holding' },
@@ -1222,6 +1246,91 @@ const server = http.createServer((req, res) => {
                choice is saved and the agent has not picked it up yet. */
             : `We saved ${wrote.model.label}, but could not start it again: ${back.because} `
               + 'It is still running the old one until it restarts.',
+          steps: back.steps || [],
+        });
+      })
+      .catch((err) => sendJson(res, (err && err.status) || 400,
+        { error: String((err && err.message) || 'we could not read that request') }));
+    return;
+  }
+
+  /**
+   * The Claude accounts on this computer, and whether each one can hold an
+   * agent's history.
+   *
+   * ⚠️ `memoryShared` travels with every row rather than being computed on the
+   * screen: the page must not be able to disagree with the engine about which
+   * accounts are safe to move somebody onto.
+   */
+  if (pathname === '/api/accounts' && (req.method === 'GET' || req.method === 'HEAD')) {
+    try { sendJson(res, 200, { accounts: accounts.list() }); }
+    catch { sendJson(res, 500, { error: 'we could not read the accounts on this computer' }); }
+    return;
+  }
+
+  /**
+   * Point an account's history at the shared tree, so agents can be moved to it.
+   *
+   * 📌 A SEPARATE ACT FROM THE MOVE, on purpose. It edits something outside
+   * Kosmos's own data (a directory belonging to a Claude account), so it is
+   * something a person chooses, not a side effect of picking a name in a
+   * dropdown.
+   */
+  if (pathname === '/api/accounts/share' && req.method === 'POST') {
+    readBody(req)
+      .then((raw) => {
+        let body = null;
+        try { body = JSON.parse(raw || 'null'); } catch { body = null; }
+        const dir = body && body.dir;
+        const known = accounts.list().find((a) => a.dir === dir);
+        if (!known) { sendJson(res, 400, { error: 'we do not know that account on this computer' }); return; }
+        const out = accounts.share(known.dir);
+        if (!out.ok) { sendJson(res, 400, { error: out.because }); return; }
+        sendJson(res, 200, { accounts: accounts.list() });
+      })
+      .catch(() => sendJson(res, 400, { error: 'we could not read that request' }));
+    return;
+  }
+
+  /**
+   * Point an agent at a different Claude account.
+   *
+   * 🛑 THE SAME TWO WRITES AS THE MODEL ROUTE, and the second is not optional:
+   * launchd reads the startup file when the job is bootstrapped, so without the
+   * restart this is a control that reports success and changes nothing until the
+   * next reboot.
+   */
+  const acctRoute = pathname.match(/^\/api\/agent\/([^/]+)\/account$/);
+  if (acctRoute && req.method === 'POST') {
+    const name = decodeSegment(acctRoute[1]);
+    if (name === null) { sendJson(res, 400, { error: 'that is not a name we can read' }); return; }
+    readBody(req)
+      .then((raw) => {
+        let body = null;
+        try { body = JSON.parse(raw || 'null'); } catch { body = null; }
+        const wrote = create.setAccount(name, body && body.dir);
+        if (wrote.outcome === create.OUTCOME.REFUSED) {
+          sendJson(res, 400, { outcome: 'refused', because: wrote.because });
+          return;
+        }
+        let back;
+        try { back = removal.restart(name); }
+        catch (err) { back = { outcome: 'partial', because: String((err && err.message) || err), steps: [] }; }
+        const ok = back.outcome === removal.OUTCOME.RESTARTED;
+        const who = wrote.account.email || wrote.account.label || 'that account';
+        sendJson(res, 200, {
+          outcome: ok ? 'changed' : 'partial',
+          account: wrote.account,
+          because: ok
+            /* Same shape as the model route's sentence, and for the same
+               reason: a restarted agent has done nothing, and Josh read that
+               emptiness as the change having failed. The history sentence is
+               here because it is the one thing a person is right to worry
+               about when moving accounts, and the answer is good news. */
+            ? `${name} runs on ${who} now. It is starting again, and it will look idle `
+              + 'until you say something to it. Everything it has done comes with it.'
+            : `We saved ${who}, but could not start it again: ${back.because} `
+              + 'It is still on the old account until it restarts.',
           steps: back.steps || [],
         });
       })

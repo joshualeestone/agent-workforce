@@ -88,6 +88,64 @@ function identityOf(dir) {
  * unless something says otherwise — and it is the one the rest of the product
  * has always meant by "your account".
  */
+/**
+ * Does this account write its transcripts into the SAME tree as the primary?
+ *
+ * The primary trivially does. Anything else has to be a symlink resolving to
+ * the primary's `projects`, which is what `prepare()` creates and what somebody
+ * wired by hand on this machine before Kosmos could.
+ *
+ * ⚠️ FALSE ON ANY DOUBT. A broken symlink, an unreadable directory and a real
+ * directory of its own all answer false, because the only action this gates is
+ * moving an agent's working life onto that account.
+ */
+function sharesMemory(dir, isDefault) {
+  if (isDefault) return true;
+  const primary = path.join(HOME, '.claude', 'projects');
+  const here = path.join(dir, 'projects');
+  try {
+    if (!fs.lstatSync(here).isSymbolicLink()) return false;
+    return fs.realpathSync(here) === fs.realpathSync(primary);
+  } catch { return false; }
+}
+
+/**
+ * Point an EXISTING account's transcripts at the primary tree.
+ *
+ * 🔑 `prepare()` does this for accounts Kosmos creates; this is the same act for
+ * one that was already on the machine when Kosmos arrived. Josh's rule is about
+ * the agent, not about who made the directory: *"her memory should follow her
+ * everywhere she goes."*
+ *
+ * 🛑 IT WILL NOT REPLACE A REAL DIRECTORY. A `projects` folder with somebody's
+ * actual history in it is not ours to delete, and deleting it is precisely the
+ * amnesia this whole area exists to prevent, arriving from the other direction.
+ * An empty one is safe to swap and is the common case for an account that has
+ * never run an agent.
+ */
+function share(dir) {
+  const primary = path.join(HOME, '.claude', 'projects');
+  const here = path.join(dir, 'projects');
+  if (sharesMemory(dir, dir === path.join(HOME, '.claude'))) return { ok: true, already: true };
+  let st = null;
+  try { st = fs.lstatSync(here); } catch { st = null; }
+  if (st && !st.isSymbolicLink()) {
+    let empty = false;
+    try { empty = fs.readdirSync(here).length === 0; } catch { empty = false; }
+    if (!empty) {
+      return { ok: false, because: 'that account already keeps its own history here, and we will not delete it' };
+    }
+  }
+  try {
+    fs.mkdirSync(primary, { recursive: true });
+    if (st) fs.rmSync(here, { recursive: true, force: true });
+    fs.symlinkSync(primary, here);
+  } catch {
+    return { ok: false, because: 'we could not point that account at your agents\' history' };
+  }
+  return { ok: true, already: false };
+}
+
 function list() {
   const out = [];
   const seen = new Set();
@@ -106,6 +164,19 @@ function list() {
          naming note at the top: `status.configRoots` only looks at `~/.claude`
          and `~/.claude-*`, and only when a `projects` directory is there. */
       memoryReadable: fs.existsSync(path.join(dir, 'projects')),
+      /* 🛑 THE STRONGER QUESTION, AND THE ONE THAT DECIDES WHETHER AN AGENT MAY
+         BE MOVED HERE. `memoryReadable` only asks whether a transcripts tree
+         EXISTS at this account; `memoryShared` asks whether it is the SAME tree
+         the rest of the machine writes to. An account with its own separate
+         tree reads as perfectly fine and gives an agent moved onto it a blank
+         history -- which presents as a working agent behaving like a new one,
+         with nothing on screen saying why.
+         📌 Measured on this machine: `.claude-account-b/projects` and `-c` are
+         both symlinks to `~/.claude/projects`, wired by hand months before this
+         function existed. That hand-wiring is the precedent, and `prepare()`
+         does it for every account Kosmos makes. This field is what lets the
+         screen tell the two kinds of account apart. */
+      memoryShared: sharesMemory(dir, isDefault === true),
     });
   };
 
@@ -171,4 +242,4 @@ function prepare(label) {
   return { ok: true, dir, label: clean, memoryShared };
 }
 
-module.exports = { list, identityOf, prepare, HOME_FOR_TEST: HOME };
+module.exports = { list, identityOf, prepare, share, sharesMemory, HOME_FOR_TEST: HOME };

@@ -142,3 +142,64 @@ test('preparing an account twice does not disturb history that is already there'
   assert.ok(fs.existsSync(nodePath.join(own, 'projects', 'something')),
     'existing history was destroyed to make room for a link');
 });
+
+/* ---- memoryShared, and the repair that makes it true ---------------------
+   🔑 THIS IS THE FIELD THE MOVE IS GATED ON. `memoryReadable` only asks whether
+   a transcripts tree exists here; an account with its OWN tree passes that and
+   still gives any agent moved onto it a blank past. */
+
+test('an account with its own separate history is NOT shared, and the one that is says so', () => {
+  const home = accounts.HOME_FOR_TEST;
+  fs.mkdirSync(nodePath.join(home, '.claude', 'projects'), { recursive: true });
+  write('.claude.json', { oauthAccount: { emailAddress: 'first@example.com' } });
+
+  // its own tree
+  fs.mkdirSync(nodePath.join(home, '.claude-own', 'projects'), { recursive: true });
+  write('.claude-own/.claude.json', { oauthAccount: { emailAddress: 'own@example.com' } });
+
+  // pointed at the primary, the way prepare() and this machine's own accounts are
+  fs.mkdirSync(nodePath.join(home, '.claude-linked'), { recursive: true });
+  write('.claude-linked/.claude.json', { oauthAccount: { emailAddress: 'linked@example.com' } });
+  fs.symlinkSync(nodePath.join(home, '.claude', 'projects'), nodePath.join(home, '.claude-linked', 'projects'));
+
+  const by = Object.fromEntries(accounts.list().map((a) => [a.email, a]));
+  assert.equal(by['first@example.com'].memoryShared, true, 'the primary is trivially shared with itself');
+  assert.equal(by['linked@example.com'].memoryShared, true, 'a link to the primary was not recognised');
+
+  /* ⚠️ THE ONE THAT MATTERS. Both of these accounts have a readable tree, so
+     `memoryReadable` cannot tell them apart -- which is exactly why a second
+     field exists rather than a stricter reading of the first. */
+  assert.equal(by['own@example.com'].memoryReadable, true, 'the premise: its tree is readable');
+  assert.equal(by['own@example.com'].memoryShared, false,
+    'an account with its own history read as safe to move an agent onto');
+});
+
+test('share() points an existing account at the one tree, and refuses to delete real history', () => {
+  const home = accounts.HOME_FOR_TEST;
+  fs.mkdirSync(nodePath.join(home, '.claude', 'projects'), { recursive: true });
+  write('.claude.json', { oauthAccount: { emailAddress: 'first@example.com' } });
+
+  // empty tree: safe to swap, and the common case for an account that has never run an agent
+  fs.mkdirSync(nodePath.join(home, '.claude-empty', 'projects'), { recursive: true });
+  write('.claude-empty/.claude.json', { oauthAccount: { emailAddress: 'empty@example.com' } });
+  const empty = nodePath.join(home, '.claude-empty');
+  assert.equal(accounts.sharesMemory(empty, false), false, 'the premise: it starts unshared');
+  assert.deepEqual(accounts.share(empty), { ok: true, already: false });
+  assert.equal(accounts.sharesMemory(empty, false), true, 'the repair did not take');
+
+  /* 🛑 AND IT WILL NOT DELETE SOMEBODY'S ACTUAL HISTORY. Replacing a real tree
+     with a link is the amnesia this whole area exists to prevent, arriving
+     from the other direction. */
+  const full = nodePath.join(home, '.claude-full');
+  fs.mkdirSync(nodePath.join(full, 'projects', '-Users-someone-work'), { recursive: true });
+  fs.writeFileSync(nodePath.join(full, 'projects', '-Users-someone-work', 'a.jsonl'), '{}\n');
+  write('.claude-full/.claude.json', { oauthAccount: { emailAddress: 'full@example.com' } });
+  const refused = accounts.share(full);
+  assert.equal(refused.ok, false);
+  assert.match(refused.because, /will not delete it/);
+  assert.ok(fs.existsSync(nodePath.join(full, 'projects', '-Users-someone-work', 'a.jsonl')),
+    'the refusal still ate the history it refused to eat');
+
+  // and sharing something already shared is a no-op that says so
+  assert.deepEqual(accounts.share(empty), { ok: true, already: true });
+});

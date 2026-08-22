@@ -316,6 +316,95 @@ function plannedModelArg(name) {
 }
 
 /**
+ * Everything a rewrite of an agent's launch file has to preserve.
+ *
+ * 🛑 THIS EXISTS BECAUSE `plistFor` REGENERATES THE WHOLE FILE. `setModel` read
+ * the two binary paths out, passed them back in, and every other field came
+ * from defaults -- which was correct while the model was the only settable
+ * thing in it. The moment a SECOND settable field exists (the account), each
+ * setter silently erases the other's, and the erasure is invisible: the file
+ * still parses, the job still starts, and the agent quietly moves back to the
+ * default account the next time somebody changes its model.
+ *
+ * 🔑 SO THE FIX IS ONE READER, NOT TWO CAREFUL CALLERS. A third settable field
+ * added later joins this shape and both setters inherit it, rather than the
+ * author of the third field having to find and patch two call sites. Tonight's
+ * own lesson, twice over: a new sibling does not inherit the guard.
+ */
+function readJob(name) {
+  if (!NAME_RE.test(String(name == null ? '' : name))) return null;
+  let text;
+  try { text = fs.readFileSync(plistPath(name), 'utf8'); } catch { return null; }
+  const block = text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  const args = block ? [...block[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((x) => unxml(x[1])) : [];
+  // 0 bash, 1 supervisor, 2 name, 3 worker dir, 4 claude, 5 tmux, 6 log, 7 model.
+  if (args.length < 7 || !args[4] || !args[5]) return null;
+  /* ⚠️ Matched inside EnvironmentVariables only in the sense that it is the one
+     place this key is ever written; the value is read back verbatim, and an
+     absent key is `null` rather than the default path, so "unset" and "set to
+     the default" stay distinguishable in the one direction that matters. */
+  const cfg = text.match(/<key>CLAUDE_CONFIG_DIR<\/key>\s*<string>([\s\S]*?)<\/string>/);
+  return {
+    claude: args[4],
+    tmux: args[5],
+    model: args.length > 7 && args[7] ? args[7] : null,
+    configDir: cfg ? unxml(cfg[1]) : null,
+  };
+}
+
+/**
+ * Point an existing agent at a different Claude account.
+ *
+ * 🛑 IT REFUSES WHEN THE ACCOUNT'S HISTORY IS NOT THE SHARED ONE, and that
+ * refusal is the feature rather than a safety rail around it. Transcripts live
+ * under the config directory, so an agent moved to an account with its own tree
+ * comes up with no memory and NOTHING ON SCREEN SAYS SO: it looks like a working
+ * agent and behaves like a blank one. Josh's rule is the opposite of that --
+ * *"her memory should follow her everywhere she goes"* -- so an account that
+ * cannot keep the promise is not an account we will move anybody to.
+ *
+ * `accounts.share()` is the fix a caller offers instead of the move.
+ */
+function setAccount(name, dir) {
+  const clean = cleanName(name);
+  if (!NAME_RE.test(String(clean == null ? '' : clean))) {
+    return { outcome: OUTCOME.REFUSED, because: 'that is not a name we can act on' };
+  }
+  const accounts = require('./accounts');
+  const all = accounts.list();
+  /* The empty string means "back to the default account", which is a real
+     choice and not a missing value. */
+  const wanted = dir === '' || dir == null ? null : String(dir);
+  const acct = wanted === null ? all.find((a) => a.isDefault) : all.find((a) => a.dir === wanted);
+  if (!acct) {
+    return { outcome: OUTCOME.REFUSED, because: 'we do not know that account on this computer' };
+  }
+  if (!acct.memoryShared) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `${acct.email || 'that account'} keeps its own separate history, so `
+        + `${clean} would arrive there with nothing it has ever done. Point that `
+        + 'account at your agents\' history first.',
+    };
+  }
+
+  const job = readJob(clean);
+  if (!job) {
+    return {
+      outcome: OUTCOME.REFUSED,
+      because: `we could not read how ${clean} is started, so we have not changed it.`,
+    };
+  }
+  try {
+    fs.writeFileSync(plistPath(clean),
+      plistFor(clean, job.claude, job.tmux, job.model, acct.isDefault ? null : acct.dir), 'utf8');
+  } catch {
+    return { outcome: OUTCOME.REFUSED, because: `we could not write ${clean}'s startup file, so nothing changed.` };
+  }
+  return { outcome: OUTCOME.CREATED, because: null, account: acct };
+}
+
+/**
  * Point an existing agent at a different model.
  *
  * 🔑 NOT A NEW SUBSYSTEM, which is why it is twenty lines. The model is already
@@ -349,26 +438,20 @@ function setModel(name, modelKey) {
   const m = MODELS.find((x) => x.key === String(modelKey));
   if (!m) return { outcome: OUTCOME.REFUSED, because: 'pick a model from the list' };
 
-  let text;
-  try { text = fs.readFileSync(plistPath(clean), 'utf8'); } catch { text = null; }
-  if (!text) {
+  /* ⚠️ THROUGH `readJob`, so this rewrite carries the agent's ACCOUNT forward.
+     Reading the two binary paths by hand was correct while the model was the
+     only settable field; it is now the shape that silently moves an agent back
+     to the default account every time somebody changes its model. */
+  const job = readJob(clean);
+  if (!job) {
     return {
       outcome: OUTCOME.REFUSED,
       because: `${clean} was not started by Kosmos, so we cannot change what it runs on.`,
     };
   }
-  const block = text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/);
-  const args = block ? [...block[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((x) => unxml(x[1])) : [];
-  // 0 bash, 1 supervisor, 2 name, 3 worker dir, 4 claude, 5 tmux, 6 log, 7 model.
-  if (args.length < 7 || !args[4] || !args[5]) {
-    return {
-      outcome: OUTCOME.REFUSED,
-      because: `we could not read how ${clean} is started, so we have not changed it.`,
-    };
-  }
 
   try {
-    fs.writeFileSync(plistPath(clean), plistFor(clean, args[4], args[5], m.arg), 'utf8');
+    fs.writeFileSync(plistPath(clean), plistFor(clean, job.claude, job.tmux, m.arg, job.configDir), 'utf8');
   } catch {
     return { outcome: OUTCOME.REFUSED, because: `we could not write ${clean}'s startup file, so nothing changed.` };
   }
@@ -530,12 +613,22 @@ function unxml(value) {
  * the notice is coming, in as many words, rather than letting somebody meet it
  * unexplained and switch their own agent off.
  */
-function plistFor(name, claudeBin, tmuxBin, modelArg) {
+function plistFor(name, claudeBin, tmuxBin, modelArg, configDir) {
   const label = serviceLabel(name);
   // The optional sixth supervisor argument. Log ($5) must be present when
   // model ($6) is, and it always is below; an agent created without a model
   // choice writes the five-argument job every existing agent already runs.
   const modelLine = modelArg ? `\n    <string>${xml(modelArg)}</string>` : '';
+  /* 🔑 WHICH CLAUDE ACCOUNT THIS AGENT RUNS ON, and it is one environment
+     variable because that is genuinely all it is: `CLAUDE_CONFIG_DIR` selects
+     the config directory, and everything a Claude Code process knows lives in
+     there.
+     ⚠️ ABSENT MEANS THE DEFAULT ACCOUNT, deliberately, rather than writing
+     `~/.claude` explicitly. Every agent on every machine today has no such key,
+     so an absent key has to keep meaning what it already means -- and a
+     rewrite that started stamping the default would make an unrelated edit
+     look like an account change in every diff of these files. */
+  const configLine = configDir ? `\n    <key>CLAUDE_CONFIG_DIR</key><string>${xml(configDir)}</string>` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -556,7 +649,7 @@ function plistFor(name, claudeBin, tmuxBin, modelArg) {
   <dict>
     <key>HOME</key><string>${xml(HOME)}</string>
     <key>PATH</key><string>${xml(`${path.dirname(claudeBin)}:${path.dirname(tmuxBin)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`)}</string>
-    <key>LANG</key><string>en_US.UTF-8</string>
+    <key>LANG</key><string>en_US.UTF-8</string>${configLine}
   </dict>
   <!-- Whose background item this is. See the note above plistFor. -->
   <key>AssociatedBundleIdentifiers</key>
@@ -1290,6 +1383,8 @@ function createAgent(opts) {
 module.exports = {
   MODELS,
   setModel,
+  setAccount,
+  readJob,
   createAgent,
   binPaths,
   unusablePath,

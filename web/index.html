@@ -302,6 +302,21 @@ h1 { font: 600 var(--text-title-1) var(--font-ui); letter-spacing: -0.012em; }
 .dprojects { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .dprojlab { font-size: .6875rem; letter-spacing: .12em; text-transform: uppercase;
             font-weight: 600; color: var(--k-ink-2); }
+/* A hairline between the two halves of Runs on: the model above, the account
+   below. Without it the second "Right now" line reads as a continuation of the
+   first control rather than the start of a second one. */
+/* One signed-in Claude account. Deliberately a plain row rather than a card:
+   this is a list of facts about the machine, and three bordered boxes inside a
+   bordered box is the shape that made Settings look busy. */
+.acct-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+            padding: 9px 0; border-bottom: 1px solid var(--k-rule); font-size: .875rem; }
+.acct-row:last-child { border-bottom: 0; }
+.acct-who { min-width: 0; }
+.acct-who b { font-weight: 650; }
+.acct-org { display: block; color: var(--label-2); font-size: .8125rem; }
+.acct-tag { color: var(--label-2); font-weight: 400; font-size: .8125rem; }
+.acct-ok { color: var(--label-2); white-space: nowrap; }
+.fdiv { height: 1px; background: var(--k-rule); margin: 16px 0 0; }
 .runnow { margin: 0 0 14px; font-size: .9375rem; color: var(--k-ink-2); }
 .runnow b { color: var(--k-ink); font-weight: 650; }
 .memrow { display: flex; align-items: center; gap: 12px; max-width: 22rem; }
@@ -2764,6 +2779,26 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          changing the model restarts the agent, and a restart is how an agent
          reads its instructions again. -->
     <p class="dhint" style="margin:8px 0 0;">Changing this starts the agent again, so it picks up the new one. It will read its instructions again too.</p>
+
+    <!-- ⚠️ THE ACCOUNT LIVES IN THE SAME BOX AS THE MODEL, and it belongs
+         there: "Runs on" is the box's subject, and which Claude account an
+         agent runs on is the other half of that sentence. A second box would
+         have made two homes for one question.
+         🔑 THE HISTORY LINE IS THE POINT OF THIS CONTROL. Transcripts live
+         inside a Claude account's own directory, so the obvious build of this
+         feature moves an agent and silently empties everything it has ever
+         done -- it comes up looking fine and behaving like a new hire. Josh's
+         rule is the opposite: her memory should follow her everywhere she
+         goes. Accounts that cannot keep that promise are refused by the engine
+         rather than warned about here. -->
+    <div class="fdiv" style="margin-top:16px;"></div>
+    <p class="runnow" id="d-account-now"></p>
+    <div class="frow" style="margin-top:10px;">
+      <select id="d-account" aria-label="Claude account this agent runs on"></select>
+      <button class="btn" type="button" id="d-account-go" disabled>Move</button>
+    </div>
+    <p class="dhint" id="d-account-msg" role="status" aria-live="polite" style="margin:8px 0 0;"></p>
+    <p class="dhint" style="margin:8px 0 0;">Everything this agent has done comes with it. Moving is how you take an agent off an account that is running out.</p>
   </section>
   <section class="dbox">
     <h3 class="dlab">Memory</h3>
@@ -4152,10 +4187,17 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
     <section class="dbox">
       <h3 class="dlab">Your Claude account</h3>
       <div id="set-account"><p class="dhint">Checking the connection…</p></div>
-      <div class="dstack">
-        <button class="btn-quiet dwide" type="button" disabled>Connect another account</button>
-      </div>
-      <p class="dhint" style="margin:12px 0 0;"><b>One account for now.</b> Connecting another is not built yet.</p>
+      <!-- 🛑 "One account for now. Connecting another is not built yet." WAS
+           HERE, under a greyed-out button, and it was wrong on this machine
+           before it was ever built: three accounts were already signed in and
+           the screen said one. It was a hardcoded sentence where a reading
+           belonged.
+           🔑 THE LIST IS READ, NOT ASSERTED. `accounts.list()` finds every
+           config directory on the machine that carries a login record, so the
+           screen cannot disagree with what is actually there. -->
+      <div id="set-accounts"></div>
+      <p class="dhint" id="set-accounts-msg" role="status" style="margin:10px 0 0;"></p>
+      <p class="dhint" style="margin:12px 0 0;"><b>Signing in to another account is done in a terminal</b>, not here: run <code>CLAUDE_CONFIG_DIR=~/.claude-work claude</code> and log in. It shows up on this list once you have.</p>
       <p class="dhint" style="margin:8px 0 0;">
         Kosmos never sees your password and holds no account of its own.
       </p>
@@ -6171,8 +6213,68 @@ async function paintSettings() {
     acct.innerHTML = accountRow(null);
     // The card keeps its last honest paint; the poll repaints it.
   }
+  await paintAccounts();
   await paintLimits();
   await refreshEngMode();
+}
+
+/**
+ * Every Claude account signed in on this computer.
+ *
+ * ⚠️ EACH ROW SAYS WHETHER AN AGENT'S HISTORY WOULD FOLLOW IT THERE, because
+ * that is the only thing about an account a person cannot see for themselves.
+ * An account whose transcripts live in its own tree looks completely normal and
+ * gives any agent moved onto it a blank past.
+ * 🔑 AND THE FIX IS OFFERED IN PLACE rather than described. "Not shared" with no
+ * button is the shape this app keeps having to remove: an admission that leaves
+ * somebody nowhere to go.
+ */
+async function paintAccounts() {
+  const box = document.getElementById('set-accounts');
+  const msg = document.getElementById('set-accounts-msg');
+  if (!box) return;
+  let list = [];
+  try {
+    const res = await fetch('/api/accounts', { cache: 'no-store' });
+    if (!res.ok) throw new Error('no');
+    list = ((await res.json()) || {}).accounts || [];
+  } catch {
+    // ⚠️ Never "one account": a failed read must not shrink the list.
+    box.innerHTML = '<p class="dhint" style="margin:10px 0 0;">We could not read the accounts on this computer.</p>';
+    return;
+  }
+  ACCOUNTS = list;
+  if (msg) msg.textContent = '';
+  box.innerHTML = list.map((a) => {
+    const who = esc(a.email || a.label || a.dir);
+    const org = a.organization && a.organization !== a.email
+      ? '<span class="acct-org">' + esc(a.organization) + '</span>' : '';
+    const shared = a.memoryShared
+      ? '<span class="acct-ok">History follows agents here</span>'
+      : '<button class="linkish" type="button" data-share="' + esc(a.dir) + '">Keeps its own history, fix this</button>';
+    return '<div class="acct-row"><div class="acct-who"><b>' + who
+      + (a.isDefault ? ' <span class="acct-tag">your first account</span>' : '') + '</b>' + org + '</div>'
+      + shared + '</div>';
+  }).join('');
+  for (const btn of box.querySelectorAll('[data-share]')) {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      if (msg) msg.textContent = '';
+      try {
+        const res = await fetch('/api/accounts/share', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ dir: btn.dataset.share }),
+        });
+        const out = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((out && out.error) || 'we could not change that');
+        await paintAccounts();
+      } catch (err) {
+        btn.disabled = false;
+        if (msg) msg.textContent = String((err && err.message) || 'we could not change that');
+      }
+    });
+  }
 }
 
 /* The conversation limit card: painted from the engine's read, and the
@@ -8167,6 +8269,7 @@ function openDetail(sessionName) {
      it needs a stub the test would then be asserting against instead of the
      page. Outside it, the same test keeps working and this keeps its real one. */
   paintModelPicker(a);
+  paintAccountPicker(a);
   /* The explanation's landing place after it left the card with the
      why-line (the pack split: the card carries signals, the panel carries
      explanation). `because` is the board's stated reason for its belief
@@ -9851,6 +9954,107 @@ async function paintModelPicker(a) {
     msg.textContent = 'Kosmos did not start this one, so it cannot change what it runs on.';
   }
 }
+
+/* ---- which Claude account this agent runs on -------------------------
+   🔑 THE SAME SHAPE AS THE MODEL PICKER ABOVE and deliberately so: a "Right
+   now" line in the present tense, a dropdown that does NOT preselect, and a
+   button that stays down until something is chosen. The two tenses need two
+   elements -- a select reading "josh@stuff.io" means "is on" until somebody
+   touches it and "about to be" afterwards.
+   ⚠️ AND IT DOES NOT PRESELECT FOR A SECOND REASON THE MODEL PICKER DOES NOT
+   HAVE: the accounts are identified by DIRECTORY, and preselecting the current
+   one would make the button's disabled state the only thing standing between a
+   person and a no-op "move" that restarts their agent for nothing. */
+let ACCOUNTS = [];
+async function paintAccountPicker(a) {
+  const sel = document.getElementById('d-account');
+  const go = document.getElementById('d-account-go');
+  const now = document.getElementById('d-account-now');
+  const msg = document.getElementById('d-account-msg');
+  if (!sel || !go || !now) return;
+  if (!ACCOUNTS.length) {
+    try {
+      const res = await fetch('/api/accounts', { cache: 'no-store' });
+      if (res.ok) ACCOUNTS = ((await res.json()) || {}).accounts || [];
+    } catch { /* the control stays empty and disabled, which is honest */ }
+  }
+  const acct = a && a.account;
+  /* ⚠️ "We cannot tell" is a THIRD state and gets its own sentence. An agent
+     Kosmos did not start has no startup file of ours to read, and saying "the
+     default account" about it would be answering for a stranger's session. */
+  now.innerHTML = acct
+    ? 'Signed in as <b>' + esc(acct.email || acct.label || acct.dir) + '</b>'
+      + (acct.isDefault ? ' (your first account)' : '')
+    : (a && a.isNamedOurs
+      ? 'Signed in as <b>your first account</b>'
+      : 'We cannot tell which account this one uses.');
+
+  /* Only accounts whose history is the shared one. The engine refuses the rest
+     and says why; the picker does not offer them at all, because an option that
+     always fails is worse than an option that is not there. */
+  const movable = ACCOUNTS.filter((x) => x.memoryShared);
+  const html = ['<option value="">Move to&hellip;</option>'].concat(
+    movable.map((x) => '<option value="' + esc(x.dir) + '">'
+      + esc(x.email || x.label || x.dir) + (x.isDefault ? ' (your first account)' : '') + '</option>'),
+  ).join('');
+  if (sel.innerHTML !== html) sel.innerHTML = html;
+
+  const ours = !!(a && a.isNamedOurs);
+  /* One movable account means there is nowhere to move TO, and a working
+     dropdown with one entry that is where you already are is a control that
+     cannot do anything. */
+  const somewhere = movable.length > 1;
+  sel.disabled = !ours || !somewhere;
+  go.disabled = !ours || !somewhere || !sel.value;
+  if (msg && !msg.textContent) {
+    if (!ours) msg.textContent = 'Kosmos did not start this one, so it cannot move it.';
+    else if (!somewhere) msg.textContent = 'Only one Claude account is signed in on this computer.';
+  }
+}
+
+document.getElementById('d-account').addEventListener('change', (e) => {
+  const go = document.getElementById('d-account-go');
+  if (go) go.disabled = !e.target.value;
+});
+
+document.getElementById('d-account-go').addEventListener('click', async () => {
+  if (!CURRENT) return;
+  const sel = document.getElementById('d-account');
+  const go = document.getElementById('d-account-go');
+  const msg = document.getElementById('d-account-msg');
+  const want = sel.value;
+  if (!want) return;
+  // The same capture-and-recheck as the model change: switching agents
+  // mid-flight must not land this answer on another agent's panel.
+  const forAgent = CURRENT.sessionName;
+  go.disabled = true;
+  sel.disabled = true;
+  msg.textContent = 'Moving…';
+  try {
+    const res = await fetch('/api/agent/' + encodeURIComponent(forAgent) + '/account', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dir: want }),
+    });
+    const out = await res.json().catch(() => null);
+    if (!CURRENT || CURRENT.sessionName !== forAgent) return;
+    if (!res.ok || !out) throw new Error((out && (out.because || out.error)) || 'that did not work');
+    // The engine's sentence, verbatim: it distinguishes "moved and starting"
+    // from "saved but still on the old account", which a person acts on
+    // differently.
+    msg.textContent = out.because || 'Moved.';
+    sel.value = '';
+    ACCOUNTS = [];   // the move can change nothing about the list, but a stale one outlives a connect
+    await tick();
+  } catch (err) {
+    msg.textContent = String((err && err.message) || 'that did not work');
+  } finally {
+    const sel2 = document.getElementById('d-account');
+    const go2 = document.getElementById('d-account-go');
+    if (sel2) sel2.disabled = false;
+    if (go2) go2.disabled = !sel2 || !sel2.value;
+  }
+});
 
 document.getElementById('d-model').addEventListener('change', (e) => {
   const go = document.getElementById('d-model-go');
