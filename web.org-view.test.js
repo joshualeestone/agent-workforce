@@ -174,6 +174,29 @@ test('a three-way cycle also terminates', () => {
   assert.deepEqual(out.map((n) => n.agent.sessionName).sort(), ['a', 'b', 'c']);
 });
 
+test('an agent listed twice is drawn once, not stacked on itself', () => {
+  /**
+   * 🔑 THIS IS WHAT THE SEEN-SET IN `walk` ACTUALLY GUARDS, and it took a
+   * mutation to find out. Removing that check leaves every cycle test green,
+   * because a cycle never enters the recursion: the walk starts at agents with
+   * no manager, each agent has at most one manager, so the reachable graph is
+   * a tree and no node can be arrived at twice.
+   *
+   * A REPEATED NAME is the case that reaches it, and it is not exotic -- a
+   * tmux session with two panes produces two cards with one sessionName.
+   * Drawn twice, the second node lands exactly on the first, which reads as
+   * one agent while the roster count says otherwise.
+   */
+  const [one] = agents(a('twinned'));
+  const out = tree([one, one]);
+
+  assert.equal(out.length, 1, 'the same agent was placed ' + out.length + ' times');
+  assert.equal(out[0].agent.sessionName, 'twinned');
+
+  const { placed } = place.orgPlace(place.orgTreeOf([one, one]));
+  assert.equal(placed.size, 1, 'two nodes were drawn for one agent');
+});
+
 test('a crowded ring spills outward instead of overlapping', () => {
   /**
    * 🔑 EVERYBODY'S FIRST ORG CHART IS THIS. A fleet starts with nobody
