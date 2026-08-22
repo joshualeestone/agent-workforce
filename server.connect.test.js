@@ -590,42 +590,103 @@ test('the port-collision message names what was seen, and the escape clears the 
   /* 🛑 THE ESCAPE MUST NOT BE PORT+1. */
   assert.ok(!setup.includes('_alt=$((PORT + 1))'),
     'the suggested port is 4318 again, which is the other OpenTelemetry default');
-  assert.ok(setup.includes('_alt=4417'), 'the escape no longer clears the OTLP range');
+  assert.ok(setup.includes('_alt=16181'), 'the escape no longer clears the OTLP range');
 
   /* And the sentence that has to survive either way: the install DID work. */
   assert.ok(setup.includes('Kosmos is installed, but something else is already answering'),
     'a person whose port is busy is no longer told the install itself succeeded');
 });
 
-test('the port precondition runs for a first-time installer, not only on upgrades', () => {
+test('a first-time installer meets the port precondition before anything is downloaded', () => {
   /**
-   * 🛑 THE CHECK EXISTED ALREADY AND WAS GATED TO THE WRONG PEOPLE. It curls the
-   * port, identifies whether a Kosmos board or a stranger is answering, and
-   * gives different advice for each — and it sat inside the pause-for-update
-   * block, so only somebody who ALREADY had Kosmos was warned early. A
-   * first-time installer met the same collision at the very end, after every
-   * step had succeeded and with the browser correctly refusing to open.
-   * Found by Splinter walking the install as a stranger would.
+   * 🛑 A COLLISION USED TO BE DISCOVERED AT THE VERY END OF A FIRST INSTALL:
+   * every step succeeded, the browser correctly refused to open, and the last
+   * paragraph was the whole product the person ever saw. Now it is checked
+   * beside the macOS floor, before the folders are made and long before the
+   * tmux download — three seconds instead of a full run.
    *
-   * ⚠️ ASSERTED BY ORDER RATHER THAN BY PRESENCE. The check being in the file
-   * proves nothing — it was in the file before. What matters is that it sits
-   * AFTER the upgrade gate closes.
+   * ⚠️ FRESH INSTALLS ONLY, AND THAT IS THE LOAD-BEARING PART. On an update our
+   * own board is legitimately answering until the pause stops it, so running
+   * this early would abort every update with "a Kosmos board is already
+   * running" — true, and exactly the wrong thing to do about it. Splinter
+   * corrected his own reading of that block, which is what surfaced it: the
+   * check inside the update gate is a POST-condition of `kosmos stop`, not a
+   * pre-check that had been misfiled.
    */
   const setup = fs.readFileSync(path.join(__dirname, 'install', 'setup.sh'), 'utf8');
-  const gate = setup.indexOf('if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then');
-  assert.ok(gate > -1, 'the upgrade gate vanished');
-  const gateEnd = setup.indexOf('\nfi\n', gate);
-  assert.ok(gateEnd > gate, 'could not find the end of the upgrade gate');
 
-  const check = setup.indexOf('_pausebody="$(curl');
-  assert.ok(check > -1, 'the port check vanished entirely');
-  assert.ok(check > gateEnd,
-    'the port check is inside the upgrade-only block again, so a first-time installer is never warned');
+  const early = setup.indexOf('_portbody="$(curl');
+  const mkdirAt = setup.indexOf('mkdir -p "$KOSMOS_HOME" "$BIN_DIR"');
+  const download = setup.indexOf('step "Setting up the pieces Kosmos needs."');
+  assert.ok(early > -1, 'the early port precondition is gone');
+  assert.ok(early < mkdirAt, 'the precondition runs after the folders are made');
+  assert.ok(early < download, 'the precondition runs after the download starts, which is the whole point');
 
-  /* And it still names the likely culprit and a way through, rather than only
-     saying no. */
+  /* It must be inside a fresh-install gate, or every update dies on our own board. */
+  const gate = setup.lastIndexOf('if [ "$FRESH_INSTALL" = "yes" ]; then', early);
+  assert.ok(gate > -1 && gate < early,
+    'the early check is not gated to fresh installs, so an update would abort on its own board');
+
+  /* And the update path keeps its own check AFTER the stop, where it means
+     "the stop did not work" rather than "somebody else is here". */
+  const updGate = setup.indexOf('if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then');
+  const stop = setup.indexOf('"$KOSMOS_HOME/bin/kosmos" stop', updGate);
+  const verify = setup.indexOf('_pausebody="$(curl', updGate);
+  assert.ok(updGate > -1 && verify > stop, 'the update no longer verifies that its pause worked');
+
+  /* 🛑 AND THE UNINSTALL MUST NOT HAVE ONE. An earlier version of this change
+     put the verification into the uninstall path by matching the first `kosmos
+     stop` in the file — which would abort `--uninstall` whenever a board was
+     still answering, breaking the reversibility this installer is built on.
+     `bash -n` passed it; only reading the placement caught it. */
+  const uninstallStop = setup.indexOf('"$KOSMOS_HOME/bin/kosmos" stop');
+  assert.ok(uninstallStop < updGate, 'expected the uninstall stop to come first in the file');
+  const between = setup.slice(uninstallStop, updGate);
+  assert.ok(!between.includes('_pausebody="$(curl'),
+    'the uninstall path verifies the port, so a running board would abort an uninstall');
+
   assert.ok(setup.includes('default for OpenTelemetry collectors, so that may be what is there'),
     'the early warning no longer names the collision a person is likeliest to have');
-  assert.ok(setup.includes('KOSMOS_PORT=4417 in front of the curl'),
+  assert.ok(setup.includes('KOSMOS_PORT=16181 in front of the curl'),
     'the early warning gives no way through, so a person with a collector is simply stopped');
+});
+
+test('every copy of the default port agrees, and none of them sits in the ephemeral range', () => {
+  /**
+   * 🛑 THREE COPIES OF ONE FACT. The default port is written in `server.js`,
+   * `install/kosmos` and `install/setup.sh`, and a change to one is invisible
+   * until somebody starts the board a way that reaches a different copy — then
+   * the icon opens one port and the board is listening on another.
+   *
+   * 🔑 MOVED OFF 4317 because that is the OpenTelemetry OTLP/gRPC default, so
+   * the people likeliest to collide with Kosmos were the people already running
+   * agents — this product's own audience. Josh picked 16180, the golden ratio:
+   * unregistered, nothing clustered near it, and memorable enough to type.
+   *
+   * ⚠️ AND DELIBERATELY NOT IN 49152–65535, which was the tempting answer since
+   * nothing ships a default there. MEASURED on macOS: that range IS the
+   * ephemeral pool (`net.inet.ip.portrange.first: 49152`), so a fixed listener
+   * in it collides at random, occasionally, and only sometimes — an intermittent
+   * failure nobody can reproduce, which is worse than the deterministic one it
+   * would replace.
+   */
+  const read = (rel) => fs.readFileSync(path.join(__dirname, rel), 'utf8');
+  const strip = (s) => s.split('\n').filter((l) => !/^\s*(#|\/\/|\*|\/\*)/.test(l)).join('\n');
+
+  const fromServer = /process\.env\.PORT \|\| (\d+)/.exec(strip(read('server.js')));
+  const fromLauncher = /PORT="\$\{KOSMOS_PORT:-(\d+)\}"/.exec(strip(read('install/kosmos')));
+  const fromSetup = /PORT="\$\{KOSMOS_PORT:-(\d+)\}"/.exec(strip(read('install/setup.sh')));
+  assert.ok(fromServer && fromLauncher && fromSetup, 'one of the three defaults could not be found');
+
+  const ports = [fromServer[1], fromLauncher[1], fromSetup[1]].map(Number);
+  assert.equal(new Set(ports).size, 1,
+    'the three copies of the default port disagree: ' + ports.join(', ')
+    + ' — the icon and the board would open different ports');
+
+  const port = ports[0];
+  assert.notEqual(port, 4317, 'back on the OpenTelemetry OTLP/gRPC default');
+  assert.notEqual(port, 4318, 'on the OpenTelemetry OTLP/HTTP default');
+  assert.ok(port >= 1024 && port < 49152,
+    'the default is in macOS’s ephemeral range (49152+), where the kernel hands out '
+    + 'ports at random — a fixed listener there fails intermittently');
 });

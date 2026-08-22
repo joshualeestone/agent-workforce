@@ -281,7 +281,27 @@ resolve_app_dir() {
 }
 # The port everything below names. Overridable for the sandboxed installer
 # test; the app icon and the closing sentences bake in whatever was installed.
-PORT="${KOSMOS_PORT:-4317}"
+# 🔑 16180 RATHER THAN 4317, and the reason is neighbourhood rather than taste.
+# 4317 is the OpenTelemetry OTLP/gRPC default and 4318 its HTTP sibling, so the
+# people most likely to collide with Kosmos were the people already running
+# agents -- exactly this product's audience. Josh picked 16180 (the golden
+# ratio) and it checks out: nothing in the service registry, nothing clustered
+# near it, and it is memorable enough to type.
+#
+# ⚠️ AND IT IS DELIBERATELY NOT IN 49152-65535, which was the tempting answer
+# because no software ships a default there. MEASURED on macOS:
+#     net.inet.ip.portrange.first: 49152
+#     net.inet.ip.portrange.last:  65535
+# That range IS the ephemeral pool the kernel hands out for outgoing
+# connections, so a fixed listener in it would collide occasionally, randomly,
+# and only sometimes -- an intermittent failure nobody can reproduce, which is
+# worse than the deterministic one it replaced. The registered range is the
+# quiet, stable part and that is where this sits.
+#
+# 📌 AN EXISTING INSTALL KEEPS THE PORT IT HAS. `kosmos` reads its own state, and
+# KOSMOS_PORT still overrides everything here, so nothing moves under somebody
+# who is already running.
+PORT="${KOSMOS_PORT:-16180}"
 # The port is baked into the same unquoted launcher heredoc the
 # KOSMOS_HOME character guard protects, so it gets the same posture:
 # anything but digits is refused in a sentence (reproduced in review: a
@@ -1049,6 +1069,36 @@ if [ "$FRESH_INSTALL" = "no" ]; then
   info "Kosmos is already installed here. Updating it in place."
 fi
 
+
+# 🛑 A PORT ALREADY IN USE IS A PRECONDITION, AND A STRANGER SHOULD MEET IT HERE.
+#
+# It used to be discovered only at the very END of a first-time install: every
+# step succeeded, the browser correctly refused to open, and the last paragraph
+# was the whole product the person ever saw. Checking it beside the macOS
+# floor costs three seconds and happens BEFORE the folders are made and long
+# before the tmux download.
+#
+# ⚠️ FRESH INSTALLS ONLY, and that is not a simplification. On an UPDATE our own
+# board is legitimately answering right up until the pause below stops it, so
+# running this early would abort every update with "a Kosmos board is already
+# running" -- true, and exactly the wrong thing to do about it. The update path
+# keeps its own check AFTER the stop, where it means "the stop did not work".
+#
+# 📌 Identity, not a bare 200: naming a stranger "a Kosmos board" hands out
+# advice ('kosmos stop') that the very next command refuses.
+if [ "$FRESH_INSTALL" = "yes" ]; then
+  _portbody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _portbody=""
+  case "$_portbody" in
+    *"Agent Workforce"*|*Kosmos*)
+      die "A Kosmos board is already running on port $PORT (another account on this Mac runs its own). Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
+      ;;
+    "") ;;
+    *)
+      die "Another app on this Mac is already using port $PORT, which Kosmos needs. Port $PORT is also the default for OpenTelemetry collectors, so that may be what is there. Quit it, or run the install line again with KOSMOS_PORT=16181 in front of the curl."
+      ;;
+  esac
+fi
+
 mkdir -p "$KOSMOS_HOME" "$BIN_DIR" || die "Could not create $KOSMOS_HOME. Check that your home folder is writable."
 
 # ---- tmux -------------------------------------------------------------------
@@ -1067,38 +1117,20 @@ mkdir -p "$KOSMOS_HOME" "$BIN_DIR" || die "Could not create $KOSMOS_HOME. Check 
 if [ "$FRESH_INSTALL" = "no" ] && [ -x "$KOSMOS_HOME/bin/kosmos" ]; then
   info "pausing Kosmos for the update"
   "$KOSMOS_HOME/bin/kosmos" stop >/dev/null 2>&1 || true
+  # Did the stop actually work? A POST-CONDITION of the line above, which is
+  # why it needs the binary to exist. Fresh installs get their own check far
+  # earlier, where it is a precondition instead.
+  _pausebody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _pausebody=""
+  case "$_pausebody" in
+    *"Agent Workforce"*|*Kosmos*)
+      die "A Kosmos board is still running on port $PORT and could not be paused for the update. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
+      ;;
+    "") ;;
+    *)
+      die "Another app on this Mac is using port $PORT, which Kosmos needs. Quit that app, then paste the install line again."
+      ;;
+  esac
 fi
-
-# 🛑 THE PORT CHECK RUNS FOR EVERYONE NOW, AND IT USED TO RUN ONLY ON UPGRADES.
-#
-# It sat inside the pause-for-update block above, so a person who ALREADY had
-# Kosmos got this early, identity-aware warning and a FIRST-TIME installer got
-# nothing -- meeting the same collision at the very end instead, after every
-# step had succeeded and with the browser correctly refusing to open. Exactly
-# backwards from where it is needed. Found by Splinter walking the install as a
-# stranger would.
-#
-# ⚠️ ONLY THE PAUSE IS UPGRADE-SPECIFIC. Stopping our own board needs an
-# existing install; asking WHO IS ANSWERING does not, and both sentences below
-# are already right for a fresh machine -- a Kosmos board answering there is
-# another account's, and "quit whatever started it" is the correct advice.
-#
-# 📌 THIS IS THE PRECONDITION, WHICH IS THE POINT: somebody accepts it before
-# investing ten minutes, rather than reading it as a failure afterwards.
-#
-# Identity, not a bare 200: naming a stranger "a Kosmos board" hands out advice
-# ('kosmos stop') that the very next command refuses, and every rerun reproduces
-# it. The advice differs by who is actually on the port.
-_pausebody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _pausebody=""
-case "$_pausebody" in
-  *"Agent Workforce"*|*Kosmos*)
-    die "A Kosmos board is already running on port $PORT. Stop it first ('kosmos stop', or quit whatever started it), then paste the install line again."
-    ;;
-  "") ;;
-  *)
-    die "Another app on this Mac is already using port $PORT, which Kosmos needs. Port $PORT is also the default for OpenTelemetry collectors, so that may be what is there. Quit it, or run the install line again with KOSMOS_PORT=4417 in front of the curl."
-    ;;
-esac
 
 step "Setting up the pieces Kosmos needs."
 # ⚠️ FETCHED ON EVERY RUN, not only the first. The old guard skipped this
@@ -1857,8 +1889,8 @@ else
   # pointed straight at the second-most-likely-occupied port on the box. An
   # escape that lands on the other landmine is worse than no suggestion.
   # 📌 Stepping well clear of the OTLP range rather than nudging by one.
-  _alt=4417
-  [ "$_alt" = "$PORT" ] && _alt=4418
+  _alt=16181
+  [ "$_alt" = "$PORT" ] && _alt=16182
   printf '    KOSMOS_PORT=%s %s/kosmos start\n' "$_alt" "$BIN_DIR"
   printf '  and it will print your dashboard address.\n\n'
 fi
