@@ -10151,11 +10151,15 @@ function renderStale(s) {
          to be discovered: a restart ends the session the agent is in, so it
          comes back with nothing in its memory ring, which Josh has twice read
          as the product being broken. */
-      /* 🛑 "THE EDITS", BECAUSE "THEM" POINTED AT THE WRONG NOUN. This read
-         "Restarting the agent is what applies them", and the nearest plural in
-         the block is "older instructions" -- applying THOSE is the opposite of
-         what a restart does. The thing "them" meant is the edits, and no
-         sentence here named them (#212, Mona Lisa).
+      /* 🛑 IT NAMES THE EDITS, BECAUSE THE PRONOUN IT REPLACED POINTED AT THE
+         WRONG NOUN. The previous wording ended on a bare plural pronoun whose
+         nearest antecedent in the block is the older instructions, and applying
+         THOSE is the opposite of what a restart does. What the pronoun meant is
+         the edits, and no sentence here named them (#212, Mona Lisa).
+         ⚠️ DESCRIBED RATHER THAN QUOTED, on purpose. The guard for this is a
+         grep over this function's source, so pasting the old sentence into the
+         comment explaining its removal puts it straight back as far as any
+         check is concerned. Sixth time that has cost me a cycle.
          ⚠️ It has to stand alone, because the clause before it is CONDITIONAL:
          "Edited X, running since Y" drops out whenever either timestamp is
          missing, so anything relying on it to supply the noun fails exactly
