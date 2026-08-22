@@ -244,7 +244,26 @@ test('the picture is stored outside the agent namespace, so an agent called You 
   assert.ok(mine && theirs, 'both pictures must exist for this to prove anything');
   assert.notEqual(mine, theirs, 'the person and an agent called You share one file');
   assert.equal(fs.readFileSync(mine).length, png.length, "the agent's picture overwrote the person's");
+
+  /**
+   * 🛑 AND THE DIRECTORY IS LOAD-BEARING, WHICH THE ASSERTIONS ABOVE CANNOT
+   * SHOW. Measured: moving this store into `avatars/` leaves every check above
+   * green, because the person's file is `picture.*` and an agent's is
+   * `<name>.*` -- different names in one folder do not collide. The name that
+   * WOULD collide is an agent called `picture`, and nothing stopped somebody
+   * making one. So the property to pin is not "these two files differ", it is
+   * "no agent name can reach the person's file at all", and only separate
+   * directories give that.
+   */
+  store.saveAvatar('picture', 'image/png', Buffer.from('89504e470d0a1a0aAABBCC', 'hex'));
+  assert.equal(fs.readFileSync(you.picturePath()).length, png.length,
+    "an agent named `picture` overwrote the person's picture");
+  assert.notEqual(nodePathOf(you.picturePath()), nodePathOf(store.avatarPath('picture')),
+    'the person and an agent named `picture` share one folder, so one name away is one file away');
 });
+
+/* Directory of a path, named so the assertion above reads as what it means. */
+function nodePathOf(p) { return path.dirname(p); }
 
 test('one picture, replaced rather than accumulated', () => {
   const png = Buffer.from('89504e470d0a1a0a', 'hex');
