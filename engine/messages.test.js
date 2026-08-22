@@ -263,7 +263,7 @@ test('owesReply compares the two sides: heard-from against sent-by, off one log'
   withFleet([fleet.agent('leo', { state: 'idle' }), fleet.agent('mara', { state: 'idle' })], (board) => {
     wipeLog();
     let v = messages.owesReply('leo');
-    assert.equal(v.owes, false, 'an agent nobody has spoken to is in debt');
+    assert.equal(v.state, 'clear', 'an agent nobody has spoken to is in debt');
     assert.equal(v.lastHeardAt, null);
     assert.equal(v.lastSentAt, null);
 
@@ -273,7 +273,7 @@ test('owesReply compares the two sides: heard-from against sent-by, off one log'
     const said = messages.send({ fromPane: '%2', to: 'leo', text: 'are you there' }, board.agents);
     assert.equal(said.state, chat.DELIVERY.PLACED, 'the fixture did not deliver: ' + (said.because || ''));
     v = messages.owesReply('leo');
-    assert.equal(v.owes, true, 'an agent spoken to and silent since is not shown as owing a reply');
+    assert.equal(v.state, 'owes', 'an agent spoken to and silent since is not shown as owing a reply');
     assert.ok(v.lastHeardAt, 'the heard-at time was not recorded');
     assert.equal(v.lastSentAt, null);
 
@@ -283,7 +283,7 @@ test('owesReply compares the two sides: heard-from against sent-by, off one log'
     const back = messages.send({ fromPane: '%1', to: 'mara', text: 'yes, here' }, board.agents);
     assert.equal(back.state, chat.DELIVERY.PLACED, 'the reply fixture did not deliver');
     v = messages.owesReply('leo');
-    assert.equal(v.owes, false, 'an agent that has spoken since is still shown as owing a reply');
+    assert.equal(v.state, 'clear', 'an agent that has spoken since is still shown as owing a reply');
     assert.ok(v.lastSentAt >= v.lastHeardAt, 'the two sides were compared the wrong way round');
   });
 });
@@ -307,20 +307,84 @@ test('owesReply compares the two times in the right DIRECTION, on distinct times
     const sent = (at) => ({ kind: 'message', id: 'out', from: 'leo', to: 'mara', text: 'a', at });
 
     write([heard('2026-08-21T10:00:00.000Z'), sent('2026-08-21T10:05:00.000Z')]);
-    assert.equal(messages.owesReply('leo').owes, false,
+    assert.equal(messages.owesReply('leo').state, 'clear',
       'it spoke five minutes AFTER being spoken to and is still shown as owing a reply');
 
     write([sent('2026-08-21T10:00:00.000Z'), heard('2026-08-21T10:05:00.000Z')]);
-    assert.equal(messages.owesReply('leo').owes, true,
+    assert.equal(messages.owesReply('leo').state, 'owes',
       'it was spoken to five minutes after it last spoke and is not shown as owing a reply');
 
     /* The tie. Equal timestamps must not read as owing: the ordering is
        unknowable at that resolution, and an accusation is the wrong default
        for a state we cannot determine. */
     write([heard('2026-08-21T10:00:00.000Z'), sent('2026-08-21T10:00:00.000Z')]);
-    assert.equal(messages.owesReply('leo').owes, false,
+    assert.equal(messages.owesReply('leo').state, 'clear',
       'two events at the same instant were resolved as a debt rather than left alone');
   });
+});
+
+test('owesReply says it cannot tell, rather than saying nothing is owed', () => {
+  /**
+   * 🛑 THIS WAS ALREADY THE BUG, NOT A RISK. `record()` separates a MISSING log
+   * (a true empty) from one it could not READ, and `readLog()` returns only
+   * `.rows`, so both arrived as zero rows and came back as "nothing is owed".
+   * A caller could not recover the difference, because false from an empty log
+   * and false from a read failure are the same value. There was nothing for a
+   * screen to collapse: the engine had already collapsed it.
+   *
+   * ⚠️ THE PERMISSIONS ARE THE FIXTURE. Nothing else makes `record()` fail the
+   * way a real machine does, and a stubbed reader would be testing the stub.
+   */
+  const log = messages.LOG;
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  /* ⚠️ WITH AN `id`, because `rowShaped` demands one for a `message` and
+     `record()` drops what fails shape. The first version of this fixture
+     omitted it: the row landed in `parsed` and never in `rows`, so owesReply
+     saw an empty log and the CONTROL below caught it. A fixture that fails the
+     real shape check tests nothing, and without the control it would have read
+     as the engine being wrong. */
+  fs.writeFileSync(log, JSON.stringify({ id: 'm1', kind: 'message', from: 'you', to: 'leo', at: '2026-01-01T00:00:00.000Z', text: 'hi' }) + '\n');
+
+  /* CONTROL FIRST: readable, and it really does say something is owed. Without
+     this the unreadable assertion passes on a log that was empty anyway. */
+  assert.equal(messages.owesReply('leo').state, 'owes',
+    'the readable control does not owe, so the unreadable case below proves nothing');
+
+  fs.chmodSync(log, 0o000);
+  try {
+    const v = messages.owesReply('leo');
+    /* On a machine running as root, chmod does not deny the read. Skipping
+       loudly beats asserting something the fixture could not create. */
+    if (v.state !== 'unknown') {
+      assert.equal(v.state, 'owes', 'the file is still readable here, so this case cannot be tested');
+      // eslint-disable-next-line no-console
+      console.log('    (chmod did not deny the read on this machine; unknown-state case not exercised)');
+    } else {
+      assert.equal(v.state, 'unknown');
+      assert.match(v.because, /could not read/, 'the unknown state does not say why: ' + v.because);
+      assert.equal(v.lastHeardAt, null, 'an unreadable record reported a timestamp it cannot have');
+      assert.equal(v.lastSentAt, null);
+    }
+  } finally {
+    fs.chmodSync(log, 0o644);
+  }
+  /* And it recovers: the state is about this read, not a latch. */
+  assert.equal(messages.owesReply('leo').state, 'owes');
+});
+
+test('an agent nobody has spoken to is clear, and the docblock now says so', () => {
+  /* ⚠️ THE DOCBLOCK USED TO CONTRADICT THE CODE, saying `owes` was true when
+     something arrived after the last thing it sent "or it has never sent
+     anything at all", which is unconditional. The code has always required
+     having been spoken to. Asserted against the SOURCE because a docblock is
+     what a person reads before they read the function, and it was the wrong
+     one for as long as it existed. */
+  const src = fs.readFileSync(path.join(__dirname, 'messages.js'), 'utf8');
+  const doc = src.slice(Math.max(0, src.indexOf('function owesReply') - 2200), src.indexOf('function owesReply'));
+  assert.ok(!/or it has never sent anything at all/.test(doc),
+    'the docblock claim the code does not implement is back');
+  assert.match(doc, /INCLUDING an agent nobody\s+\*\s+has spoken to|nobody\s*\n?\s*\*?\s*has spoken to/,
+    'the docblock no longer says what happens to an agent nobody has addressed');
 });
 
 test('owesReply counts only rows that CARRY TEXT, and never a project name', () => {
@@ -337,7 +401,7 @@ test('owesReply counts only rows that CARRY TEXT, and never a project name', () 
       { kind: 'valve', from: 'you', to: 'leo', because: 'y', at: '2026-08-21T10:01:00.000Z' },
     ]);
     let v = messages.owesReply('leo');
-    assert.equal(v.owes, false,
+    assert.equal(v.state, 'clear',
       'a refused or throttled row counted as being spoken to, so the agent owes a reply to a message it never got');
     assert.equal(v.lastHeardAt, null);
 
@@ -347,14 +411,14 @@ test('owesReply counts only rows that CARRY TEXT, and never a project name', () 
       { kind: 'refused', from: 'you', to: 'leo', because: 'x', at: '2026-08-21T10:00:00.000Z' },
       { kind: 'message', id: 'm1', from: 'you', to: 'leo', text: 'hi', at: '2026-08-21T10:02:00.000Z' },
     ]);
-    assert.equal(messages.owesReply('leo').owes, true,
+    assert.equal(messages.owesReply('leo').state, 'owes',
       'CONTROL: a real message did not register either, so this test proves nothing');
 
     /* A PROJECT-typed `to` is never matched against an agent name, the same
        rule `list` follows: an agent named like a project must not inherit that
        room's bookkeeping. */
     write([{ kind: 'valve', from: 'you', to: 'leo', project: 'leo', because: 'z', at: '2026-08-21T10:03:00.000Z' }]);
-    assert.equal(messages.owesReply('leo').owes, false,
+    assert.equal(messages.owesReply('leo').state, 'clear',
       'a room row whose project shares this agent name was read as a message to the agent');
   });
 });

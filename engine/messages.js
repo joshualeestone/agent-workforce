@@ -859,22 +859,53 @@ function list(agent) {
  * would be a guess about text; "did anything arrive from it since we delivered"
  * is a fact we already store. The cheaper question is also the sounder one.
  *
- * Returns `{ owes, lastHeardAt, lastSentAt }`:
- *   owes         true when something was addressed to it after the last thing
- *                it sent, or it has never sent anything at all
+ * Returns `{ state, lastHeardAt, lastSentAt, because }`:
+ *   state        'owes'    something was addressed to it after the last thing
+ *                          it sent
+ *                'clear'   nothing is outstanding, INCLUDING an agent nobody
+ *                          has spoken to
+ *                'unknown' we could not read the record, so we cannot say
  *   lastHeardAt  ISO time of the last message addressed TO it, or null
  *   lastSentAt   ISO time of the last message FROM it, or null
+ *   because      why, when the state is 'unknown'; null otherwise
  *
- * 📌 It does NOT decide when to say so. A grace period and the sentence are a
+ * 🛑 THREE STATES, NOT A BOOLEAN, AND THE THIRD ONE WAS ALREADY WRONG. This
+ * returned `owes: false` when the log could not be READ, which is the confident
+ * all-clear this codebase is built against: `record()` distinguishes a missing
+ * file (a true empty) from a failed read, and `readLog()` returns only `.rows`,
+ * so both arrived here as zero rows. A caller could not recover the difference,
+ * because `false` from an empty log and `false` from a read failure are the
+ * same value. So the engine has to answer it (Mona Lisa, who found it in the
+ * code rather than in the docblock).
+ *
+ * ⚠️ AND THIS DOCBLOCK USED TO CONTRADICT THE CODE. It said `owes` was true
+ * when something arrived after the last thing it sent "or it has never sent
+ * anything at all", which is unconditional; the code has always required having
+ * been SPOKEN TO first, and the inline comment below says so correctly. The
+ * docblock is the part anyone reads first, and it was the wrong one.
+ *
+ * 📌 It does NOT decide when to SAY so. A grace period and the sentence are a
  * design call, and an engine that hard-codes "four minutes" has made it
  * silently. The caller has both timestamps and can choose.
  */
 function owesReply(agent) {
   const name = String(agent == null ? '' : agent).trim();
-  if (!name) return { owes: false, lastHeardAt: null, lastSentAt: null };
+  if (!name) return { state: 'clear', lastHeardAt: null, lastSentAt: null, because: null };
+  /* `record()` rather than `readLog()`: the latter returns only `.rows` and
+     throws away the one bit that separates "there is nothing" from "we could
+     not look". */
+  const rec = record();
+  if (!rec.ok) {
+    return {
+      state: 'unknown',
+      lastHeardAt: null,
+      lastSentAt: null,
+      because: 'we could not read the record of what your agents have said',
+    };
+  }
   let lastHeardAt = null;
   let lastSentAt = null;
-  for (const m of readLog()) {
+  for (const m of rec.rows) {
     if (!m || !m.at) continue;
     /* ⚠️ Only rows that CARRY TEXT count as being spoken to. `valve` and
        `refused` rows name the agent in `to` and are Kosmos's own bookkeeping
@@ -895,7 +926,7 @@ function owesReply(agent) {
   /* Never spoken to: nothing is owed, whatever it has or has not sent. The
      alternative reads as an accusation about an agent nobody has addressed. */
   const owes = Boolean(lastHeardAt) && (!lastSentAt || lastHeardAt > lastSentAt);
-  return { owes, lastHeardAt, lastSentAt };
+  return { state: owes ? 'owes' : 'clear', lastHeardAt, lastSentAt, because: null };
 }
 
 /* ── the block new agents are born knowing ──────────────────────────────── */
