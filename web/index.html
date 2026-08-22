@@ -7805,16 +7805,19 @@ function boardEmpty() {
     + '<p><b>No agents yet.</b><br>An agent is a worker you put on a job. It '
     + 'runs on this computer and keeps going while you get on with something '
     + 'else.</p>'
-    /* ⚠️ `.btn`, NOT the spec's `.btn-gold`, and this is a deliberate departure
-       rather than a miss. `.btn-gold` has no rule anywhere in this app: an
-       existing comment beside the chat composer already records that it and
-       `.inp` are pack classes the build never adopted, and shipping it here
-       would render a plain button while the code claimed a gold one. The
-       app's gold primary is `.btn.uprime`. Plain is also what the sibling
-       empty state uses ("No projects yet" -> "Add a project"), and two empty
-       states on two screens must not weight their one action differently.
-       Raised with Mona Lisa rather than silently swapped. */
-    + '<button class="btn" type="button" data-board-new>Create your first agent</button>'
+    /* 🔑 `.btn.uprime.big` IS the pack's `.btn-gold`, measured rather than
+       assumed: same font-size (1.0625rem), same padding (.9em 1.75em), same
+       radius (10px), same colour (#e3b341). Two names for one button, which is
+       why shipping the pack's literal class would have rendered a PLAIN button
+       while the code claimed a gold one -- `.btn-gold` has no rule anywhere in
+       this app, and a comment beside the chat composer already records that it
+       and `.inp` were never adopted.
+       ⚠️ Gold carries brand and the primary action, never status, and an empty
+       state's single action is the purest primary in the app because nothing
+       else on the screen competes with it. The projects empty state below is
+       matched upward to this for the same reason, rather than this one being
+       matched down to it. (Mona Lisa measured both, 2026-08-22.) */
+    + '<button class="btn uprime big" type="button" data-board-new>Create your first agent</button>'
     + '</div>';
 }
 // Ordering guard for the folder browser, the same shape `PJ_GEN` gives the
@@ -12904,7 +12907,10 @@ function paintProjects() {
     setIfChanged(list, '<div class="pj-empty">'
       + '<p><b>No projects yet.</b><br>Point Kosmos at a folder you already have, '
       + 'and put an agent on it.</p>'
-      + '<button class="btn" id="pj-new-empty" type="button">Add a project</button>'
+      /* Matched to the agents empty state (2026-08-22): the two are the same
+         shape doing the same job, and weighting their one action differently
+         taught two mental models on two screens. The pack draws gold for both. */
+      + '<button class="btn uprime big" id="pj-new-empty" type="button">Add a project</button>'
       + '</div>');
     return;
   }
