@@ -3123,10 +3123,43 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     fleet.agent('x" onload="alert(1)', { state: 'idle' }),
   ]);
   try {
-    const cards = JSON.parse((await req('/api/status')).body).agents;
+    /* 🛑 WRAPPED, AND THEY WERE NOT. This test installs a strict fleet and then
+       drove both renderers against the PARSED HTTP BODY, which is plain JSON:
+       a renderer reading a field the route does not emit got `undefined` and
+       every assertion here stayed green. That is the exact defect
+       `test-support/fleet` exists to make impossible, in the test that
+       exercises the most renderer surface in the suite.
+       ⚠️ WRAPPED AGAINST THE ROUTE, not against `snapshot()`. The route adds
+       `running`, `plannedModelName`, `account`, `commitments` and
+       `instructions` to every row, so wrapping the engine's output would throw
+       on five fields the page is entitled to read. The producer for a card is
+       the route. */
+    const cards = JSON.parse((await req('/api/status')).body).agents
+      /* ⚠️ TWO KEYS ARE HANDED BACK RAW, and both for stated reasons rather than
+         because they were inconvenient.
+         `profile` is a free-form record: an agent nobody has set a role on has
+         `{}` there, and the page correctly reads `profile.role` off it.
+         `context` is a UNION OF BRANCH SHAPES, not one shape. `readContext`
+         returns `overCeiling` and `ceiling` only on the branch that computed a
+         percent, and `noCeiling` only on the branch that could not; `memPrint`
+         and `memUnknown` read across the union, correctly. A fixture holds ONE
+         branch, so strictness there reports the renderer doing its job as a
+         defect. Making it strict would mean readContext emitting every key on
+         every branch, and status.js records that choosing `undefined` over
+         `null` there was deliberate.
+         Everything else on the row keeps its fixed shape and stays strict. */
+      .map((a) => fleet.strict(a, '/api/status', { freeForm: ['profile', 'context'] }));
     const by = (n) => cards.find((a) => a.name === n);
     const leo = by('leo'), mara = by('mara'), rook = by('rook'), nils = by('nils'), vex = by('vex');
     assert.ok(leo && mara && rook && nils && vex, 'the fixture board is missing an agent');
+    /* 🛑 THE INSTRUMENT, ASSERTED. A guard only fires when the code is wrong, so
+       deleting the wrap above breaks nothing and nothing notices: measured by
+       replacing it with the identity and watching all 199 stay green. These two
+       lines are what make the guard's own removal red.
+       ⚠️ Both halves, because a patched copy goes through a different path and
+       `{ ...row }` silently strips a proxy. */
+    assert.throws(() => by('leo').notAField, /does not emit/,
+      'the rows are not wrapped, so a renderer reading a field the route does not emit passes silently');
 
     const raw = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
     const script = raw.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -3136,7 +3169,45 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     assert.ok(from > -1 && lrowAt > from && end > lrowAt, 'renderer block not found');
     // eslint-disable-next-line no-new-func
     const api = new Function(script.slice(from, end) + '\n; return { card, lrow };')();
-    const withPct = (a, pct) => ({ ...a, context: { ...a.context, percent: pct, tokens: 1 } });
+    /**
+     * A copy of a row with something changed, still strict.
+     *
+     * ⚠️ A SPREAD STRIPS A PROXY. `{ ...row }` produces a plain object, so
+     * every patched copy below was unprotected even once the roster was
+     * wrapped. Measured, not assumed.
+     *
+     * ⚠️ AND A NESTED PATCH MERGES rather than replaces, so `{ instructions:
+     * { state: 'stale' } }` does not delete the four other fields the route
+     * emits there and turn a legitimate read into a false failure. The guard
+     * has to fire on the CODE being wrong, never on the fixture being terse.
+     */
+    const as = (a, patch) => {
+      const next = { ...a };
+      for (const [k, v] of Object.entries(patch)) {
+        const base = a[k];
+        next[k] = (v && typeof v === 'object' && !Array.isArray(v) && base && typeof base === 'object')
+          ? { ...base, ...v }
+          : v;
+      }
+      return fleet.strict(next, '/api/status', { freeForm: ['profile', 'context'] });
+    };
+    /* 🛑 `overCeiling` IS PART OF A MEASURED CONTEXT, and this patch used to
+       leave it out. Every branch of `readContext` that returns a non-null
+       percent also returns `overCeiling`; the branches that omit it all return
+       `percent: null`. So patching a percent onto one of those made a shape the
+       producer never produces, and `memPrint` -- which reads `overCeiling` to
+       decide between "Full" and a figure -- was being asked about a world that
+       does not exist. Invisible until the row was wrapped: the read was
+       `undefined` and the assertion passed.
+       ⚠️ This is the fixture's own founding defect, still in the test that
+       exercises the most renderer surface. */
+    const withPct = (a, pct) => as(a, { context: { percent: pct, tokens: 1, overCeiling: pct > 100 } });
+    assert.throws(() => withPct(leo, 50).notAField, /does not emit/,
+      'a patched copy is not wrapped, so every assertion built on one is unguarded');
+    /* ⚠️ Placed HERE rather than beside its twin above, because `as` and
+       `withPct` are `const` and the earlier position was inside their temporal
+       dead zone: the call threw a ReferenceError and the assertion failed for a
+       reason that had nothing to do with wrapping. */
 
     // The membadge fires AT 80, not around it, and the heat wash yields to red.
     assert.match(api.card(withPct(leo, 80)), /membadge/,
@@ -3209,7 +3280,7 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
     // An UNRECOGNISED server state gets the unknown treatment's WHOLE
     // honesty payload, note included: the gate reads the treatment
     // (cardStOf's fallback), not the state's spelling.
-    assert.match(api.card({ ...vex, state: 'martian' }), /not telling you it is fine/,
+    assert.match(api.card(as(vex, { state: 'martian' })), /not telling you it is fine/,
       'a future server state renders as Can’t-tell without the note that makes it honest');
     const attn88 = api.card(withPct(mara, 88));
     assert.match(attn88, /acard attn/, 'needs_you lost its red card treatment');
@@ -3254,7 +3325,7 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
        "Waiting out a usage limit" asserted a fact about the person's account
        from a word on a screen. Both arms asserted, because the confident one is
        unreachable from today's engine and would otherwise be untested. */
-    assert.match(api.card({ ...rook, task: null, stateConfidence: 'scraped' }),
+    assert.match(api.card(as(rook, { task: null, stateConfidence: 'scraped' })),
       /Its screen mentions a usage limit/,
       'the paused card lost its reason line');
     /* 🛑 AND IT OUTRANKS A PANE TITLE. `a.task` is `#{pane_title}`, frozen by
@@ -3262,15 +3333,15 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
        agent that had run long enough to have a title showed a summary of
        "hello" instead of the fact that it cannot work. Worst on the oldest
        agents, which are the likeliest to be blocked. */
-    assert.match(api.card({ ...rook, task: 'Hello', stateConfidence: 'scraped' }),
+    assert.match(api.card(as(rook, { task: 'Hello', stateConfidence: 'scraped' })),
       /Its screen mentions a usage limit/,
       'a frozen first-message title is outranking the reason the agent is stopped');
-    assert.doesNotMatch(api.card({ ...rook, task: 'Hello', stateConfidence: 'scraped' }),
+    assert.doesNotMatch(api.card(as(rook, { task: 'Hello', stateConfidence: 'scraped' })),
       /Hello/, 'the stale title is still on the card beside the blocking reason');
-    assert.doesNotMatch(api.card({ ...rook, task: null, stateConfidence: 'scraped' }),
+    assert.doesNotMatch(api.card(as(rook, { task: null, stateConfidence: 'scraped' })),
       /Waiting out a usage limit/,
       'the board still asserts a throttle it only read off a screen');
-    assert.match(api.card({ ...rook, task: null, stateConfidence: 'structured' }),
+    assert.match(api.card(as(rook, { task: null, stateConfidence: 'structured' })),
       /Waiting out a usage limit/,
       'a state read from a file written for the purpose should be said plainly');
     /**
@@ -3288,12 +3359,12 @@ test('the board renderers hold the pack grammar: thresholds, states, parity, esc
      * likeliest to have hit a limit and certain to have a title — so it read as
      * working on a fresh agent and silently stopped as an agent aged.
      */
-    assert.match(api.card({ ...rook, task: 'Drafting', stateConfidence: 'scraped' }),
+    assert.match(api.card(as(rook, { task: 'Drafting', stateConfidence: 'scraped' })),
       /Its screen mentions a usage limit/,
       'a frozen pane title is outranking the reason a blocked agent cannot work');
 
     // Grid/list parity on the shared facts, including the stale badge.
-    const staleLeo = { ...leo, instructions: { state: 'stale' } };
+    const staleLeo = as(leo, { instructions: { state: 'stale' } });
     assert.match(api.card(staleLeo), /card-stale/, 'the stale badge left the card');
     assert.match(api.lrow(staleLeo), /card-stale/, 'the stale badge is missing from the list view');
     assert.match(api.lrow(vex), /bar unknown/, 'unknown memory in the list invented a bar value');

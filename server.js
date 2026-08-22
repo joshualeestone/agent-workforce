@@ -769,6 +769,19 @@ const server = http.createServer((req, res) => {
       };
       const agents = snap.agents.filter((a) => !gone.has(a.sessionName)).map((a) => ({
         ...a,
+        /* 🔑 STATED ON EVERY ROW, and it was stated on only half. The board
+           branches on `running === false`, and the not-running rows below set
+           it while these did not: so for every live agent the page was reading
+           a field the route does not emit, getting `undefined`, and working by
+           accident. `undefined === false` is false, which is the right answer
+           for the wrong reason, and the first person to write `if (a.running)`
+           would have got false for a fleet that is entirely up.
+           ⚠️ TRUE FOR A `stopped` PANE TOO. That state means a session exists
+           with something other than Claude in it, and that agent IS up; the
+           rows that carry `false` are the ones with no session at all.
+           Found by wrapping this route's output in the fixture's strict proxy,
+           which threw the moment a renderer touched it. */
+        running: true,
         // The name only. `plannedModelArg` returns null for "we do not know",
         // and null travels as null: the screen must not be able to tell a
         // missing job from a default.

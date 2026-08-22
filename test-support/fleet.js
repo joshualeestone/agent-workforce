@@ -274,17 +274,32 @@ const HOUSEKEEPING = new Set([
  * failure this mechanism is for, one level down. Nested wrapping is memoised so
  * `card.context === card.context` stays true; a fixture that broke identity
  * would be a new way for a test to be wrong.
+ *
+ * ⚠️ AND ONE KIND OF NESTED OBJECT MUST NOT BE WRAPPED: a FREE-FORM RECORD,
+ * where an absent key is a legitimate value rather than a producer gap.
+ * `store.readProfile` answers `{}` for an agent nobody has set a role on, and
+ * the page correctly reads `profile.role` off it. Throwing there would report
+ * the fixture doing its job as a defect, which is the mirror of the failure
+ * this mechanism exists for and every bit as misleading.
+ *
+ * 🔑 NAMED BY THE CALLER, never guessed here. `strict(row, producer, { freeForm:
+ * ['profile'] })` says: this key holds a bag, its absent keys mean nothing.
+ * A list this file maintained on its own would be an exemption nobody sees.
  */
-function strict(value, producer) {
+function strict(value, producer, opts) {
+  const freeForm = new Set((opts && opts.freeForm) || []);
   if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((v) => strict(v, producer));
+  if (Array.isArray(value)) return value.map((v) => strict(v, producer, opts));
   const nested = new Map();
   return new Proxy(value, {
     get(target, prop, receiver) {
       if (typeof prop === 'symbol' || prop in target || HOUSEKEEPING.has(prop)) {
         const got = Reflect.get(target, prop, receiver);
         if (got === null || typeof got !== 'object' || typeof prop === 'symbol') return got;
-        if (!nested.has(prop)) nested.set(prop, strict(got, `${producer}.${String(prop)}`));
+        /* A named free-form record is handed back RAW, at any depth: its
+           absent keys are a fact about the person, not about the producer. */
+        if (freeForm.has(prop)) return got;
+        if (!nested.has(prop)) nested.set(prop, strict(got, `${producer}.${String(prop)}`, opts));
         return nested.get(prop);
       }
       throw new Error(
