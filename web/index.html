@@ -2188,7 +2188,11 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    row) mapped onto this file's tokens. The old flat .pick list above stays
    for anything else that uses it. */
 .picklist { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); max-width: 36rem; }
-.pickradios { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr); }
+/* A fieldset, so it needs its UA chrome removed. `min-width: 0` is not
+   cosmetic: a fieldset has a min-content floor of its own that a grid child
+   cannot shrink past, which is the same reflow trap `.p2d` documents below. */
+.pickradios { display: grid; gap: var(--space-3); grid-template-columns: minmax(0,1fr);
+              border: 0; padding: 0; margin: 0; min-width: 0; }
 .pick2 {
   display: grid; grid-template-columns: 18px auto 1fr; align-items: baseline;
   gap: var(--space-2) var(--space-5);
@@ -2197,10 +2201,21 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
   border-radius: var(--radius-control); padding: 11px 14px;
 }
 .pick2:hover { border-color: var(--border-strong); }
-.pick2:focus-visible { outline: 2px solid var(--label); outline-offset: 2px; }
-.pick2.on { border-color: var(--label); box-shadow: inset 0 0 0 1px var(--label); }
-.pick2 .pickmark { color: transparent; font-weight: 700; }
-.pick2.on .pickmark { color: var(--label); }
+/* 🔑 THE RING IS DRAWN AROUND THE LABEL, FROM THE INPUT'S OWN FOCUS. The
+   focusable element is now the radio inside, which is 15px in the corner, so
+   a plain `:focus-visible` on it would put a keyboard user's only position
+   indicator on a dot rather than on the row they are choosing. */
+.pick2:has(input:focus-visible) { outline: 2px solid var(--label); outline-offset: 2px; }
+/* ⚠️ `:has(input:checked)` REPLACES A `.on` CLASS, and that is the point
+   rather than a tidy-up: the class was a second copy of a state the input
+   already holds, and every place they could disagree was a bug we had to
+   write a test for. There is one source of truth now and CSS reads it. */
+.pick2:has(input:checked) { border-color: var(--label); box-shadow: inset 0 0 0 1px var(--label); }
+/* The radio itself, in the column the checkmark glyph used to occupy. */
+.pick2 > input[type="radio"] {
+  margin: 0; width: 15px; height: 15px; accent-color: var(--label);
+  justify-self: center; align-self: center; cursor: pointer;
+}
 /* ⚠️ NO nowrap AND min-width: 0 ON THE FLEX COLUMN -- the reflow rules.
    The first cut copied the pack's `white-space: nowrap` name column, and at
    375px the description rendered OUTSIDE the row border one word per line
@@ -2219,7 +2234,7 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    somebody with no agents and noise to somebody who already has six (pack). */
 .p2full { grid-column: 2 / -1; font: var(--text-callout) var(--font-ui);
   color: var(--label-2); margin-top: 6px; display: none; line-height: 1.45; }
-.pick2.on .p2full { display: block; }
+.pick2:has(input:checked) .p2full { display: block; }
 .prec {
   display: inline-block; margin-left: var(--space-4); font: 700 var(--text-caption) var(--font-ui);
   letter-spacing: .08em; text-transform: uppercase; vertical-align: middle;
@@ -4141,51 +4156,52 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          person reads while choosing has to be the copy the agent is created
          from (the rule the old flat list already followed). -->
     <div class="picklist" id="roles-list">
-      <!-- ⚠️ The radiogroup wraps ONLY the radios: the menu below is a
-           sibling, because a radiogroup that owns a select announces "1 of
-           2" and then hands AT a child that is neither (review round 1). -->
-      <div class="pickradios" role="radiogroup" aria-label="What this agent is for">
-      <button class="pick2" type="button" role="radio" aria-checked="false" data-rmode="pm" hidden id="pick-pm">
-        <span class="pickmark" aria-hidden="true">&#10003;</span>
+      <!-- 🔑 NATIVE RADIOS, GROUPED BY THEIR NAME ATTRIBUTE. Three inputs
+           sharing `name="rmode"` are ONE group wherever they sit in the
+           document, so the menu can be an ordinary sibling between the second
+           and third options and nothing has to reparent anything.
+
+           🛑 THIS IS WHAT #178 WAS ACTUALLY ABOUT, and it was self-inflicted.
+           The old markup hand-rolled `role="radio"` onto buttons, and THAT role
+           requires an owning group ELEMENT -- which is a DOM containment
+           constraint, and containment is exactly what the menu placement needed
+           to break. So the order and the menu position were traded against each
+           other for weeks over a constraint the platform does not impose. Josh
+           asked for the order on 2026-08-22; the answer was to stop paying
+           rather than to re-trade (Mona Lisa, superseding her own #178 ruling).
+
+           ✅ AND IT PAYS ON AXES THIS WAS NOT ABOUT: arrow-key movement between
+           the options comes from the browser instead of from the fifteen hand-
+           written lines this replaces; `checked` becomes the single source of
+           truth, so `aria-checked` stops existing and a whole desync class goes
+           with it; and the "1 of 2" hazard cannot recur, because there is no
+           group element left to put a non-radio child into.
+
+           📌 A FIELDSET, NOT A DIV WITH A ROLE. The legend names the group the
+           way `aria-label` did, and a fieldset carries no promise about what it
+           may contain, which is the whole point. -->
+      <fieldset class="pickradios">
+      <legend class="vh">What this agent is for</legend>
+      <label class="pick2" hidden id="pick-pm">
+        <input type="radio" name="rmode" value="pm">
         <span class="p2n" id="pick-pm-name"></span>
         <span class="p2d" id="pick-pm-desc"></span>
-      </button>
-      <!-- ⚠️ Three equivalent options, same border as the other two (the
-           pack rejected a dashed 'provisional' look: describing the job
-           yourself is not a lesser choice). Its editor prefill is the
-           catalogue's own `own` entry, which works unchanged; its label is
-           the person's own words, gated rather than defaulted. -->
-      <button class="pick2 own" type="button" role="radio" aria-checked="false" data-rmode="own" hidden id="pick-own">
-        <span class="pickmark" aria-hidden="true">&#10003;</span>
-        <span class="p2n">Describe it yourself</span>
-        <span class="p2d">Write the job in your own words</span>
-        <span class="p2full">We will start you off with an example you can change, rather than an empty page.</span>
-      </button>
-      <!-- 🔑 "Pick another role" IS LAST SO THE MENU SITS DIRECTLY UNDER IT
-           (#178). The menu is a sibling AFTER the radiogroup, deliberately -- a
-           radiogroup that owns a select announces "1 of 2" and hands assistive
-           tech a child that is neither -- so the only way to put the menu
-           beneath its own radio without breaking that is to move the RADIO
-           rather than the menu. Nothing crosses the group boundary: it still
-           wraps exactly the three radios.
-           ⚠️ THE OBVIOUS OBJECTION IS ALREADY ANSWERED BY THIS SCREEN. A
-           freeform option conventionally goes last -- and the note below
-           records the pack rejecting that framing outright: "describing the job
-           yourself is not a lesser choice". If the three are EQUIVALENT, their
-           order carries no meaning to trade away. That ruling was made for a
-           different reason and happens to make this free.
-           📌 Mona Lisa's route, and better than the three I proposed: mine all
-           moved the menu or the group, and one of them needed `display:
-           contents`, which has a real history of dropping elements out of the
-           accessibility tree. This needs no such measurement. -->
-      <button class="pick2" type="button" role="radio" aria-checked="false" data-rmode="list" hidden id="pick-list">
-        <span class="pickmark" aria-hidden="true">&#10003;</span>
+      </label>
+      <!-- ⚠️ SECOND, AND THE MENU IS THE NEXT ELEMENT. Josh, 2026-08-22, asked
+           for exactly this reading order: the recommended role, then "pick
+           another role" with its menu opening in place underneath it and
+           pushing the third option down, then "describe it yourself". The old
+           markup had to put this option LAST to get the menu under it, which
+           is the trade the native grouping above removes. -->
+      <label class="pick2" hidden id="pick-list">
+        <input type="radio" name="rmode" value="list">
         <span class="p2n">Pick another role</span>
         <span class="p2d" id="pick-list-desc"></span>
-      </button>
-      </div>
+      </label>
       <!-- The list only exists once its radio is chosen, so the screen
-           stays two choices tall until someone asks for more (pack). -->
+           stays two choices tall until someone asks for more (pack).
+           🔑 IT SITS INSIDE THE FIELDSET, BETWEEN TWO RADIOS, which is the one
+           thing the old `role="radiogroup"` could not allow. -->
       <div class="rolepick" id="rolepick" hidden>
         <label class="flabel" for="rolesel">Role</label>
         <select id="rolesel" aria-describedby="roledesc"></select>
@@ -4200,6 +4216,21 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
              visibility is the engine's shipping condition -->
         <p class="roledesc" id="roledesc" aria-live="polite"></p>
       </div>
+      <!-- ⚠️ Three equivalent options, same border as the other two (the
+           pack rejected a dashed 'provisional' look: describing the job
+           yourself is not a lesser choice). Its editor prefill is the
+           catalogue's own `own` entry, which works unchanged; its label is
+           the person's own words, gated rather than defaulted.
+           📌 IT IS THIRD BECAUSE JOSH ASKED FOR IT THIRD, not because it is a
+           lesser choice. The note above still holds: the three are equivalent,
+           so their order carries no ranking to read into. -->
+      <label class="pick2 own" hidden id="pick-own">
+        <input type="radio" name="rmode" value="own">
+        <span class="p2n">Describe it yourself</span>
+        <span class="p2d">Write the job in your own words</span>
+        <span class="p2full">We will start you off with an example you can change, rather than an empty page.</span>
+      </label>
+      </fieldset>
     </div>
     <div class="fmsg" id="roles-msg" role="status" aria-live="polite"></div>
     <!-- ⚠️ THE PACK'S FOOTER: right-aligned, one primary, and the SAME size on
@@ -12981,16 +13012,13 @@ function updateRecPill() {
  * always the role KEY the create will use, whichever shape chose it.
  */
 function pickMode(mode) {
-  const pmBtn = document.getElementById('pick-pm');
-  const listBtn = document.getElementById('pick-list');
-  const ownBtn = document.getElementById('pick-own');
-  [pmBtn, listBtn, ownBtn].forEach((b) => {
-    const on = b.dataset.rmode === mode;
-    b.classList.toggle('on', on);
-    b.setAttribute('aria-checked', String(on));
-    // Roving tabindex: the chosen radio is the group's single Tab stop.
-    b.tabIndex = on ? 0 : -1;
-  });
+  /* ⚠️ IT STILL SETS `checked`, because this is called programmatically as
+     well as from a click: a person choosing a role from the menu with the
+     keyboard reaches this without the radio ever being clicked. Setting it
+     when it is already set is a no-op and fires nothing, so there is no loop
+     back through the change listener. */
+  const input = document.querySelector(`input[name="rmode"][value="${mode}"]`);
+  if (input) input.checked = true;
   document.getElementById('rolepick').hidden = mode !== 'list';
   if (mode === 'pm') {
     PICKED = (roleByKey('pm') || ROLES[0]).key;
@@ -13016,46 +13044,35 @@ function sayRole() {
     (r.caution ? `<span class="caution">${esc(r.caution)}</span>` : '');
 }
 
-document.getElementById('roles-list').addEventListener('click', (e) => {
-  const btn = e.target.closest('.pick2');
-  if (btn) pickMode(btn.dataset.rmode);
+/* ⚠️ `change`, NOT `click`. The browser fires it for a click on the label, for
+   the space bar, AND for the arrow keys -- which is where the hand-written
+   keyboard handler this replaces used to live. */
+document.getElementById('roles-list').addEventListener('change', (e) => {
+  if (e.target.name === 'rmode') pickMode(e.target.value);
 });
 document.getElementById('rolesel').addEventListener('change', () => {
   PICKED = document.getElementById('rolesel').value;
   sayRole();
 });
 
-/**
- * ⚠️ The keyboard model the ARIA role PROMISES.
- *
- * `role="radiogroup"` tells a screen reader "1 of 3, use the arrows", so the
- * arrows move between the visible radios (the menu inside the second is a
- * native select with its own keyboard, and a radio an older server never
- * served is hidden AND out of the cycle). Announcing an interaction the code
- * does not
- * implement is the defect this file corrects everywhere else, in the one
- * place a person cannot see it.
- */
-document.getElementById('roles-list').addEventListener('keydown', (e) => {
-  const keys = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 };
-  if (!keys[e.key] || !ROLES || !ROLES.length) return;
-  if (e.target.closest('select')) return;   // the menu owns its own arrows
-  e.preventDefault();
-  // Hidden radios are not in the cycle: against an older server that never
-  // served `own`, arrowing must not park the group's one Tab stop on a
-  // hidden element with Continue silently dead.
-  const order = ['pm', 'list', 'own'].filter((m) =>
-    !document.getElementById({ pm: 'pick-pm', list: 'pick-list', own: 'pick-own' }[m]).hidden);
-  if (!order.length) return;
-  const cur = order.find((m) =>
-    document.getElementById({ pm: 'pick-pm', list: 'pick-list', own: 'pick-own' }[m]).classList.contains('on')) || 'pm';
-  const mode = order[(order.indexOf(cur) + keys[e.key] + order.length) % order.length];
-  pickMode(mode);
-  document.getElementById({ pm: 'pick-pm', list: 'pick-list', own: 'pick-own' }[mode]).focus();
-});
+/* 🛑 THE ARROW-KEY HANDLER THAT WAS HERE IS DELETED, and nothing replaced it.
+   Twenty-two lines of roving tabindex, wrap-around arithmetic and a filter to
+   keep hidden radios out of the cycle: all of it is what a browser does for a
+   group of same-named radio inputs, including the hidden ones, which it skips
+   without being told. The old comment above it said the point exactly -- the
+   ARIA role PROMISED this behaviour, so the code had to keep the promise. A
+   native radio makes the promise and keeps it in the same breath. */
 
 function openCreate() {
   PICKED = null;
+  /* 🛑 THE RADIOS ARE CLEARED, WHICH THE OLD PICKER NEVER DID. A form control
+     keeps its state across a hidden panel, so reopening this form used to show
+     the previous visit's option still marked while `PICKED` was null and
+     Continue was disabled: the screen said one thing and the button said
+     another. With a class that was invisible bookkeeping; with a real radio it
+     is the control lying, so it gets fixed rather than inherited. */
+  document.querySelectorAll('input[name="rmode"]').forEach((r) => { r.checked = false; });
+  document.getElementById('rolepick').hidden = true;
   CREATING = false;
   WATCH += 1;
   document.getElementById('create-name').value = '';
