@@ -584,8 +584,17 @@ test('the port-collision message names what was seen, and the escape clears the 
 
   assert.ok(!setup.includes('often another'),
     'the message asserts a cause again; it can see the port is busy, not who has it');
-  assert.ok(setup.includes('port for OpenTelemetry collectors'),
-    'the message no longer names the collision a person is likeliest to actually have');
+  /* 🛑 THIS TEST USED TO REQUIRE THE OTLP SENTENCE AND NOW FORBIDS IT, which is
+     a reversal worth stating rather than a quiet edit. It was written when the
+     default port WAS 4317, where naming the collector was the single most
+     useful thing the message could say. The default is 16180 now: 16180 is the
+     default for nothing, so the same sentence became a confident wrong cause —
+     the exact defect this test's neighbour above ("often another") exists to
+     prevent. The claim did not change; the value under it did.
+     🔑 A test that pins an explanation pins it relative to a value. When the
+     value moves, the test is the thing that keeps the stale copy alive. */
+  assert.ok(!/OpenTelemetry|collector/i.test(setup),
+    'the install messages name a cause that stopped being true when the port moved off 4317');
 
   /* 🛑 THE ESCAPE MUST NOT BE PORT+1. */
   assert.ok(!setup.includes('_alt=$((PORT + 1))'),
@@ -645,8 +654,17 @@ test('a first-time installer meets the port precondition before anything is down
   assert.ok(!between.includes('_pausebody="$(curl'),
     'the uninstall path verifies the port, so a running board would abort an uninstall');
 
-  assert.ok(setup.includes('also the default for OpenTelemetry collectors'),
-    'the early warning no longer names the collision a person is likeliest to have');
+  /* Same reversal as above, on the early notice: no named cause on 16180.
+     ⚠️ AGAINST THE CODE, NOT THE FILE. `setup` here is raw, comments and all,
+     and the comment recording WHY the OTLP sentence was dropped contains the
+     word — so this fired on the explanation of the fix. Third time this exact
+     shape has bitten in two days, so the stripper is the answer rather than a
+     cleverer pattern, and it is proved below rather than trusted. */
+  const code = setup.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+  assert.ok(/^\s*#.*OpenTelemetry/m.test(setup),
+    'the premise: a comment mentioning OTLP is what this stripper has to survive');
+  assert.ok(!/OpenTelemetry|collector/i.test(code),
+    'the early notice names a cause that stopped being true when the port moved');
 
   /**
    * 🛑 AND IT WARNS RATHER THAN ABORTS. An earlier version of this change made

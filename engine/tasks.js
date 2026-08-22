@@ -86,6 +86,15 @@ function create(projectId, { sentence, detail, who } = {}, roster) {
       // undefined when unassigned (nothing to have seen); null when assigned
       // with no roster to check against; boolean when checked.
       whoSeen: seen,
+      /* 🔑 WHO PUT IT THERE, STORED NOW WHILE THE ANSWER IS TRIVIAL. Only the
+         operator can make a task today, so the page could hardcode "You" and
+         be right -- and would go wrong silently the day an agent can add one,
+         because nothing would have recorded the difference. Mona Lisa's note
+         on the pack's "Added: You, yesterday": the field costs nothing while
+         the answer is free and cannot be recovered afterwards.
+         'operator' rather than a name: Kosmos has no accounts, so the only
+         honest identity here is the person at the machine. */
+      addedBy: 'operator',
       createdAt: new Date().toISOString(),
       closedAt: null,
     };

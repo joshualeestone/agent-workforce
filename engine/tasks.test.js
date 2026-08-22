@@ -261,3 +261,13 @@ test('the managed block teaches the join: tasks listed in the matching spelling,
   const bare = projects.blockBody([stored]);
   assert.ok(!/Task 1:/.test(bare) && !/task <number>/.test(bare), 'task lines appear with no agent to scope them');
 });
+
+test('a task records who added it, while the answer is still free', () => {
+  const p = freshProject('Provenance');
+  const t = tasks.create(p.id, { sentence: 'Rewrite the handoff checklist' });
+  assert.equal(t.addedBy, 'operator',
+    'nothing stored who added the task, so the page can only guess');
+  // And it SURVIVES the write, which is the half a return value cannot prove.
+  const stored = projects.readAll().find((x) => x.id === p.id).tasks[0];
+  assert.equal(stored.addedBy, 'operator');
+});

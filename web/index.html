@@ -1129,6 +1129,9 @@ button.uprime, .btn.uprime, .utoast .uacts button.uprime { background: #e3b341; 
    pjcols are the cards, and a panel behind them was cards on a card. */
 #pj-one-view { max-width: 1320px; margin: 0 auto; background: none;
   border: 0; box-shadow: none; padding: 0; }
+/* The task page sits in the same column as the project it came from: a
+   page that changes width when you click into it reads as a different app. */
+#pj-task-view { max-width: 1320px; margin: 0 auto; }
 .panel h2 { font: 600 var(--text-title-3) var(--font-ui); margin-bottom: var(--space-5); }
 .panel p { font: var(--text-body) var(--font-ui); color: var(--label-2);
            line-height: 1.6; margin-bottom: var(--space-5); }
@@ -1222,6 +1225,35 @@ p.pj-desc { display: block; margin: 3px 0 2px; font-size: .9375rem;
    drew a stray line above Tasks. */
 .pjcol .field { border-top: 0; padding-top: 0; margin-top: 0; }
 .pjcol .field + .field { margin-top: var(--space-6); }
+/* ---- the task page (#206) -------------------------------------------
+   ⚠️ TWO COLUMNS, NOT THE PACK'S THREE, and the missing one is deliberate.
+   The pack draws Who-is-on-it · Activity · This-task. The activity thread is
+   unspecced (Mona Lisa: two questions decide it and both are Josh's -- a new
+   store or the project room filtered, and whether agents POST into it), so
+   drawing an empty middle column would be a promise of a surface nobody has
+   designed. The grid keeps the right rail at the pack's width so the middle
+   can arrive later WITHOUT moving anything already on the screen. */
+.pj2 { display: grid; grid-template-columns: repeat(2, minmax(0, 22rem)); gap: 16px;
+       align-items: start; justify-content: start; }
+@media (max-width: 52rem) { .pj2 { grid-template-columns: minmax(0, 1fr); } }
+/* The pack's tasknum: mono, small, above the title. It is the thing a person
+   says out loud to an agent, which is why it is set apart from the sentence
+   rather than folded into it. */
+.tasknum { font: 600 11px var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+           letter-spacing: .06em; color: var(--label-2); text-transform: uppercase; margin: 0 0 4px; }
+.tmeta { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+         padding: 7px 0; border-bottom: 1px solid var(--k-rule); font-size: .8125rem; }
+.tmeta:last-of-type { border-bottom: 0; }
+.tmeta > span { color: var(--label-2); }
+.tmeta > b { font-weight: 600; text-align: right; min-width: 0; }
+.tkstate { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.tkclosenote { margin: 10px 0 18px; }
+.tkwho { display: flex; align-items: center; gap: 10px; }
+.tkwho .lav { flex: 0 0 34px; }
+.tkwho-b { min-width: 0; }
+.tkwho-b b { display: block; font-size: .9375rem; }
+.tkwho-b small { color: var(--label-2); }
+.tkdetail { white-space: pre-wrap; margin: 0; }
 .pjmid { display: flex; flex-direction: column; min-width: 0; }
 .pjmidhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 /* ⚠️ THE MESSAGES GET A BOX OF THEIR OWN, matching Project members and Tasks:
@@ -3080,21 +3112,6 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
      about KOSMOS's behaviour, not the agent's state, and both its clauses are
      verifiable tonight. "Back" and not "Close", because a dismiss button
      reading "Close" beside "Mark as done" is two closings with one word. -->
-<div class="rm-back" id="tk-modal" hidden>
-  <div class="rm-box" role="dialog" aria-modal="true" aria-labelledby="tk-title" aria-describedby="tk-meta">
-    <h2 class="rm-title" id="tk-title"></h2>
-    <p class="rm-small" id="tk-meta"></p>
-    <p class="rm-small" id="tk-detail" hidden></p>
-    <!-- The unknown's reason, too long for the card that reports the state. -->
-    <p class="rm-small" id="tk-why" hidden></p>
-    <p class="rm-small" id="tk-note" hidden></p>
-    <div class="rm-acts">
-      <button class="btn" id="tk-back" type="button">Back</button>
-      <button class="btn" id="tk-done" type="button"></button>
-    </div>
-    <div class="fmsg" id="tk-msg" role="alert" aria-live="assertive"></div>
-  </div>
-</div>
 
 <div class="rm-back" id="rm-modal" hidden>
   <div class="rm-box" role="alertdialog" aria-modal="true"
@@ -3845,6 +3862,62 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
        settings page that restates the screen it was opened from is a second
        copy of it. The archive/remove ids are UNCHANGED from their old home,
        so their battle-tested wiring moved with them untouched. -->
+  <!-- ⚠️ A PAGE, NOT A DIALOG (#206). This was `#tk-modal`, and Josh's
+       complaint about it was the whole reason: a task is a thing you go TO
+       and stay on, and a modal is a thing you dismiss. The pack draws it as
+       a view with the project in the back link.
+       🔑 THE PROJECT IS NAMED IN THE BACK LINK RATHER THAN A BREADCRUMB.
+       There are only two levels here, project and task, so a trail would be
+       scaffolding for a depth this product does not have: the way back and
+       the thing it belongs to are the same fact. -->
+  <div id="pj-task-view" hidden>
+    <button class="back" id="tk-back" type="button"></button>
+    <div class="pjhead">
+      <div class="pjtitle">
+        <p class="tasknum" id="tk-num"></p>
+        <h2 class="dname" id="tk-title"></h2>
+        <!-- Hidden entirely when there is none, the same rule the project
+             description follows: an empty grey line under every task without
+             detail would read as something missing. -->
+        <p class="pj-desc tkdetail" id="tk-detail" hidden></p>
+      </div>
+      <!-- ⚠️ THE ONLY STATE A PERSON OWNS IS "DONE". Working and Waiting are
+           DERIVED from what each agent reported holding; letting a person
+           declare one would let them assert a fact the system is supposed to
+           observe. So: one human verb, and its undo. -->
+      <div class="tkstate">
+        <button class="btn-quiet" id="tk-done" type="button"></button>
+      </div>
+    </div>
+    <p class="dhint tkclosenote" id="tk-note" hidden></p>
+    <div class="fmsg" id="tk-msg" role="alert" aria-live="assertive"></div>
+
+    <div class="pj2">
+      <section class="pjcol">
+        <h3 class="dlab">Who is on it</h3>
+        <div id="tk-who"></div>
+        <!-- The unknown's reason, too long for the card that reports the
+             state: the card carries the signal, the page carries the
+             explanation. Only claimed:null has a because to give -- true and
+             false are complete statements. -->
+        <p class="dhint" id="tk-why" hidden style="margin:10px 0 0;"></p>
+      </section>
+
+      <aside class="pjcol">
+        <h3 class="dlab">This task</h3>
+        <div class="tmeta"><span>Project</span><b id="tk-project"></b></div>
+        <div class="tmeta"><span>Added</span><b id="tk-added"></b></div>
+        <div class="tmeta"><span>State</span><b id="tk-state"></b></div>
+        <!-- ⚠️ NO DUE DATE FIELD, and its absence is deliberate rather than an
+             omission. Nothing in Kosmos acts on a date: agents are not
+             scheduled, nothing reminds anyone, and a date the product cannot
+             honour is a promise printed on a screen. It belongs here the day
+             something reads it. -->
+        <p class="dhint" style="margin:12px 0 0;">Anything written here is part of the task, so an agent picking it up later reads the whole thing rather than just the title.</p>
+      </aside>
+    </div>
+  </div>
+
   <div id="pj-settings-view" hidden>
     <button class="back" id="pj-settings-back" type="button">&larr; <span id="pj-settings-backname"></span></button>
     <h2>Project settings</h2>
@@ -10950,7 +11023,7 @@ let PJ_THREAD_GEN = 0;
 let PJ_NAV_GEN = 0;
 
 function pjView(which) {
-  for (const v of ['list', 'one', 'add', 'settings']) {
+  for (const v of ['list', 'one', 'add', 'settings', 'task']) {
     document.getElementById('pj-' + v + '-view').hidden = (v !== which);
   }
   // Arriving at a project resets the member picker to its resting state (the
@@ -11458,6 +11531,12 @@ async function loadProjects() {
   }
   paintProjects();
   if (PJ_CURRENT) paintOneProject();
+  /* ⚠️ THE THIRD OPEN SURFACE. paintOneProject repaints the project view;
+     the task page is a separate view off the same record and would otherwise
+     hold whatever it was painted with when it opened -- including a "Mark as
+     done" button for a task somebody closed elsewhere. Guarded on the view
+     being up, so a stale TK_OPEN cannot repaint a page nobody is looking at. */
+  if (TK_OPEN !== null && !document.getElementById('pj-task-view').hidden) paintTaskPage();
   // The settings view holds the archive control now, so a poll that lands
   // while it is open must repaint IT from the truth too -- without this,
   // "Restore failed. Try again." outlives a restore whose write landed and
@@ -11583,50 +11662,105 @@ document.getElementById('pj-alltasks').addEventListener('click', () => {
 document.getElementById('pj-tasklist').addEventListener('click', (e) => {
   const card = e.target.closest('.tkcard');
   if (!card) return;
-  openTaskModal(Number(card.dataset.task));
+  openTaskPage(Number(card.dataset.task));
 });
 
-/* ---- the view dialog: one human verb and its undo ---- */
+/* ---- the task page: one human verb and its undo -----------------------
+   ⚠️ THIS WAS A MODAL AND IT IS NOW A VIEW (#206). Everything the dialog
+   said is still said; what changed is that a task is somewhere you ARE
+   rather than something covering the page you were on. Two consequences
+   worth stating because they are easy to lose in the move:
+     - the five-second poll now has a THIRD open surface to keep true. A
+       dialog could be stale for as long as it was up; a page cannot.
+     - Back goes to the project, not to the card. The card may not exist
+       any more (marking done drops it out of the column), which is exactly
+       why the old closer had to fall back to the New task button. */
 let TK_ACT = null;   // the act the visible label promises; see the click handler
-function openTaskModal(n) {
+function tkStateWord(t) {
+  return t.closedAt ? 'Done' : 'Open';
+}
+/**
+ * "Added" as a person would say it. Whole days apart, in the machine's own
+ * timezone, so "yesterday" means the day before today rather than 24 hours.
+ * ⚠️ It says WHO and WHEN together because the pack does, and because who is
+ * the half that will stop being trivially true: `addedBy` is stored on every
+ * task now (engine/tasks.js) precisely so this line does not have to assume.
+ */
+function tkAdded(t) {
+  const who = t.addedBy === 'operator' ? 'You' : (t.addedBy || 'Somebody');
+  const at = t.createdAt ? new Date(t.createdAt) : null;
+  if (!at || isNaN(at.getTime())) return who;
+  const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(at)) / 86400000);
+  const when = days <= 0 ? 'today'
+    : days === 1 ? 'yesterday'
+      : days < 7 ? days + ' days ago'
+        : at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return who + ', ' + when;
+}
+function paintTaskPage() {
   const p = pjById(PJ_CURRENT);
-  const t = p && (p.tasks || []).find((x) => x.number === n);
-  if (!t) return;
-  TK_OPEN = n;
+  const t = p && (p.tasks || []).find((x) => x.number === TK_OPEN);
+  /* ⚠️ THE TASK CAN VANISH UNDER AN OPEN PAGE -- a poll that reads a project
+     whose task was deleted elsewhere. A dialog could simply be dismissed; a
+     page has to go somewhere, and the project it belonged to is the only
+     honest destination. */
+  if (!t) { TK_OPEN = null; if (p) { pjView('one'); } else { pjView('list'); PJ_CURRENT = null; } return; }
   TK_ACT = t.closedAt ? 'reopen' : 'close';
-  document.getElementById('tk-title').textContent = t.sentence;
   const who = t.who ? tkMemberName(p, t.who) : null;
-  document.getElementById('tk-meta').textContent =
-    'Task ' + t.number + (t.closedAt ? ', done.' : (who ? ', given to ' + who + '.' : ', nobody on it yet.'));
+  document.getElementById('tk-back').textContent = '\u2190 ' + p.name;
+  document.getElementById('tk-num').textContent = 'Task ' + t.number;
+  document.getElementById('tk-title').textContent = t.sentence;
   const det = document.getElementById('tk-detail');
   det.textContent = t.detail || '';
   det.hidden = !t.detail;
-  /* ⚠️ THE UNKNOWN'S REASON LIVES HERE, not on the card. The card says "we
-     could not check" in three words; the engine's own sentence explaining WHY
-     runs to fifty ("we cannot tie the pane holding this name to the agent, so
-     we will not speak for what that name is holding") and would set the width
-     of every card in the column. The card carries the signal, the panel
-     carries the explanation.
-     Only for the unknown: `claimed` true and false are complete statements and
-     have no because to give. */
+
+  document.getElementById('tk-project').textContent = p.name;
+  document.getElementById('tk-added').textContent = tkAdded(t);
+  document.getElementById('tk-state').textContent = tkStateWord(t);
+
+  /* Who is on it. One person today; parts are the next step and this column
+     is where they land, which is why it is a column rather than a line in the
+     meta rail beside it. */
+  /* ⚠️ THE SAME FACE THE MEMBERS COLUMN DRAWS, built from `pjMember`'s rule
+     rather than a fresh one. The first version wrote a bare `<span class=lav>`
+     with one letter in it, and rendering it in DARK showed why that is wrong:
+     every other `.lav` in this file carries a discTint/discInk inline style or
+     a real avatar, so the class's own `rgba(20,22,26,.06)` background is a
+     default nothing actually uses -- a near-black disc on a near-black card.
+     `hasAvatar` is gated on TIED in the engine and that gate travels with it:
+     a stranger's pane borrowing the name must not lend this row a photograph
+     of somebody it is not. */
+  const member = t.who ? (p.agents || []).find((a) => a && a.sessionName === t.who) : null;
+  const face = !who ? ''
+    : (member && member.hasAvatar)
+      ? '<span class="lav" aria-hidden="true"><img src="/api/agent/'
+        + encodeURIComponent(t.who) + '/avatar" alt=""></span>'
+      : '<span class="lav" aria-hidden="true" style="background:' + discTint(who)
+        + ';color:' + discInk(who) + '">' + esc(initials(who)) + '</span>';
+  const say = (t.claim
+    ? (t.claim.claimed === true ? 'says it is on this'
+      : t.claim.claimed === false ? 'says it is not on this'
+        : 'we could not check')
+    : '');
+  document.getElementById('tk-who').innerHTML = who
+    ? '<div class="tkwho">' + face
+      + '<div class="tkwho-b"><b>' + esc(who) + '</b>'
+      + (say ? '<small>' + esc(say) + '</small>' : '') + '</div></div>'
+    : '<p class="fhint">Nobody yet.</p>';
+
   const why = document.getElementById('tk-why');
   const unknownBecause = (t.claim && t.claim.claimed === null && t.claim.because) ? t.claim.because : '';
   why.textContent = unknownBecause ? 'We could not check whether ' + (who || 'it')
     + ' is on this: ' + unknownBecause + '.' : '';
   why.hidden = !unknownBecause;
-  /* The close-note, Mona Lisa's blessed v1 wording: both clauses are about
-     what KOSMOS does not do, verifiable tonight, and needed MORE before the
-     commitments join exists, because tonight is when someone will assume
-     closing stops the agent. Only when somebody is on it and it is open. */
+
+  /* The close-note: both clauses are about what KOSMOS does not do. Needed
+     most by somebody who assumes closing a task stops the agent. Only when
+     somebody is on it and it is open. */
   const note = document.getElementById('tk-note');
   if (who && !t.closedAt) {
-    /* The scene-setting sentence returns in front of the correction, per
-       the ruling made when the correction shipped without it: only when
-       the agent has SAID so (the join), and in says-vocabulary, never as
-       an observation Kosmos cannot make. */
-    const says = (t.claim && t.claim.claimed === true)
-      ? who + ' says it is on this. '
-      : '';
+    const says = (t.claim && t.claim.claimed === true) ? who + ' says it is on this. ' : '';
     note.textContent = says + 'Marking it done closes it here. It does not stop ' + who
       + ' or change what ' + who + ' is doing.';
     note.hidden = false;
@@ -11634,36 +11768,37 @@ function openTaskModal(n) {
     note.hidden = true;
   }
   document.getElementById('tk-done').textContent = t.closedAt ? 'Reopen' : 'Mark as done';
-  document.getElementById('tk-msg').textContent = '';
-  document.getElementById('tk-modal').hidden = false;
-  document.getElementById('tk-back').focus();   // the safe answer, every dialog
 }
-function closeTaskModal() {
-  document.getElementById('tk-modal').hidden = true;
+function openTaskPage(n) {
+  const p = pjById(PJ_CURRENT);
+  const t = p && (p.tasks || []).find((x) => x.number === n);
+  if (!t) return;
+  TK_OPEN = n;
+  document.getElementById('tk-msg').textContent = '';
+  paintTaskPage();
+  pjView('task');
+  document.getElementById('tk-back').focus();   // the top of the new page
+}
+function leaveTaskPage() {
   const was = TK_OPEN;
   TK_OPEN = null;
-  TK_ACT = null;
-  // Back to the card that opened the dialog; after a done/reopen repaint it
-  // may be gone from the column, and then New task is the stable landing.
+  pjView('one');
+  // Back to the card that opened it; after a done/reopen repaint the card may
+  // have left the column, and then New task is the stable landing.
   const card = document.querySelector('.tkcard[data-task="' + was + '"]');
   (card || document.getElementById('pj-newtask')).focus();
 }
-document.getElementById('tk-back').addEventListener('click', closeTaskModal);
-document.getElementById('tk-modal').addEventListener('click', (e) => {
-  if (e.target.id === 'tk-modal') closeTaskModal();
-});
+document.getElementById('tk-back').addEventListener('click', leaveTaskPage);
 document.getElementById('tk-done').addEventListener('click', async () => {
   const p = pjById(PJ_CURRENT);
   const t = p && (p.tasks || []).find((x) => x.number === TK_OPEN);
-  // An orphaned dialog (the project vanished under it) closes rather than
-  // being a button that silently does nothing on top of the list view.
-  if (!t) { closeTaskModal(); return; }
+  if (!t) { leaveTaskPage(); return; }
   /* ⚠️ THE ACT IS THE ONE THE LABEL PROMISED. The five-second poll keeps
-     PROJECTS fresher than this dialog, so deriving the act here from t
+     PROJECTS fresher than a click in flight, so deriving the act here from t
      could invert the visible button: it says "Mark as done", the task was
-     closed elsewhere a tick ago, and the click would silently reopen. If
-     the world moved since open, show the new state instead of acting. */
-  if ((t.closedAt ? 'reopen' : 'close') !== TK_ACT) { openTaskModal(t.number); return; }
+     closed elsewhere a tick ago, and the click would silently reopen. If the
+     world moved since the paint, show the new state instead of acting. */
+  if ((t.closedAt ? 'reopen' : 'close') !== TK_ACT) { paintTaskPage(); return; }
   const btn = document.getElementById('tk-done');
   btn.disabled = true;
   try {
@@ -11677,8 +11812,13 @@ document.getElementById('tk-done').addEventListener('click', async () => {
         (body && body.error) || 'we could not change that task';
       return;
     }
-    closeTaskModal();
+    document.getElementById('tk-msg').textContent = '';
     await pjReload();
+    /* ⚠️ AND IT STAYS ON THE PAGE. The dialog closed itself here, which was
+       right for a dialog: the act was the reason it was open. A page is not
+       dismissed by succeeding, and being thrown back to the project on a
+       press of Reopen would hide the very state change that was asked for.
+       The reload repaints this page through paintTaskPage. */
   } catch {
     document.getElementById('tk-msg').textContent = 'we could not change that task';
   } finally {
@@ -11759,13 +11899,19 @@ document.getElementById('nt-go').addEventListener('click', async () => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!document.getElementById('nt-modal').hidden) closeNewTask();
-  else if (!document.getElementById('tk-modal').hidden) closeTaskModal();
+  /* ⚠️ THE TASK PAGE IS NOT AN ESCAPE TARGET ANY MORE, and that is the point
+     of the change rather than an omission. Escape dismisses a thing that
+     covers your work; it does not navigate. Leaving it wired would make a
+     page behave like an overlay, which is the confusion #206 was about. */
 });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab') return;
   for (const [backId, stopIds, home] of [
     ['nt-modal', ['nt-what', 'nt-detail', 'nt-who', 'nt-cancel', 'nt-go'], 'nt-what'],
-    ['tk-modal', ['tk-back', 'tk-done'], 'tk-back'],
+    /* ⚠️ NO TRAP ON THE TASK PAGE. A focus trap is what makes a dialog modal;
+       a page must let the keyboard reach the tab bar and everything else on
+       the screen. Trapping here would be the modal behaviour surviving the
+       markup that stopped being a modal. */
   ]) {
     const back = document.getElementById(backId);
     if (back.hidden) continue;

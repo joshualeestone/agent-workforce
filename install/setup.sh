@@ -1095,13 +1095,28 @@ if [ "$FRESH_INSTALL" = "yes" ]; then
   _portbody="$(curl -fsS -m 2 "http://127.0.0.1:$PORT/" 2>/dev/null)" || _portbody=""
   case "$_portbody" in
     *"Agent Workforce"*|*Kosmos*)
-      info "note: a Kosmos board is already answering on port $PORT (another account on this Mac runs its own)."
+      # 🛑 IT SAYS WHAT IT SAW, NOT WHOSE IT IS. This read "(another account on
+      # this Mac runs its own)", and Splinter found the third case within the
+      # hour: an ORPHANED board of our own, left behind by an install test,
+      # answering on the default port from a deleted worktree. A person sent to
+      # look for a second account would not find one.
+      # ⚠️ Same shape as the OTLP sentence two arms below and as "often another"
+      # before it: the probe establishes THAT a Kosmos answers here, never WHOSE.
+      info "note: a Kosmos board is already answering on port $PORT."
       info "      this install will finish; it will tell you how to start yours on another port."
       ;;
     "") ;;
     *)
       info "note: something else is already using port $PORT, so Kosmos will not be able to start there."
-      info "      port $PORT is also the default for OpenTelemetry collectors, so that may be what it is."
+      # 🛑 NO NAMED CAUSE. This line used to say "$PORT is also the default for
+      # OpenTelemetry collectors", which was TRUE when it was written and false
+      # SIX MINUTES LATER, when the default moved off 4317 to 16180 in the very
+      # commit that was fixing this class of wrong-cause sentence. 16180 is not
+      # the default for anything, so there is no likely cause to name, and
+      # naming one anyway is the exact defect that was being removed.
+      # 🔑 An explanation is only true relative to a value; moving the value
+      # rots it silently, and nothing greps for a sentence whose subject is a
+      # variable. Found by Splinter on the wire.
       info "      this install will finish and tell you how to start Kosmos on another port."
       ;;
   esac
@@ -1883,10 +1898,13 @@ else
   # ⚠️ Same discipline as the connect screen: say what was observed (the port is
   # answering and it is not ours), name the candidates without ranking them, and
   # let the person recognise their own machine.
+  # 🛑 AND THE OTLP HALF OF THAT SENTENCE IS GONE, because the default moved to
+  # 16180 an hour after this was written and the sentence did not move with it.
+  # It survived a first pass that fixed the same rot one screen earlier: a
+  # correction does not sweep, and this one named a line rather than the class.
   printf '\n  Kosmos is installed, but something else is already answering on port %s,\n' "$PORT"
   printf '  so we did not start a board there. It could be another Kosmos (each\n'
-  printf '  account runs its own), or any other program — %s is also the default\n' "$PORT"
-  printf '  port for OpenTelemetry collectors.\n'
+  printf '  account runs its own), or any other program using that port.\n'
   if [ "$APP_MADE" = "yes" ]; then
     printf '  (The Kosmos icon this install created is tied to port %s and will open\n' "$PORT"
     printf '  whichever Kosmos answers there.)\n'
