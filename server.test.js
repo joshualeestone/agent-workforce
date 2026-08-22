@@ -253,14 +253,11 @@ const UNREAD_ON_PURPOSE = {
   unknownFullness: 'a count the summary line covers in words rather than by '
     + 'number',
   unreadableTokens: 'as above',
-  /* 🛑 THIS ONE IS A REAL GAP AND IS PARKED, NOT DISMISSED. `percent` is capped
-     at `Math.min(100, percent)` and `overCeiling` records that the true figure
-     was higher, so an agent past its ceiling draws identically to one exactly
-     full. The memory reading has five renderers and the treatment needs a copy
-     ruling, so it is with Mona Lisa rather than invented here. Remove this line
-     when it lands. */
-  overCeiling: 'PARKED: a real gap. Over-ceiling draws the same as exactly '
-    + 'full. Five renderers and needs ruled copy; raised 2026-08-22',
+  /* `overCeiling` was parked here for one hour on 2026-08-22 and is now drawn
+     as the word `Full` (#260). The line came off because the allowlist's own
+     control failed the moment the page started reading it, which is the whole
+     reason that control exists: a list of deliberate exceptions with nothing
+     watching it becomes where real gaps go to be forgotten. */
 };
 
 test('no field the board sends is unknown to the page', async (t) => {

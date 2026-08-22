@@ -5466,6 +5466,44 @@ function memBand(pct) {
    ⚠️ `word` and `aria` are kept DISJOINT AS STRINGS in both branches, so an
    assertion about one cannot be satisfied by the other — the same property the
    ring's docblock relies on. */
+/**
+ * What the memory slot PRINTS: a percentage, or a word when a number would lie.
+ *
+ * 🔑 THE SLOT ALREADY RENDERS A WORD. `Unknown` has always gone here when there
+ * is no percentage to give, so `Full` is a third value in a pattern that
+ * exists rather than a new treatment, and it lands the same way on all three
+ * surfaces that print the figure (Mona Lisa's ruling, #260).
+ *
+ * 🛑 WHY A WORD AND NOT THE TRUE NUMBER. The engine caps `percent` at
+ * `Math.min(100, percent)` and sets `overCeiling` when the real figure was
+ * higher, so the page had been printing `100%` for an agent at 130: the one
+ * number we KNOW to be wrong. Printing 130 instead would be honest and
+ * useless, because the ring cannot draw past its own end and the decision is
+ * identical at 100 and at 130. A figure that changes nothing invites a reading
+ * nothing supports.
+ *
+ * ⚠️ AND `overCeiling` MEANS TWO DIFFERENT THINGS depending on
+ * `ceilingAssumed`. Against a limit we have watched it hit, the agent really is
+ * past a real one. Against a limit we assumed, the likelier truth is that OUR
+ * ASSUMPTION IS WRONG rather than that the agent is in trouble. `Full` is true
+ * under both readings; a number would be a claim about which one we are in.
+ * The engine's `because` already carries that distinction and the memory box
+ * already shows it, so the caveat sits next to the word.
+ *
+ * 📌 NO ALARM TREATMENT, deliberately. The badge already goes red at
+ * NEARLY_FULL. Over-ceiling is not a new severity, it is the same severity with
+ * a number we cannot state, and a colour would say something new has happened
+ * when nothing has.
+ */
+function memPrint(ctx, pct) {
+  if (pct === null) return memUnknown(ctx).word;
+  /* ⚠️ `=== true`, NOT TRUTHY. `Full` is a claim that an agent is out of room,
+     and a field carrying any non-boolean would assert it. The engine sets this
+     as a real boolean; anything else arriving here is a shape we do not
+     understand, and a shape we do not understand is not evidence. */
+  return (ctx && ctx.overCeiling === true) ? 'Full' : pct + '%';
+}
+
 function memUnknown(ctx) {
   /* 🛑 A THIRD CASE, AND IT WAS SHIPPING A FALSE SENTENCE ON THE SURFACE THIS
      CHANGE REWRITES. When a reading is taken but the model's limit is unknown,
@@ -5856,7 +5894,7 @@ function card(a) {
        The gap this badge closes was always the SIGHTED half. (Mona Lisa,
        2026-08-19; the pack uses this pattern 160 times on .haz/.qmark/.rest.) */
     ? `<span class="membadge unk" aria-hidden="true">${memUnknown(a.context).word}</span>`
-    : (pct >= NEARLY_FULL ? `<span class="membadge">${pct}%</span>` : '');
+    : (pct >= NEARLY_FULL ? `<span class="membadge">${memPrint(a.context, pct)}</span>` : '');
   const pres = `<span class="pres ${m.pres}"><span class="vh">${PRESSAY[m.pres]}</span></span>`;
 
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
@@ -5926,7 +5964,7 @@ function lrow(a) {
      shared derivation was for. */
   const mem = pct === null
     ? `<span class="bar unknown"></span><span class="pct"><span aria-hidden="true">${memu.word}</span><span class="vh">${memu.aria}</span></span>`
-    : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${pct}%</span>`;
+    : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${memPrint(a.context, pct)}</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
     <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button>${staleBadge(a)}</b><small>${esc(roleLine(a))}</small><em>${esc(modelLine(a))}</em></div>
@@ -7990,8 +8028,14 @@ function memoryBox(a) {
       + u.note + '</p>';
   }
   const band = memBand(pct);
+  /* 🛑 THE FOURTH SURFACE, and the comment beside the detail badge records the
+     last time one was left behind: "three surfaces, one fact, and the third
+     left on the old treatment". This box was the fourth, printing the capped
+     figure directly while the other three had moved to `memPrint`. The bar's
+     WIDTH keeps the capped number, which is correct: a bar cannot draw past its
+     own end, and that is the reason the printed figure had to become a word. */
   return '<div class="memrow"><span class="bar"><i class="' + band + '" style="width:' + pct + '%"></i></span>'
-    + '<span class="pct">' + pct + '%</span></div>'
+    + '<span class="pct">' + memPrint(a.context, pct) + '</span></div>'
     + (pct >= NEARLY_FULL
       ? '<p class="dhint" style="margin:12px 0 0;"><b>Memory nearly full.</b> ' + esc(a.name)
         + ' will soon summarise its older context to keep working, and fine detail from earlier in the session may be compressed.'
@@ -9512,7 +9556,7 @@ function openDetail(sessionName) {
      treatment" was this branch's own note, and this was the fourth. */
   const dbadge = document.getElementById('d-membadge');
   dbadge.className = 'membadge' + (dpct === null ? ' unk' : '');
-  dbadge.textContent = dpct === null ? memUnknown(a.context).word : dpct + '%';
+  dbadge.textContent = memPrint(a.context, dpct);
   dbadge.hidden = !(dpct === null || dpct >= NEARLY_FULL);
   document.getElementById('d-memory').innerHTML = memoryBox(a);
   const drun = document.getElementById('d-runson');
