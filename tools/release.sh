@@ -17,6 +17,32 @@
 set -euo pipefail
 V="${1:-}"
 [ -n "$V" ] || { echo "usage: bash tools/release.sh <version>   e.g. 0.2.12"; exit 1; }
+
+# 🔑 AFTER 0.2.99 COMES 0.3.0, and this refuses anything else. Josh, 2026-08-22:
+# *"since we are getting close, when we get to 0.2.99 then lets roll to 0.3.00"*.
+#
+# ⚠️ A RULE IN A CARD DEPENDS ON WHOEVER IS AWAKE AT 0.2.99 HAVING READ IT, and
+# at the current rate that is three weeks and several people from now. The
+# version is a bare argument to this script, so nothing otherwise stops
+# `0.2.100` being typed at exactly the moment nobody is thinking about it — and
+# by then it is published, polled by every install, and in the versions page.
+# Mona Lisa's call, and it is the same argument as baking the version rather
+# than fetching it: answer it once instead of asking every future author.
+#
+# ⚠️ IT REFUSES RATHER THAN CORRECTS. Silently shipping 0.3.0 when somebody
+# asked for 0.2.100 would be a release nobody named, and the entry they wrote on
+# the versions page is stamped with the version they typed.
+_prev="$(node -e "console.log(JSON.parse(require('fs').readFileSync('$(cd "$(dirname "$0")/.." && pwd)/package.json','utf8')).version)")"
+if [ "$_prev" = "0.2.99" ] && [ "$V" != "0.3.0" ]; then
+  echo "0.2.99 is the last of the 0.2 line: the next version is 0.3.0, not $V."
+  echo "(Josh's ruling, 2026-08-22. If that has changed, this guard is in tools/release.sh.)"
+  exit 1
+fi
+case "$V" in
+  0.2.1[0-9][0-9]*)
+    echo "$V is past the end of the 0.2 line. 0.2.99 is the last one; after it comes 0.3.0."
+    exit 1 ;;
+esac
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SITE="${KOSMOS_SITE:-$HOME/work/chaoskosmos-site}"
 [ -d "$SITE/dist" ] || { echo "no site checkout at $SITE (set KOSMOS_SITE)"; exit 1; }
