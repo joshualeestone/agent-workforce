@@ -1622,19 +1622,25 @@ test('the MODELS list has one default and args the CLI will accept as model ids'
   }
 });
 
-test('own is the 27th entry and the 26th role does not exist', () => {
-  // ⚠️ Both counts asserted BY NAME (catalogue 0ef34cc): 27 entries, 26
-  // pickable. A test that asserted one bare number would not know which
-  // fact it held when the next entry lands.
-  assert.equal(roles.ROLES.length, 27, 'the catalogue grew or shrank; decide which count this is');
+test('own is the last entry and no role is hidden but it', () => {
+  // ⚠️ TWO FACTS, AND THEY USED TO BE TWO NUMBERS THAT MOVED TOGETHER (27 and
+  // 26). Adding Project Director broke both at once, which is exactly the
+  // situation the original comment was trying to avoid: two failures naming
+  // one cause, and no way to read which fact went. They are now separate
+  // axes. The total is a deliberate tripwire so a role cannot join the
+  // catalogue silently; the menu is expressed as a RELATIONSHIP to it, so a
+  // new role touches one number and `own` leaking into the picker still fails
+  // on its own line no matter how large the catalogue grows.
+  assert.equal(roles.ROLES.length, 28, 'the catalogue grew or shrank; say so here on purpose');
   const menu = roles.ROLES.filter((r) => r.menu !== false);
-  assert.equal(menu.length, 26, 'own leaked into the pickable menu, or a menu role got hidden');
+  assert.equal(menu.length, roles.ROLES.length - 1,
+    'exactly one entry is meant to be hidden; own leaked into the picker, or a menu role got hidden');
   assert.ok(!menu.some((r) => r.key === 'own'), 'own is in the grouped menu');
   // POSITIVE CONTROL: the exclusion is the flag doing work, not a
   // coincidence of counting -- flipping it in a copy must change the count.
   const flipped = roles.ROLES.map((r) => (r.key === 'own' ? { ...r, menu: true } : r))
     .filter((r) => r.menu !== false);
-  assert.equal(flipped.length, 27, 'the menu filter is not reading the flag this test guards');
+  assert.equal(flipped.length, roles.ROLES.length, 'the menu filter is not reading the flag this test guards');
   // No label on purpose: it prints under the agent's name, and "Custom" is
   // nobody's job. The gate lives in create and is tested below.
   assert.ok(!roles.byKey('own').label, 'own grew a default label');
