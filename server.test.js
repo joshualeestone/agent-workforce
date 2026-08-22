@@ -5943,8 +5943,18 @@ test('the limit card shows each caution only when it matters (her always-on-scre
     if (sc[k] === '{') depth += 1;
     else if (sc[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
   }
+  /* ⚠️ THE HELPER COMES WITH IT. `paintLimitsFrom` routes its switch through
+     `paintSwitch` now, and lifting one without the other is a harness reporting
+     a ReferenceError as a product failure. */
+  const swAt = sc.indexOf('function paintSwitch(');
+  assert.ok(swAt > -1, 'paintSwitch vanished from the page');
+  let swDepth = 0; let swEnd = -1;
+  for (let k = sc.indexOf('{', swAt); k < sc.length; k += 1) {
+    if (sc[k] === '{') swDepth += 1;
+    else if (sc[k] === '}') { swDepth -= 1; if (swDepth === 0) { swEnd = k + 1; break; } }
+  }
   // eslint-disable-next-line no-new-func
-  const painter = new Function('document', sc.slice(at, end) + '\nreturn paintLimitsFrom;')({ getElementById: el });
+  const painter = new Function('document', sc.slice(swAt, swEnd) + '\n' + sc.slice(at, end) + '\nreturn paintLimitsFrom;')({ getElementById: el });
 
   painter({ on: true, perHour: 20, tiers: [10, 20, 40, 100] });
   assert.equal(el('lim-tier-row').hidden, false);
@@ -9112,15 +9122,35 @@ test('a switch that has not been read says so, rather than showing OFF', () => {
   const els = {};
   const el = (id) => els[id] || (els[id] = {
     id, hidden: undefined, textContent: '', attrs: {}, classes: new Set(),
-    classList: { toggle(c, v) { if (v) { this._s.add(c); } else { this._s.delete(c); } }, _s: null },
+    /* ⚠️ THE DOUBLE GREW TWO METHODS THE PAINTER NOW USES. A stub missing a
+       method reports its own gap as a product failure: this one threw
+       "removeAttribute is not a function" and read as the switch fix being
+       broken. Both are here because the unknown state now REMOVES a position
+       and a class rather than setting a third value. */
+    classList: {
+      toggle(c, v) { if (v) { this._s.add(c); } else { this._s.delete(c); } },
+      remove(c) { this._s.delete(c); },
+      _s: null,
+    },
     setAttribute(k, v) { this.attrs[k] = v; },
     getAttribute(k) { return this.attrs[k]; },
+    removeAttribute(k) { delete this.attrs[k]; },
   });
   for (const id of ['tell-toggle', 'tell-msg', 'auto-toggle', 'auto-msg']) {
     const e = el(id); e.classList._s = e.classes;
   }
   const raw3 = fs.readFileSync(nodePath.join(__dirname, 'web', 'index.html'), 'utf8');
   const sc3 = raw3.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const sourceOf = (name) => {
+    const at = sc3.indexOf('function ' + name + '(');
+    assert.ok(at > -1, name + ' vanished from the page');
+    let depth = 0; let end = -1;
+    for (let k = sc3.indexOf('{', at); k < sc3.length; k += 1) {
+      if (sc3[k] === '{') depth += 1;
+      else if (sc3[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
+    }
+    return sc3.slice(at, end);
+  };
   const lift = (name) => {
     const at = sc3.indexOf('function ' + name + '(');
     assert.ok(at > -1, name + ' vanished from the page');
@@ -9129,8 +9159,12 @@ test('a switch that has not been read says so, rather than showing OFF', () => {
       if (sc3[k] === '{') depth += 1;
       else if (sc3[k] === '}') { depth -= 1; if (depth === 0) { end = k + 1; break; } }
     }
+    /* ⚠️ THE HELPER COMES WITH IT. All four painters route through
+       `paintSwitch` now, and lifting one without the other is a harness
+       reporting a ReferenceError as a product failure. */
+    const helper = (name === 'paintSwitch') ? '' : sourceOf('paintSwitch');
     // eslint-disable-next-line no-new-func
-    return new Function('document', sc3.slice(at, end) + '\nreturn ' + name + ';')({ getElementById: el });
+    return new Function('document', helper + '\n' + sc3.slice(at, end) + '\nreturn ' + name + ';')({ getElementById: el });
   };
 
   for (const [paint, toggle, msg] of [['tellPaint', 'tell-toggle', 'tell-msg'],
@@ -9144,13 +9178,25 @@ test('a switch that has not been read says so, rather than showing OFF', () => {
     p({ on: false, ok: true });
     assert.equal(el(toggle).getAttribute('aria-checked'), 'false', paint + ': off did not read as off');
 
-    /* And the third state, which is what a thrown fetch hands it. */
+    /* 🛑 AND THE THIRD STATE, WHICH IS NOW THE ABSENCE OF THE CONTROL.
+       `switch` is a two-state role and ARIA says outright that it does not
+       support `mixed`, so the third position we were drawing was not a state
+       the role defines and what a screen reader made of it was never ours to
+       choose (Mona Lisa, #229). A switch in an unknown position is a claim; a
+       switch that is not there yet is not. */
     p(null);
-    assert.equal(el(toggle).getAttribute('aria-checked'), 'mixed',
-      paint + ': an unread setting still shows a definite position');
+    assert.equal(el(toggle).hidden, true, paint + ': an unread setting still draws a control');
+    assert.equal(el(toggle).getAttribute('aria-checked'), undefined,
+      paint + ': a hidden switch kept a position, which reads as a definite answer if anything un-hides it');
     assert.equal(el(toggle).classes.has('on'), false, paint + ': unread rendered as on');
     assert.match(el(msg).textContent, /could not read/,
       paint + ': an unread setting says nothing, so the switch is the only claim on screen');
+    /* ⚠️ AND IT COMES BACK WHEN THE ANSWER DOES, asserted AFTER the sentence
+       above rather than before it: a recovery paint clears that message, so
+       checking it first made the message assertion fail on a working fix. */
+    p({ on: true, ok: true });
+    assert.equal(el(toggle).hidden, false, paint + ': the control never came back');
+    assert.equal(el(toggle).getAttribute('aria-checked'), 'true');
   }
 
   /**
@@ -9180,13 +9226,21 @@ test('a switch that has not been read says so, rather than showing OFF', () => {
     const epoch = refresh === 'refreshTell' ? 'TELL_EPOCH' : 'AUTO_EPOCH';
     // eslint-disable-next-line no-new-func
     const run = new Function('document', 'fetch',
-      'let ' + epoch + ' = 0;\n' + sc3.slice(pAt, pEnd) + '\n' + sc3.slice(at, end)
+      'let ' + epoch + ' = 0;\n' + sourceOf('paintSwitch') + '\n'
+      + sc3.slice(pAt, pEnd) + '\n' + sc3.slice(at, end)
       + '\nreturn ' + refresh + ';')(
       { getElementById: el }, () => Promise.reject(new Error('offline')));
     void url;
     return run().then(() => {
-      assert.equal(el(toggle).getAttribute('aria-checked'), 'mixed',
-        refresh + ': a thrown fetch left the switch showing a position nobody read');
+      /* 🛑 THE THIRD STATE IS THE ABSENCE OF THE CONTROL. `switch` is a
+         two-state role and ARIA says outright it does not support `mixed`, so
+         the third position this used to assert was not a state the role
+         defines (Mona Lisa, #229). What the caller must produce is no control
+         at all, which is a claim nobody can misread. */
+      assert.equal(el(toggle).hidden, true,
+        refresh + ': a thrown fetch left a switch on screen showing a position nobody read');
+      assert.equal(el(toggle).getAttribute('aria-checked'), undefined,
+        refresh + ': the hidden switch kept a position, which reads as a definite answer if anything un-hides it');
     });
   }
   return undefined;
