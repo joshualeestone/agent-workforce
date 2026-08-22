@@ -213,7 +213,12 @@ const memoryBox = (function () {
   /* `memWhy` joined the list when memUnknown started composing the engine's own
      `because` (Josh, 2026-08-21). Listed rather than stubbed, for the reason
      the comment above gives. */
-  const deps = ['esc', 'memWhy', 'memUnknown', 'assumedCeilingNote', 'pctOf', 'memBand', 'memoryBox'];
+  /* ⚠️ `memPrint` JOINED THIS LIST when the memory figure became a word for an
+   over-ceiling agent (#260). It is lifted, not stubbed, for the reason the
+   comment above gives about every other dependency: a stub here would let
+   this box print a number the other three surfaces have stopped printing,
+   which is the exact defect that change fixed. */
+const deps = ['esc', 'memWhy', 'memUnknown', 'memPrint', 'assumedCeilingNote', 'pctOf', 'memBand', 'memoryBox'];
   // eslint-disable-next-line no-new-func
   return new Function(
     'const NEARLY_FULL = 80, WARM = 60;\n' + deps.map(sliceFn).join('\n') + '; return memoryBox;',
