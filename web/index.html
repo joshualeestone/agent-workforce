@@ -8257,7 +8257,11 @@ function convoRow(r, agentName) {
   }
   let who; let cls;
   if (r.kind === 'operator') {
-    who = 'You · on ' + r.project;
+    /* The name for the sentence, the id as the fallback: the same rule the post
+       and valve rows above follow, and the reason is theirs. A person reading
+       "You · on AUG21404PM" about a project they named "Aug 21 4:04 PM" cannot
+       place the room, which is the whole job of this line. */
+    who = 'You · on ' + (r.projectName || r.project);
     cls = 'cvrow you';
   } else {
     // From this agent or to it, both render; from and to ARE the
