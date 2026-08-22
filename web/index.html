@@ -11289,7 +11289,16 @@ async function paintSurvival() {
   if (!body || body.ok !== true || !Array.isArray(body.missing)) return;
   if (!onAgentsTab()) { wrap.hidden = true; return; }
   if (!body.missing.length) { wrap.hidden = true; wrap.innerHTML = ''; return; }
-  const names = body.missing.map((n) => esc(n)).join(', ');
+  /* ⚠️ THE NAME THE PERSON GAVE IT, resolved from the survey's own rows. The
+     first version printed `body.missing`, which is the machine name, so the
+     list read `ava, bob, brigitte` beside cards saying Ava, Brigitte and
+     Scarlett and Josh read it as an agent missing from a list she was in.
+     Falls back to the machine name, which is worse to read and never wrong. */
+  const shownFor = (n) => {
+    const row = (body.agents || []).find((a) => a && a.name === n);
+    return (row && row.shownAs) || n;
+  };
+  const names = body.missing.map((n) => esc(shownFor(n))).join(', ');
   wrap.hidden = false;
   wrap.innerHTML = '<div class="pj-empty boardfail">'
     + '<p><b>' + esc(survivalSay(body.missing.length)) + '</b><br>'
@@ -11340,7 +11349,7 @@ document.addEventListener('click', async (e) => {
         ? 'starts at login, and is running now'
         : 'starts at your next login, but we could not start it just now')
       : (r.because || 'we could not set that one up');
-    return '<p class="dhint"><b>' + esc(r.name) + '</b>: ' + esc(said) + '</p>';
+    return '<p class="dhint"><b>' + esc(r.shownAs || r.name) + '</b>: ' + esc(said) + '</p>';
   }).join('');
   /* ⚠️ WHAT WE HAD TO ASSUME, said once and out loud. The model an agent was
      SET to run on lived only in the job that never existed, so what goes in is
@@ -12501,7 +12510,34 @@ document.addEventListener('click', (e) => {
      NOT clear BOARD_LOOK_FAILED first -- clearing it here would flip the box to
      "no agents yet" for the length of one request, which is the exact
      conflation this box exists to refuse. */
-  if (e.target.closest('[data-board-retry]')) tick();
+  /* 🛑 A BUTTON THAT DOES REAL WORK AND LOOKS INERT. Josh, 2026-08-22, on a
+     board that could not read tmux: "Hitting Try Again does nothing. It
+     doesn't even feel like the button is submitting when I push Try Again".
+     It was running every time; the answer was the same, so the box repainted
+     identically and the press left no trace at all.
+     ⚠️ THE FIX IS NOT A SPINNER ON A GUESS. It says what it is doing while it
+     is doing it, and the repaint that follows is the result. If the answer is
+     the same the person has still SEEN the attempt happen, which is the thing
+     that was missing.
+     ⚠️ AND IT RESTORES ITSELF rather than trusting the repaint to replace the
+     node: on a failure the box's markup is unchanged, so the change guard can
+     legitimately skip it and a permanently disabled button would be worse
+     than an inert one. */
+  const retry = e.target.closest('[data-board-retry]');
+  if (retry) {
+    if (retry.disabled) return;
+    const said = retry.textContent;
+    retry.disabled = true;
+    retry.textContent = 'Looking…';
+    const done = () => {
+      /* The node may have been replaced by the repaint; if it has, this is a
+         no-op on a detached element and the fresh one is already correct. */
+      retry.disabled = false;
+      retry.textContent = said;
+    };
+    Promise.resolve(tick()).then(done, done);
+    return;
+  }
 });
 
 // ⚠️ Leaving the panel STOPS THE WATCH. `openCreate` bumps the token and this

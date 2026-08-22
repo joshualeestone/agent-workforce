@@ -42,6 +42,24 @@ test('it names them, because a count is not something anybody can act on', async
   }
 });
 
+test('it speaks the name the person typed, not the machine name', async () => {
+  /* 🛑 IT PRINTED THE SLUG AND JOSH READ IT AS A MISSING AGENT. His list said
+     `ava, bob, brigitte` while his cards said Ava, Brigitte and Scarlett. */
+  const wrap = await paint({
+    ok: true,
+    missing: ['scarlett'],
+    agents: [{ name: 'scarlett', shownAs: 'Scarlett' }],
+  });
+  assert.match(wrap.innerHTML, /Scarlett/);
+  assert.ok(!/>scarlett</.test(wrap.innerHTML), 'the machine name reached the screen');
+});
+
+test('an agent with no display name recorded reads as its own name', async () => {
+  /* The ordinary case, and it must not print an empty gap. */
+  const wrap = await paint({ ok: true, missing: ['bob'], agents: [{ name: 'bob', shownAs: 'bob' }] });
+  assert.match(wrap.innerHTML, /bob/);
+});
+
 test('one agent reads as one agent', async () => {
   /* "1 agents" is the seam this screen keeps being caught on. */
   const wrap = await paint({ ok: true, missing: ['anna'] });

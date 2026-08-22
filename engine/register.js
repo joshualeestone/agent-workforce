@@ -34,7 +34,38 @@ const fs = require('node:fs');
 const path = require('node:path');
 const create = require('./create');
 const remove = require('./remove');
+const status = require('./status');
 const store = require('./store');
+
+/**
+ * What this agent is called by the person who made it.
+ *
+ * 🛑 THE PANEL PRINTED THE MACHINE NAME, and Josh met it head on: the list read
+ * `ava, bob, brigitte…` while his board showed **Ava**, **Brigitte** and
+ * **Scarlett**. The same agents, in two vocabularies, on one screen. He
+ * reasonably read it as Scarlett being missing from a list she was in.
+ *
+ * 🔑 THE RULE THIS BREAKS IS ALREADY WRITTEN DOWN, in `create.js`: act on the
+ * machine name, speak the display name. Every value this module ACTS on stays
+ * the slug; this is only for the sentence.
+ *
+ * ⚠️ THROUGH `status.readIdentity`, which is the board's own reader, so a name
+ * cannot differ between the card and the panel that names the card. It prefers
+ * the stored record over the instruction file, handles the overrides, and falls
+ * back to the slug — three behaviours a local `readProfile().displayName` would
+ * have to grow one at a time, wrongly, in a second place.
+ */
+function shownName(name) {
+  try {
+    const id = status.readIdentity(name);
+    const shown = id && typeof id.displayName === 'string' ? id.displayName.trim() : '';
+    return shown || name;
+  } catch {
+    /* A name we cannot look up is still a name. The slug is what the machine
+       calls it, which is worse to read and never wrong. */
+    return name;
+  }
+}
 
 /** Names Kosmos has written a profile for: its own record that an agent exists. */
 function known() {
@@ -85,6 +116,10 @@ function survey() {
   const removed = new Set(rem.names);
   const agents = k.names.map((name) => ({
     name,
+    /* ⚠️ ACT ON `name`, SPEAK `shownAs`. Both travel, and the caller must not
+       have to choose: the panel printed the machine name and Josh read
+       `ava, bob, brigitte` beside cards saying Ava, Brigitte and Scarlett. */
+    shownAs: shownName(name),
     removed: removed.has(name),
     folder: fs.existsSync(create.workerDir(name)),
     job: fs.existsSync(create.plistPath(name)),
@@ -93,8 +128,10 @@ function survey() {
     ok: true,
     because: null,
     agents,
-    /* The ones a repair would act on: known, not removed, on disk, no job. */
-    missing: agents.filter((a) => !a.removed && a.folder && !a.job).map((a) => a.name),
+    /* The ones a repair would act on: known, not removed, on disk, no job.
+       Machine names, because this is the list a repair ACTS on; the sentence
+       naming them reads `shownAs` off `agents`. */
+    missing: agents.filter((x) => !x.removed && x.folder && !x.job).map((x) => x.name),
   };
 }
 
@@ -123,7 +160,7 @@ function repair(opts) {
        click; an agent that does not come back at all is not. */
     try { model = modelFor(name) || null; } catch { model = null; }
     const r = create.installJob(name, { model });
-    return { name, ...r };
+    return { name, shownAs: shownName(name), ...r };
   });
   return {
     ok: true,

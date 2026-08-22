@@ -62,7 +62,12 @@ test('an agent with a folder and no job is the thing being looked for', () => {
   const s = register.survey();
   assert.equal(s.ok, true);
   assert.deepEqual(s.missing, ['brigitte', 'marilyn']);
-  assert.deepEqual(s.agents.find((a) => a.name === 'anna'), { name: 'anna', removed: false, folder: true, job: true });
+  /* ⚠️ THE ROW CARRIES BOTH NAMES. Act on `name`, speak `shownAs`: the panel
+     printed the machine name and Josh read `ava, bob, brigitte` beside cards
+     saying Ava, Brigitte and Scarlett. With no display name recorded, the two
+     are the same string, which is the ordinary case and not a fallback. */
+  assert.deepEqual(s.agents.find((x) => x.name === 'anna'),
+    { name: 'anna', shownAs: 'anna', removed: false, folder: true, job: true });
 });
 
 test('the roster comes from what Kosmos wrote, never from what is in the folder', () => {
@@ -218,4 +223,21 @@ test('a machine that has never had an agent is not an unreadable one', () => {
   assert.equal(s.ok, true);
   assert.deepEqual(s.agents, []);
   assert.deepEqual(s.missing, []);
+});
+
+test('the survey speaks the name the person typed', () => {
+  /* 🛑 THE PANEL PRINTED THE SLUG. Josh, 2026-08-22, reading his own repair
+     list: `ava, bob, brigitte` while his board showed Ava, Brigitte and
+     Scarlett. He reasonably took Scarlett to be missing from a list she was
+     in, because her machine name is one of the lowercase ones. */
+  reset();
+  agent('scarlett');
+  store.writeProfile('scarlett', { displayName: 'Scarlett' });
+  const row = register.survey().agents.find((x) => x.name === 'scarlett');
+  assert.equal(row.shownAs, 'Scarlett');
+  /* ⚠️ And the acting key is untouched: everything downstream of this builds a
+     path, a launchd label and a tmux target out of it. */
+  assert.equal(row.name, 'scarlett');
+  assert.deepEqual(register.survey().missing, ['scarlett'], 'the list a repair acts on stopped being machine names');
+  assert.equal(register.repair().results[0].shownAs, 'Scarlett', 'the report speaks the machine name');
 });
