@@ -3316,7 +3316,15 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
          can also edit by hand, was true and was the least of the four things
          competing for a reader at the moment they are editing the field. -->
     <div class="fpath" id="d-instr-foot" hidden></div>
-      <button class="btn" id="d-instr-save" type="button" disabled>Save</button>
+      <!-- 🛑 TWO BUTTONS ON THIS PANEL SAY "Save" AND A SCREEN READER HEARD
+           BOTH AS "Save". Neither was missing a name; the name did not
+           IDENTIFY, which is the same defect as six identical buttons on a
+           project's member list and is invisible to a check that only asks
+           whether a name exists.
+           ⚠️ THE VISIBLE WORD SURVIVES VERBATIM (SC 2.5.3), which is why it is
+           not "Update instructions": somebody driving by voice says what they
+           can see, and a label that rewords the button breaks them. -->
+      <button class="btn" id="d-instr-save" type="button" aria-label="Save instructions" disabled>Save</button>
     </div>
     <!-- Announced: this is the only channel for every outcome of the most
          powerful write in the product, including each refusal and the reason a
@@ -3444,7 +3452,10 @@ code.t { font: 13px var(--k-mono); border-radius: 4px; padding: .12em .4em;
   <!-- ONE Save for the box, because it now writes two fields. A button sitting
        inside the role row while also saving the name would misdescribe itself. -->
   <div class="frow" style="margin-top:14px;">
-    <button class="btn" id="d-save" type="button">Save</button>
+    <!-- Named for its BOX rather than its fields, because Reports to is
+         conditional: a label listing the fields would be wrong whenever that
+         row is hidden, which is most machines. "Save" survives verbatim. -->
+    <button class="btn" id="d-save" type="button" aria-label="Save name and role">Save</button>
   </div>
   <div class="fmsg" id="d-role-msg"></div>
   </section>
