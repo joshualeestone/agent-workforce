@@ -5793,7 +5793,21 @@ function runsOnLine(a) {
   }
   return { lead: '', name };
 }
-function roleLine(a) {
+/**
+ * The catalogue's own titles, keyed by the same words folded to lower case.
+ * Null until the roles route answers, which is the state every assertion below
+ * has to hold in: see `roleLine`.
+ */
+let ROLE_TITLES = null;
+function learnRoleTitles(roles) {
+  const m = new Map();
+  for (const r of roles || []) if (r && r.label) m.set(String(r.label).toLowerCase(), r.label);
+  ROLE_TITLES = m.size ? m : null;
+}
+/* ⚠️ `titles` IS A PARAMETER RATHER THAN A GLOBAL READ, so this function stays
+   liftable: the suite pulls it out of this file by source and runs it on its
+   own, and a global reference would make that a ReferenceError. */
+function roleLine(a, titles) {
   /**
    * ⚠️ TWO KINDS OF VALUE SHARE THIS SLOT, and only one of them was ever
    * written to be read here.
@@ -5820,7 +5834,23 @@ function roleLine(a) {
      `IOS engineer`. Much narrower than the title-casing it replaced, which
      mangled every word, but the claim should match the behaviour. */
   const parsed = a.role || '';
-  return parsed ? parsed.charAt(0).toUpperCase() + parsed.slice(1) : '';
+  if (!parsed) return '';
+  /* 🔑 A LOOKUP, NOT A TRANSFORM, and the difference is the whole reason this
+     is safe. Josh, 2026-08-22: "when we write Project Manager or any of these
+     titles, use proper capitals for both words". Title-casing the words would
+     do that AND turn "SEO specialist" into "Seo Specialist", which is the
+     defect the comment above exists to prevent. Matching the parsed line
+     against the catalogue's own labels asks a different question: is this one
+     of OUR titles, and if so what did we call it. It cannot invent capitals
+     for words it has never seen.
+     ⚠️ IT FAILS TO EXACTLY WHAT SHIPPED BEFORE IT. `titles` is null until the
+     roles route answers, and on a board that never asks (or asks and fails) the
+     next line is the whole behaviour. That direction is deliberate: the cost of
+     failing open is a lower-case second word, and the cost of failing closed
+     would be a board with no roles on it at all. */
+  const known = titles && titles.get(parsed.trim().toLowerCase());
+  if (known) return known;
+  return parsed.charAt(0).toUpperCase() + parsed.slice(1);
 }
 /* ⚠️ ONE encoding of the memory thresholds, because there were four: the
    ring band, the list bar band, the membadge and the heat wash each wrote
@@ -6287,7 +6317,7 @@ function card(a) {
            pill is the one that carries it. -->
       <span class="pres off" aria-hidden="true"></span></div>
     <div class="aname"><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button></div>
-    <div class="ameta">${esc(roleLine(a))}</div>
+    <div class="ameta">${esc(roleLine(a, ROLE_TITLES))}</div>
     <div class="astate st-stopped">${GLYPH.stopped}<b>Not running</b></div>
   </div>`;
   }
@@ -6346,7 +6376,7 @@ function card(a) {
   return `<div class="acard ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="agauge">${ring(a)}${pres}${badge}</div>
     <div class="aname"><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button>${staleBadge(a)}</div>
-    <div class="ameta">${esc(roleLine(a))}</div>
+    <div class="ameta">${esc(roleLine(a, ROLE_TITLES))}</div>
     <div class="astate st-${m.st}">${GLYPH[m.st]}<b>${esc(copy.label)}</b>${answer}</div>
     <div class="atask">${esc(taskLine(a))}</div>
     ${unknownNote}
@@ -6400,7 +6430,7 @@ function lrow(a) {
       : `<span class="lavtint" style="background:${discTint(a.name)};color:${discInk(a.name)}">${esc(initials(a.name))}</span>`;
     return `<div class="lrow off notrunning" data-agent="${esc(a.sessionName)}">
       <div class="lav">${off}</div>
-      <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button></b><small>${esc(roleLine(a))}</small></div>
+      <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button></b><small>${esc(roleLine(a, ROLE_TITLES))}</small></div>
       <div class="lstate st-stopped">${GLYPH.stopped}Not running</div>
       <div class="ltask"></div>
       <div class="lmem"></div>
@@ -6457,7 +6487,7 @@ function lrow(a) {
     : `<span class="bar"><i class="${band}" style="width:${pct}%"></i></span><span class="pct">${memPrint(a.context, pct)}</span>`;
   return `<div class="lrow ${boardMods(a, m)}" data-agent="${esc(a.sessionName)}">
     <div class="lav">${av}</div>
-    <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button>${staleBadge(a)}</b><small>${esc(roleLine(a))}</small><em>${esc(modelLine(a))}</em></div>
+    <div class="lname"><b><button class="namego" type="button" aria-label="Open ${esc(a.name)}">${esc(a.name)}</button>${staleBadge(a)}</b><small>${esc(roleLine(a, ROLE_TITLES))}</small><em>${esc(modelLine(a))}</em></div>
     <div class="lstate">${GLYPH[m.st]}${esc(copy.label)}${answerBtn(a)}</div>
     <div class="ltask">${esc(taskLine(a))}</div>
     <div class="lmem">${mem}</div>
@@ -10390,7 +10420,7 @@ function openDetail(sessionName) {
      the box resolved rather than deriving a second one. */
   const runs = runsOnLine(a);   // one evaluation, read by the meta line and the box
   document.getElementById('d-meta').textContent =
-    [roleLine(a), runs.name,
+    [roleLine(a, ROLE_TITLES), runs.name,
      a.nameDerived ? null : 'shown by its machine name'].filter(Boolean).join(' · ');
   const copy = STATE_COPY[a.state] || STATE_COPY.unknown;
   /* ⚠️ The card's own derivations, not a copy of them: `cardStOf` decides the
@@ -12899,6 +12929,8 @@ async function loadRoles() {
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
     ROLES = (data && data.roles) || [];
+    // Same payload, so the board and this form can never hold different titles.
+    learnRoleTitles(ROLES);
     CREATE_MODELS = (data && data.models) || [];
     OWN_ROLE = (data && data.own) || null;
     if (!ROLES.length) throw new Error('none came back');
@@ -17566,7 +17598,7 @@ function addAgentsHtml() {
       /* The THIRD copy of the role expression, and the one furthest from the
          card: a member row in a project and an agent card disagreed about the
          same agent's role text. `roleLine` is the one derivation. */
-      + '<small>' + esc(roleLine(a)) + '</small></span>'
+      + '<small>' + esc(roleLine(a, ROLE_TITLES)) + '</small></span>'
       + '</button>';
   }).join('');
 }
@@ -19874,6 +19906,17 @@ showTab(BOOT_TAB);
 // exactly the failure the instruction editor had when it shipped enabled and
 // empty on its own deep link.
 if (BOOT_TAB === 'create') loadRoles();
+/* 🔑 THE BOARD NEEDS THE CATALOGUE TOO, and until now only the create form
+   ever fetched it. An agent card reads its role out of the agent's own
+   instruction file as prose, so "project manager" is what is on disk and what
+   the board showed; the titles are what let it print the name we chose.
+   ⚠️ FIRE AND FORGET ON PURPOSE. Nothing waits for it and nothing reports it
+   failing: the board is fully usable without it, and the next repaint picks
+   the titles up whenever the answer arrives. An error here would be an error
+   about capitalisation. */
+fetch('/api/roles').then((r) => (r.ok ? r.json() : null)).then((j) => {
+  if (j && Array.isArray(j.roles)) { learnRoleTitles(j.roles); tick(); }
+}).catch(() => {});
 
 /**
  * ⚠️ FIRST RUN IS ASKED FOR SEPARATELY, AND THE BOARD DOES NOT WAIT FOR IT.
