@@ -465,3 +465,16 @@ an hour on `render-first-run`, which is fine.
 
 **The rule that makes the survey possible: a server whose working directory no
 longer exists is decidable and always wrong.** No threshold, no judgement.
+
+**`render-role-limit.js`** needs the sandbox to have FIRST RUN ALREADY COMPLETE,
+before the server starts:
+
+```sh
+mkdir -p "$SB/data/AgentWorkforce"
+echo '{"completedAt":"2026-01-01T00:00:00.000Z"}' > "$SB/data/AgentWorkforce/first-run.json"
+```
+
+⚠️ **Skip that and onboarding covers the entire app.** The script asserts nothing
+is on top of the sentence precisely because its first version did not, and passed
+all twelve checks with the whole page underneath an opaque overlay. Laid out and
+readable are different facts and only one of them is what this pins.
